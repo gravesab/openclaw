@@ -1,6 +1,6 @@
 ---
 title: "PropertyManager Foundational Requirements"
-version: "1.2"
+version: "1.3"
 status: "Phase 3 deployed — post-deploy verification"
 owner: "OpenClaw Operator"
 last_reviewed: "2026-07-29"
@@ -10,7 +10,7 @@ source_document: "PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md"
 
 # PropertyManager Foundational Requirements
 
-Version: 1.2  
+Version: 1.3  
 Status: **Phase 3 deployed on production Intel Mini** — post-deploy verification  
 Owner: OpenClaw Operator  
 Last Updated: 2026-07-29
@@ -192,30 +192,69 @@ When completing a meter-scheduled maintenance task:
 - Calendar schedules (`warning_days`, `next_due`) and meter schedules (`next_due_meter_value`, `meter_interval_value`, `meter_interval_unit`) are **independent** fields.
 - **Combined schedules** (`schedule_kind=both`) are allowed **only** when the manufacturer manual explicitly specifies "whichever comes first" (or equivalent). Both calendar and meter thresholds must be stored as authored; the recalc engine evaluates each independently.
 
-### Run hours trigger (Equipment meter PM)
+### Run hours trigger (meter PM)
 
-**Run hours trigger** means the **absolute** meter reading at which a linked Equipment task becomes due — not the repeat interval alone. Example: "Check blade when mower hits **150.0** hours."
+**Run hours trigger** means the **absolute** meter reading at which a linked task becomes due — not the repeat interval alone. Example: "Check blade when mower hits **150.0** hours."
 
-| Concept                | Column                                           | Meaning                                                                                              |
-| ---------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
-| Absolute due threshold | `next_due_meter_value`                           | Meter reading at which the task becomes due (column in `005_assets_and_meters.sql`)                  |
-| Repeat interval        | `meter_interval_value` (+ `meter_interval_unit`) | After completion, engine advances the next trigger to `last_done_meter_value + meter_interval_value` |
+| Concept                | Column                                           | Meaning                                                                                                                        |
+| ---------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Absolute due threshold | `next_due_meter_value`                           | Meter reading at which the task becomes due (absolute trigger; column in `005_assets_and_meters.sql`) — no new migration       |
+| Repeat interval        | `meter_interval_value` (+ `meter_interval_unit`) | Repeating interval (e.g. every 50 hours). After completion with an interval: `next_due = meter_value_at_completion + interval` |
 
-Foundational contract:
+#### Controlling rule
 
-1. **Due / overdue:** when `asset_meter.current_value >= next_due_meter_value`, the task is meter-overdue (`remaining_meter <= 0` / `overdue_meter`).
-2. **Remaining:** `remaining_meter = next_due_meter_value - current_meter_value` after accepted readings and completions.
-3. **Schedule promotion:** setting `asset_id` and `next_due_meter_value` while `schedule_kind` is `calendar` must promote to `meter`. Keep `both` only when calendar dates are intentional (manufacturer "whichever comes first").
-4. **Scope:** Equipment assets (`category = Equipment` / `runtime_hours` meter) and linked tasks. Vehicles / mileage use the same absolute-trigger + interval pattern later (out of scope for this Equipment contract).
-5. **UI:** label "Due when meter reaches (hours)" / "Run hours trigger"; badges "Due at X hrs" / "N hrs left" / "Overdue".
-6. **Interval authorship:** manufacturer manual import stores repeat intervals on the task; operators may set or adjust the absolute trigger. Never approximate hours as calendar days.
+Eligibility is determined by the **linked asset**, not by task category:
+
+- Task must have `asset_id` set.
+- Linked asset meter must be **activated** with `meter_type == runtime_hours`.
+- Asset **category is not authoritative** (a `runtime_hours` meter in a non-Equipment category is allowed).
+
+#### Due vs overdue vs remaining
+
+Compare `asset_meter.current_value` to `next_due_meter_value` (Decimal):
+
+| Condition                         | Meaning   | Enrichment                                                               |
+| --------------------------------- | --------- | ------------------------------------------------------------------------ |
+| `current < next_due_meter_value`  | Remaining | `remaining_meter = next_due - current` (positive)                        |
+| `current == next_due_meter_value` | Due now   | `due_meter = true`; **not** overdue                                      |
+| `current > next_due_meter_value`  | Overdue   | `overdue_meter = true` (**strict `>` only**); `remaining_meter` negative |
+
+Expose both `due_meter` and `overdue_meter`. Do **not** treat `>=` as overdue.
+
+#### Schedule kind — no silent promotion
+
+- Saving a non-null `next_due_meter_value` requires **explicit** `schedule_kind` of `meter` or `both`.
+- **Forbidden:** silently changing `calendar` → `meter` (or `both`) on upsert/PATCH.
+- UI default: when calendar fields are already meaningful, default new trigger saves to `both` (operator must still send explicit `meter` or `both`).
+
+#### One-time trigger (no interval)
+
+When `meter_interval_value` is null/absent and the task completes: **clear** `next_due_meter_value` (one-shot). Do not invent a next trigger.
+
+When an interval is present: `next_due_meter_value = meter_value_at_completion + meter_interval_value` (Decimal). Completion must be **atomic** (single multi-statement `BEGIN…COMMIT`, not separate autocommit execs).
+
+#### Authorship (no new DB column)
+
+- **Manufacturer interval** (`meter_interval_*`) keeps existing provenance: `origin` / `source_manual_name` / `manualImport` (or equivalent). Editing the absolute trigger must **not** strip these.
+- **Absolute trigger** (`next_due_meter_value`) is an **operator scheduling decision**. No new authorship column.
+
+#### Validation and save semantics
+
+- Require linked activated `runtime_hours` asset when setting `next_due_meter_value`.
+- Unit must be hours (`hrs`); value must be nonnegative finite numeric (Decimal end-to-end).
+- Blank / `""` is **not** zero — reject blank and non-numeric input.
+- If trigger `<` current meter: allow save with `warnings[]` (trigger behind current).
+- Clients: **deliberate Save only** after valid parse — no autosave of partial/invalid trigger fields.
+- UI labels: "Due when meter reaches (hours)" / "Run hours trigger"; badges: "N hrs left" / "Due now" / "Overdue".
+
+Vehicles / mileage absolute-trigger + interval follow the same pattern later (out of scope for this `runtime_hours` contract).
 
 Architecture and recalc details: [PropertyManager Asset Architecture — Run hours trigger](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#run-hours-trigger-equipment-tasks).
 
 ### Meter-based PM (general)
 
-- Meter schedules require an absolute due threshold (`next_due_meter_value`) evaluated against the asset meter current value.
-- Repeat intervals (`meter_interval_value`, `meter_interval_unit`) originate from manufacturer manual import when available and drive post-completion advancement of the trigger.
+- Meter schedules require an absolute due threshold (`next_due_meter_value`) evaluated against the asset meter current value per the due/overdue/remaining rules above.
+- Repeat intervals (`meter_interval_value`, `meter_interval_unit`) originate from manufacturer manual import when available and drive post-completion advancement of the trigger (or clear on one-time complete).
 - Recalc after accepted readings and completions uses the formulas in the run hours trigger contract above.
 
 ---
@@ -268,26 +307,36 @@ Exact auth mechanism is a Phase 1 design detail; the **requirement** is that wri
 
 The following scenarios must pass on the **development VM** before Phase 3 authorization:
 
-| Scenario                                                     | Validates                                             |
-| ------------------------------------------------------------ | ----------------------------------------------------- |
-| Concurrent meter entries on same asset                       | Concurrency protection, no lost updates               |
-| Duplicate mobile retries (same `idempotency_key`)            | Idempotent replay                                     |
-| Offline sync: queue readings, replay on reconnect            | Ordering, idempotency, conflict handling              |
-| Backdated reading insertion (middle of history)              | Usage recalc, conditional current_value update        |
-| Backdated reading that becomes latest                        | current_value promotion                               |
-| Meter replacement (`meter_epoch` increment)                  | Epoch isolation, no invalid deltas                    |
-| Meter rollover (odometer)                                    | Epoch or correction workflow                          |
-| Transactional rollback on partial failure                    | No orphan readings or inconsistent PM state           |
-| Maintenance completion with stale cache                      | Forces confirm-or-enter; rejects silent default       |
-| Maintenance completion with new reading                      | Reading link, PM recalc                               |
-| Manual entry provenance                                      | operator_id, entry_method, audit chain                |
-| Combined calendar + meter schedule ("whichever comes first") | Independent evaluation, no day/hour conversion        |
-| Equipment run hours trigger due / remaining / overdue        | Absolute `next_due_meter_value` vs current meter      |
-| Run hours trigger + interval after completion                | Next trigger = last done + interval                   |
-| Calendar task gains asset + run hours trigger                | Promotes `schedule_kind` to `meter` (not silent both) |
-| Lower-reading preview-and-confirm                            | Two-step flow, audit record                           |
-| RanchBrain mapping report                                    | No auto-apply without approval                        |
-| QR read without auth vs write with auth                      | Token ≠ authorization                                 |
+| Scenario                                                     | Validates                                                       |
+| ------------------------------------------------------------ | --------------------------------------------------------------- |
+| Concurrent meter entries on same asset                       | Concurrency protection, no lost updates                         |
+| Duplicate mobile retries (same `idempotency_key`)            | Idempotent replay                                               |
+| Offline sync: queue readings, replay on reconnect            | Ordering, idempotency, conflict handling                        |
+| Backdated reading insertion (middle of history)              | Usage recalc, conditional current_value update                  |
+| Backdated reading that becomes latest                        | current_value promotion                                         |
+| Meter replacement (`meter_epoch` increment)                  | Epoch isolation, no invalid deltas                              |
+| Meter rollover (odometer)                                    | Epoch or correction workflow                                    |
+| Transactional rollback on partial failure                    | No orphan readings or inconsistent PM state                     |
+| Maintenance completion with stale cache                      | Forces confirm-or-enter; rejects silent default                 |
+| Maintenance completion with new reading                      | Reading link, PM recalc                                         |
+| Manual entry provenance                                      | operator_id, entry_method, audit chain                          |
+| Combined calendar + meter schedule ("whichever comes first") | Independent evaluation, no day/hour conversion; explicit `both` |
+| Run hours: current == trigger                                | `due_meter` true; `overdue_meter` false                         |
+| Run hours: current > trigger                                 | `overdue_meter` true (strict `>`); remaining negative           |
+| Run hours: current < trigger                                 | `remaining_meter` positive; not due/overdue                     |
+| Run hours decimal threshold (e.g. 127.4)                     | Decimal compare; no float rounding                              |
+| Run hours one-time complete (no interval)                    | Clears `next_due_meter_value`                                   |
+| Run hours complete with interval                             | `next_due = meter_value_at_completion + interval`; atomic       |
+| Run hours trigger behind current                             | `warnings[]`; still saveable                                    |
+| Run hours + `schedule_kind=both`                             | Accepted when explicit                                          |
+| Calendar + trigger without explicit meter/both               | Rejected; **no** silent `calendar`→`meter` promote              |
+| Blank / invalid / negative trigger                           | Rejected (blank ≠ 0)                                            |
+| Unlinked task + trigger                                      | Rejected                                                        |
+| `runtime_hours` asset in non-Equipment category              | Allowed (category not authoritative)                            |
+| Duplicate/retried completion                                 | Idempotent / safe replay                                        |
+| Lower-reading preview-and-confirm                            | Two-step flow, audit record                                     |
+| RanchBrain mapping report                                    | No auto-apply without approval                                  |
+| QR read without auth vs write with auth                      | Token ≠ authorization                                           |
 
 Test evidence (logs, API responses, DB snapshots) must be archived for operator review at Phase 2 gate.
 

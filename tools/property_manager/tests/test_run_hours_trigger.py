@@ -293,6 +293,46 @@ def test_duplicate_completion_safe() -> None:
     assert str(body2.get("next_due_meter_value")) in {"30", "30.0", "30.000"}, body2
 
 
+def test_mileage_trigger_accepted_for_vehicle() -> None:
+    ext = f"TEST-MI-{uuid.uuid4().hex[:8]}"
+    status, asset = _req(
+        "POST",
+        "/v1/assets",
+        {"external_id": ext, "name": "Mileage Vehicle", "category": "Vehicles"},
+    )
+    assert status == 201, asset
+    asset_id = asset["id"]
+    status, activated = _req(
+        "POST",
+        f"/v1/assets/{asset_id}/activate-meter",
+        {"meter_type": "mileage", "unit": "mi"},
+    )
+    assert status == 200, activated
+    _set_current_meter(asset_id, "1000")
+    status, body = _req(
+        "POST",
+        "/tasks",
+        {
+            "item": f"Rotate Tires {uuid.uuid4().hex[:6]}",
+            "area": "Vehicles",
+            "category_name": "Vehicles",
+            "asset_id": asset_id,
+            "schedule_kind": "meter",
+            "meter_interval_value": "5000",
+            "meter_interval_unit": "mi",
+            "next_due_meter_value": "5000",
+            "origin": "manufacturer",
+            "source_manual_name": "Toyota_4Runner_Guide.pdf",
+            "manufacturer": "Toyota",
+        },
+    )
+    assert status == 200, body
+    assert body.get("schedule_kind") == "meter", body
+    assert str(body.get("meter_interval_value")) in {"5000", "5000.0", "5000.000"}, body
+    assert body.get("meter_interval_unit") == "mi", body
+    assert str(body.get("next_due_meter_value")) in {"5000", "5000.0", "5000.000"}, body
+
+
 def main() -> int:
     print(f"API={API}")
     wait_health()
@@ -320,6 +360,8 @@ def main() -> int:
     print("PASS interval advance")
     test_duplicate_completion_safe()
     print("PASS duplicate completion")
+    test_mileage_trigger_accepted_for_vehicle()
+    print("PASS mileage trigger for Vehicles")
     print("ALL RUN-HOURS TRIGGER TESTS PASSED")
     return 0
 

@@ -96,14 +96,29 @@ def parse_optional_meter_decimal(value: Any, *, field: str) -> Decimal | None:
     return decimal_to_db(parsed)
 
 
-def validate_run_hours_trigger(
+_TRIGGER_UNITS_BY_METER_TYPE: dict[str, set[str]] = {
+    "runtime_hours": {"hrs", "hours", "hr", "h"},
+    "mileage": {"mi", "mile", "miles"},
+}
+_CANONICAL_UNIT_BY_METER_TYPE: dict[str, str] = {
+    "runtime_hours": "hrs",
+    "mileage": "mi",
+}
+
+
+def validate_meter_trigger(
     *,
     asset_id: Any,
     schedule_kind: str,
     next_due_meter: Decimal,
     meter_interval_unit: str | None = None,
+    expected_meter_type: str | None = None,
 ) -> list[str]:
-    """Validate absolute run-hours trigger. Returns warnings (non-fatal). Raises ValueError on reject."""
+    """Validate absolute meter trigger for activated runtime_hours or mileage meters.
+
+    Returns warnings (non-fatal). Raises ValueError on reject.
+    Controlling rule: linked asset meter_type (not task category).
+    """
     if asset_id is None or str(asset_id).strip() == "":
         raise ValueError("asset_id is required when next_due_meter_value is set")
     kind = (schedule_kind or "").strip().lower()
@@ -112,18 +127,28 @@ def validate_run_hours_trigger(
             "schedule_kind must be 'meter' or 'both' when next_due_meter_value is set "
             "(silent calendar→meter promotion is forbidden)"
         )
-    unit = (meter_interval_unit or "hrs").strip().lower()
-    if unit not in {"hrs", "hours", "hr", "h"}:
-        raise ValueError("meter_interval_unit must be hours (hrs) for run-hours triggers")
 
     aid = str(asset_id).strip()
     if not meter_is_active(aid):
-        raise ValueError("linked asset meter must be activated before setting a run-hours trigger")
+        raise ValueError("linked asset meter must be activated before setting a meter trigger")
     meter = fetch_meter_row(aid)
     if meter is None:
         raise ValueError("linked asset has no meter row")
-    if str(meter.get("meter_type") or "") != "runtime_hours":
-        raise ValueError("linked asset meter_type must be runtime_hours")
+    meter_type = str(meter.get("meter_type") or "")
+    if expected_meter_type is not None and meter_type != expected_meter_type:
+        raise ValueError(f"linked asset meter_type must be {expected_meter_type}")
+    if meter_type not in _TRIGGER_UNITS_BY_METER_TYPE:
+        raise ValueError(
+            "linked asset meter_type must be runtime_hours or mileage when setting a meter trigger"
+        )
+
+    allowed_units = _TRIGGER_UNITS_BY_METER_TYPE[meter_type]
+    canonical = _CANONICAL_UNIT_BY_METER_TYPE[meter_type]
+    unit = (meter_interval_unit or canonical).strip().lower()
+    if unit not in allowed_units:
+        raise ValueError(
+            f"meter_interval_unit must be {canonical} for {meter_type} triggers (got {unit!r})"
+        )
 
     warnings: list[str] = []
     current = _as_decimal(meter.get("current_value"))
@@ -133,6 +158,23 @@ def validate_run_hours_trigger(
             f"current meter ({format_decimal(current)})"
         )
     return warnings
+
+
+def validate_run_hours_trigger(
+    *,
+    asset_id: Any,
+    schedule_kind: str,
+    next_due_meter: Decimal,
+    meter_interval_unit: str | None = None,
+) -> list[str]:
+    """Validate absolute run-hours trigger. Returns warnings (non-fatal). Raises ValueError on reject."""
+    return validate_meter_trigger(
+        asset_id=asset_id,
+        schedule_kind=schedule_kind,
+        next_due_meter=next_due_meter,
+        meter_interval_unit=meter_interval_unit,
+        expected_meter_type="runtime_hours",
+    )
 
 
 def fetch_meter_row(asset_id: str, *, for_update: bool = False) -> dict[str, Any] | None:
@@ -218,36 +260,16 @@ def activate_meter(
 
 
 def recalc_tasks_for_asset(asset_id: str, current_meter: Decimal | None) -> list[dict[str, Any]]:
-    tasks = pm_db.execute_json(
-        """
-        SELECT id, schedule_kind, meter_interval_value, last_done_meter_value, next_due_meter_value
-        FROM propertymanager.maintenance_tasks
-        WHERE is_active = true
-          AND asset_id = %s
-          AND schedule_kind IN ('meter', 'both')
-        """,
-        (asset_id,),
-    )
-    updated: list[dict[str, Any]] = []
-    for task in tasks:
-        interval = _as_decimal(task.get("meter_interval_value"))
-        if interval is None or interval <= 0:
-            continue
-        last_done = _as_decimal(task.get("last_done_meter_value"))
-        if last_done is None:
-            last_done = current_meter if current_meter is not None else Decimal("0")
-        next_due = decimal_to_db(last_done + interval)
-        pm_db.execute(
-            """
-            UPDATE propertymanager.maintenance_tasks
-            SET next_due_meter_value = %s,
-                updated_at = now()
-            WHERE id = %s
-            """,
-            (next_due, str(task["id"])),
-        )
-        updated.append({"id": str(task["id"]), "next_due_meter_value": format_decimal(next_due)})
-    return updated
+    """No-op for absolute meter triggers.
+
+    Corrected contract: `next_due_meter_value` is an operator-authored absolute
+    trigger. Due/overdue/remaining are enrichment against `current_meter`.
+    Advancement happens only on completion (`meter_at_completion + interval` or
+    clear when one-time). Never rewrite triggers from current+interval here —
+    that destroyed guide first-due values (e.g. belts at 60k with 15k interval).
+    """
+    _ = (asset_id, current_meter)
+    return []
 
 
 def _latest_accepted_in_epoch(asset_id: str, epoch: int) -> dict[str, Any] | None:

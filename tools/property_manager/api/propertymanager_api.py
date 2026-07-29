@@ -630,10 +630,14 @@ def upsert_task():
     meter_interval_unit = str(payload.get("meter_interval_unit") or "").strip() or None
     warnings: list[str] = []
     if next_due_meter is not None:
-        if meter_interval_unit is None:
+        if meter_interval_unit is None and asset_id:
+            meter_row = ms.fetch_meter_row(str(asset_id))
+            meter_type = str((meter_row or {}).get("meter_type") or "")
+            meter_interval_unit = ms._CANONICAL_UNIT_BY_METER_TYPE.get(meter_type) or "hrs"
+        elif meter_interval_unit is None:
             meter_interval_unit = "hrs"
         try:
-            warnings = ms.validate_run_hours_trigger(
+            warnings = ms.validate_meter_trigger(
                 asset_id=asset_id,
                 schedule_kind=schedule_kind,
                 next_due_meter=next_due_meter,
@@ -822,17 +826,20 @@ def patch_task(task_id: str):
             existing.get("schedule_kind") or "calendar"
         )
         effective_unit = updates["meter_interval_unit"] if "meter_interval_unit" in updates else (
-            existing.get("meter_interval_unit") or "hrs"
+            existing.get("meter_interval_unit")
         )
-        if "meter_interval_unit" not in updates and not effective_unit:
-            updates["meter_interval_unit"] = "hrs"
-            effective_unit = "hrs"
+        if not effective_unit:
+            meter_row = ms.fetch_meter_row(str(effective_asset)) if effective_asset else None
+            meter_type = str((meter_row or {}).get("meter_type") or "")
+            effective_unit = ms._CANONICAL_UNIT_BY_METER_TYPE.get(meter_type) or "hrs"
+            if "meter_interval_unit" not in updates:
+                updates["meter_interval_unit"] = effective_unit
         try:
-            warnings = ms.validate_run_hours_trigger(
+            warnings = ms.validate_meter_trigger(
                 asset_id=effective_asset,
                 schedule_kind=str(effective_kind),
                 next_due_meter=updates["next_due_meter_value"],
-                meter_interval_unit=str(effective_unit) if effective_unit else "hrs",
+                meter_interval_unit=str(effective_unit),
             )
         except ValueError as exc:
             return validation_error(str(exc))

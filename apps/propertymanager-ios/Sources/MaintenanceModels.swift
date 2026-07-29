@@ -27,12 +27,26 @@ enum DueStatus: String, Codable {
 struct MaintenanceCategory: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
-    var icon: String?
+    var icon: String
     var colorName: String?
+    var isBuiltIn: Bool
+    var sortOrder: Int
 
     enum CodingKeys: String, CodingKey {
         case id, name, icon
         case colorName = "color_name"
+        case isBuiltIn = "is_built_in"
+        case sortOrder = "sort_order"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        icon = try c.decodeIfPresent(String.self, forKey: .icon) ?? "folder"
+        colorName = try c.decodeIfPresent(String.self, forKey: .colorName)
+        isBuiltIn = try c.decodeIfPresent(Bool.self, forKey: .isBuiltIn) ?? false
+        sortOrder = try c.decodeIfPresent(Int.self, forKey: .sortOrder) ?? 0
     }
 }
 
@@ -53,11 +67,15 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
     var lastDone: Date?
     var nextDue: Date
     var scheduleKind: String?
-    var meterIntervalValue: Double?
+    var meterIntervalValue: Decimal?
     var meterIntervalUnit: String?
+    var nextDueMeterValue: Decimal?
     var assetId: UUID?
-    var remainingMeter: Double?
+    var remainingMeter: Decimal?
+    var dueMeter: Bool?
     var overdueMeter: Bool?
+    var isActive: Bool
+    var primaryPartNumber: String?
     var parts: [MaintenancePart]?
 
     enum CodingKeys: String, CodingKey {
@@ -73,9 +91,43 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         case scheduleKind = "schedule_kind"
         case meterIntervalValue = "meter_interval_value"
         case meterIntervalUnit = "meter_interval_unit"
+        case nextDueMeterValue = "next_due_meter_value"
         case assetId = "asset_id"
         case remainingMeter = "remaining_meter"
+        case dueMeter = "due_meter"
         case overdueMeter = "overdue_meter"
+        case isActive = "is_active"
+        case primaryPartNumber = "primary_part_number"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        area = try c.decode(String.self, forKey: .area)
+        item = try c.decode(String.self, forKey: .item)
+        categoryName = try c.decode(String.self, forKey: .categoryName)
+        priority = try c.decode(String.self, forKey: .priority)
+        frequency = try c.decode(String.self, forKey: .frequency)
+        taskDescription = try c.decodeIfPresent(String.self, forKey: .taskDescription)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        suppliesNeeded = try c.decodeIfPresent(String.self, forKey: .suppliesNeeded)
+        partNumber = try c.decodeIfPresent(String.self, forKey: .partNumber)
+        vendor = try c.decodeIfPresent(String.self, forKey: .vendor)
+        warningDays = try c.decodeIfPresent(Int.self, forKey: .warningDays) ?? 7
+        criticalDays = try c.decodeIfPresent(Int.self, forKey: .criticalDays) ?? 14
+        lastDone = try c.decodeIfPresent(Date.self, forKey: .lastDone)
+        nextDue = try c.decode(Date.self, forKey: .nextDue)
+        scheduleKind = try c.decodeIfPresent(String.self, forKey: .scheduleKind)
+        meterIntervalValue = FlexibleDecimal.decodeDecimal(c, key: .meterIntervalValue)
+        meterIntervalUnit = try c.decodeIfPresent(String.self, forKey: .meterIntervalUnit)
+        nextDueMeterValue = FlexibleDecimal.decodeDecimal(c, key: .nextDueMeterValue)
+        assetId = try c.decodeIfPresent(UUID.self, forKey: .assetId)
+        remainingMeter = FlexibleDecimal.decodeDecimal(c, key: .remainingMeter)
+        dueMeter = try c.decodeIfPresent(Bool.self, forKey: .dueMeter)
+        overdueMeter = try c.decodeIfPresent(Bool.self, forKey: .overdueMeter)
+        isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
+        primaryPartNumber = try c.decodeIfPresent(String.self, forKey: .primaryPartNumber)
+        parts = try c.decodeIfPresent([MaintenancePart].self, forKey: .parts)
     }
 
     var dueStatus: DueStatus {
@@ -92,6 +144,28 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
 
     var requiresMeterOnComplete: Bool {
         scheduleKind == "meter" || scheduleKind == "both"
+    }
+
+    /// Controlling rule: linked activated runtime_hours asset (category is not authoritative).
+    func showsRunHoursTrigger(linkedAsset: RanchAsset?) -> Bool {
+        guard assetId != nil, let linkedAsset else { return false }
+        return linkedAsset.meter?.meterType == "runtime_hours" && linkedAsset.meterActivatedAt != nil
+    }
+
+    var runHoursBadge: String? {
+        if overdueMeter == true { return "Overdue" }
+        if dueMeter == true { return "Due now" }
+        if let rem = remainingMeter, rem > 0 {
+            return "\(Self.formatMeter(rem)) hrs left"
+        }
+        if let trigger = nextDueMeterValue {
+            return "Due at \(Self.formatMeter(trigger)) hrs"
+        }
+        return nil
+    }
+
+    private static func formatMeter(_ value: Decimal) -> String {
+        NSDecimalNumber(decimal: value).stringValue
     }
 }
 

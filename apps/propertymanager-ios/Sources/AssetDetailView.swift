@@ -8,6 +8,7 @@ struct AssetDetailView: View {
     @State private var readings: [MeterReading] = []
     @State private var showMeterSheet = false
     @State private var showVoiceSheet = false
+    @State private var editingTask: AssetTaskSummary?
     @State private var isActivating = false
     @State private var errorMessage: String?
 
@@ -131,28 +132,65 @@ struct AssetDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Upcoming service")
                 .font(.headline)
-            if let tasks = asset.tasks?.filter({ $0.remainingMeter != nil }), !tasks.isEmpty {
-                ForEach(tasks) { task in
-                    HStack {
-                        Text(task.item)
-                        Spacer()
-                        if task.overdueMeter == true {
-                            Text("Overdue")
-                                .foregroundStyle(.red)
-                        } else if let remaining = task.remainingMeter {
-                            Text("\(formatValue(remaining)) \(asset.meter?.unit ?? "") left")
-                                .foregroundStyle(.secondary)
+            let linked = asset.tasks ?? []
+            if linked.isEmpty {
+                Text("No service tasks linked yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(linked) { task in
+                    Button {
+                        editingTask = task
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(task.item)
+                                    .foregroundStyle(.primary)
+                                if let badge = task.runHoursBadge {
+                                    Text(badge)
+                                        .font(.caption)
+                                        .foregroundStyle(
+                                            task.overdueMeter == true
+                                                ? Color.red
+                                                : (task.dueMeter == true ? Color.orange : Color.secondary)
+                                        )
+                                } else if let trigger = task.nextDueMeterValue {
+                                    Text("Due at \(formatDecimal(trigger)) hrs")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else if asset.meter?.meterType == "runtime_hours", asset.meterActivatedAt != nil {
+                                    Text("Tap to set hour trigger")
+                                        .font(.caption)
+                                        .foregroundStyle(.tertiary)
+                                }
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
                         }
                     }
                 }
-            } else {
-                Text("No meter-based tasks linked yet.")
-                    .foregroundStyle(.secondary)
             }
         }
         .padding()
         .background(Color(.secondarySystemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+        .sheet(item: $editingTask) { task in
+            let full = store.tasks.first(where: { $0.id == task.id })
+            RunHoursTriggerSheet(
+                taskID: task.id,
+                taskTitle: task.item,
+                assetID: full?.assetId ?? asset?.id,
+                currentScheduleKind: full?.scheduleKind ?? task.scheduleKind,
+                calendarIsMeaningful: full.map { $0.warningDays > 0 } ?? true,
+                initialTrigger: full?.nextDueMeterValue ?? task.nextDueMeterValue,
+                initialInterval: full?.meterIntervalValue ?? task.meterIntervalValue
+            )
+            .environmentObject(store)
+            .onDisappear {
+                Task { await loadAsset() }
+            }
+        }
     }
 
     @ViewBuilder
@@ -217,5 +255,9 @@ struct AssetDetailView: View {
     private func formatValue(_ value: Double?) -> String {
         guard let value else { return "—" }
         return value.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    }
+
+    private func formatDecimal(_ value: Decimal) -> String {
+        NSDecimalNumber(decimal: value).stringValue
     }
 }

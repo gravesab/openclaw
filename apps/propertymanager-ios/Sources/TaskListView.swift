@@ -133,7 +133,15 @@ struct TaskRowView: View {
                 Text("\(task.area) · \(task.categoryName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                if task.requiresMeterOnComplete {
+                if let badge = task.runHoursBadge {
+                    Text(badge)
+                        .font(.caption2)
+                        .foregroundStyle(
+                            task.overdueMeter == true
+                                ? Color.red
+                                : (task.dueMeter == true ? Color.orange : Color.secondary)
+                        )
+                } else if task.requiresMeterOnComplete {
                     Label("Meter schedule", systemImage: "gauge.with.dots.needle.67percent")
                         .font(.caption2)
                         .foregroundStyle(.orange)

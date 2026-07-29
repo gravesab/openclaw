@@ -1,6 +1,6 @@
 ---
 title: "PropertyManager Asset Architecture"
-version: "1.2"
+version: "1.3"
 status: "Architecture — Phase 3 deployed (production)"
 owner: "OpenClaw Architecture"
 last_reviewed: "2026-07-29"
@@ -10,7 +10,7 @@ source_document: "PROPERTY_MANAGER_ASSET_ARCHITECTURE.md"
 
 # PropertyManager Asset Architecture
 
-Version: 1.2  
+Version: 1.3  
 Status: **Phase 3 deployed on production Intel Mini**  
 Authority: Requirements in [PropertyManager Foundational Requirements](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md)  
 Last Updated: 2026-07-29
@@ -32,7 +32,7 @@ Track operating meters (runtime hours, mileage, cycles) for ranch equipment and 
 - **Auto-sync.** Mac and iPhone read/write through the API; local JSON cache is offline-derived only.
 - **Dashboard-first QR entry.** Scanning a label opens a mobile web page; write actions require auth beyond the QR token (see [QR access policy](#qr-access-policy)).
 - **Five-minute learning.** Asset pages show current reading and remaining until next service.
-- **Manufacturer manual is PM source of truth for intervals.** Repeat intervals (`meter_interval_*`) are stored at manual import. The **run hours trigger** (`next_due_meter_value`) is the absolute due threshold for Equipment meter schedules (operators may set or adjust it).
+- **Manufacturer manual is PM source of truth for intervals.** Repeat intervals (`meter_interval_*`) are stored at manual import and keep origin/source provenance. The **run hours trigger** (`next_due_meter_value`) is an absolute operator scheduling decision (no new authorship column).
 - **Audit-first meter history.** Every reading is reconstructable; corrections append new rows.
 
 ---
@@ -148,14 +148,14 @@ Append-only history. Corrections and rejections are new rows; accepted rows are 
 
 ### Task extensions (`maintenance_tasks`)
 
-| Column                                        | Notes                                                                                   |
-| --------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `asset_id`                                    | FK to `assets`                                                                          |
-| `schedule_kind`                               | `calendar`, `meter`, or `both`                                                          |
-| `next_due_meter_value`                        | Absolute meter reading at which the task becomes due (run hours trigger for Equipment)  |
-| `meter_interval_value`, `meter_interval_unit` | Repeat every N units after complete — from manufacturer manual; never converted to days |
-| `last_done_meter_value`                       | Meter at last completion; set by recalc on complete                                     |
-| Calendar fields                               | `warning_days`, `next_due` — unchanged for calendar / hybrid                            |
+| Column                                        | Notes                                                                                         |
+| --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `asset_id`                                    | FK to `assets`                                                                                |
+| `schedule_kind`                               | `calendar`, `meter`, or `both`                                                                |
+| `next_due_meter_value`                        | Absolute meter reading at which the task becomes due (run hours trigger; operator scheduling) |
+| `meter_interval_value`, `meter_interval_unit` | Repeat every N units after complete — from manufacturer manual; never converted to days       |
+| `last_done_meter_value`                       | Meter at last completion; set by recalc on complete                                           |
+| Calendar fields                               | `warning_days`, `next_due` — unchanged for calendar / hybrid                                  |
 
 **Hybrid (`both`):** Use only when the manual (or operator) intentionally keeps calendar dates with a meter trigger ("whichever comes first"). Engine evaluates calendar due and meter due independently; task is due when **either** threshold is met. Do not silently upgrade `calendar` → `both` when only a meter trigger is added.
 
@@ -198,44 +198,64 @@ After every **accepted** reading:
 
 Within the same `meter_epoch`, recompute `usage_since_previous` for all accepted readings in chronological order after any insert or acceptance.
 
-### PM remaining (meter schedules)
+### PM remaining / due / overdue (meter schedules)
 
-After every accepted reading or task completion that affects meter state:
+After every accepted reading or task completion that affects meter state (Decimal compare):
 
 ```
 remaining_meter = next_due_meter_value - current_meter_value
-overdue_meter   = current_meter_value >= next_due_meter_value
+due_meter       = current_meter_value == next_due_meter_value
+overdue_meter   = current_meter_value >  next_due_meter_value   # strict >; never >=
 ```
 
-Meter-overdue when `remaining_meter <= 0` (equivalently `overdue_meter`).
+| Condition            | Flags                                    |
+| -------------------- | ---------------------------------------- |
+| `current < trigger`  | remaining positive; not due; not overdue |
+| `current == trigger` | `due_meter` true; **not** overdue        |
+| `current > trigger`  | `overdue_meter` true; remaining negative |
 
-### Run hours trigger (Equipment tasks)
+### Run hours trigger (runtime_hours tasks)
 
-**Run hours trigger** = the absolute hour-meter reading at which the task becomes due (not the repeat interval alone). Example: due when the mower hits **150.0** hours.
+**Run hours trigger** = the absolute hour-meter reading at which the task becomes due (not the repeat interval alone). Example: due when the mower hits **150.0** hours. No new migration — uses `next_due_meter_value` from `005_assets_and_meters.sql`.
 
-| Role             | Column / field                                   | Notes                                                            |
-| ---------------- | ------------------------------------------------ | ---------------------------------------------------------------- |
-| Absolute trigger | `next_due_meter_value`                           | Column already in `005_assets_and_meters.sql`                    |
-| Current meter    | `asset_meter.current_value`                      | Task meter-overdue when `current_value >= next_due_meter_value`  |
-| Repeat interval  | `meter_interval_value` (+ unit, typically `hrs`) | After complete, engine sets next trigger to last done + interval |
+| Role             | Column / field                        | Notes                                                            |
+| ---------------- | ------------------------------------- | ---------------------------------------------------------------- |
+| Absolute trigger | `next_due_meter_value`                | Operator scheduling decision; Decimal                            |
+| Current meter    | `asset_meter.current_value`           | Compared per due/overdue/remaining rules above                   |
+| Repeat interval  | `meter_interval_value` (+ unit `hrs`) | Manufacturer interval; advances trigger on complete when present |
 
-**Schedule promotion:** setting `asset_id` and `next_due_meter_value` while `schedule_kind` is `calendar` promotes to `meter`. Keep `both` only when calendar dates are intentional.
+**Controlling rule:** linked asset must be activated with `meter_type == runtime_hours`. Task category is **not** authoritative.
 
-**UI (Equipment):**
+**Schedule kind — no silent promotion:**
+
+- Non-null `next_due_meter_value` requires explicit `schedule_kind` in `{meter, both}`.
+- Upsert/PATCH must **not** silently change `calendar` → `meter`.
+- UI default: prefer `both` when calendar fields are already meaningful; still send explicitly.
+
+**Validation (API):**
+
+- Require `asset_id` and linked activated `runtime_hours` meter.
+- Unit `hrs`; nonnegative finite numeric; reject blank/`""` (blank ≠ 0) and non-numeric.
+- Trigger `<` current → saveable with `warnings[]`.
+
+**UI:**
 
 - Field labels: "Due when meter reaches (hours)" / "Run hours trigger"
-- Badges: "Due at X hrs" / "N hrs left" / "Overdue"
+- Badges: "N hrs left" / "Due now" / "Overdue"
+- Deliberate Save only after valid Decimal parse — no autosave of partial trigger
+- Editing trigger must not strip manufacturer `origin` / `source_manual_name` / `manualImport`
 
-**On task complete** with a meter schedule (after operator confirms meter):
+**On task complete** with a meter schedule (after operator confirms meter), atomically (`BEGIN…COMMIT` as one multi-statement script):
 
 - `last_done_meter_value = meter_value_at_completion`
-- `next_due_meter_value = last_done_meter_value + meter_interval_value` (when an interval is present)
+- If interval present: `next_due_meter_value = meter_value_at_completion + meter_interval_value`
+- If one-time (no interval): **clear** `next_due_meter_value`
 
 Calendar `next_due` recalculation unchanged for `calendar` / `both` schedules. **Never** derive calendar dates from meter hour intervals.
 
-**Scope:** Equipment (`category = Equipment`, `runtime_hours`). Vehicles / mileage follow the same absolute-trigger + interval pattern later; not required for this Equipment contract.
+**Scope:** `runtime_hours` meters (any category). Vehicles / mileage follow the same absolute-trigger + interval pattern later.
 
-Policy baseline: [Foundational Requirements — Run hours trigger](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md#run-hours-trigger-equipment-meter-pm).
+Policy baseline: [Foundational Requirements — Run hours trigger](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md#run-hours-trigger-meter-pm).
 
 ### Meter epoch changes
 

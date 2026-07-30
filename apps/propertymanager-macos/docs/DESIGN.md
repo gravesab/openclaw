@@ -606,21 +606,30 @@ Completing, rescheduling, or editing tasks is done only through the PM Mac or iP
 - Timed blocks stacked from a configurable start time (default 8:00 AM), each block = `estimated_minutes` (fallback 30 min).
 - Filter: active tasks, `schedule_kind` in `calendar | both`, `next_due` local date ≤ today.
   - Overdue (incomplete) tasks roll forward automatically: they stay in the push filter every day until marked complete in PM, because `next_due` only advances on completion.
-- Target calendar: **OpenClaw** (must exist; clear error if missing — not auto-created).
+- Target calendar is fixed by the signed app identity:
+  - DEV app → **OpenClaw DEV**
+  - Production app → **OpenClaw**
+  Both calendars must already exist; the app does not create them.
 - Idempotent: re-push removes old PM-managed blocks first, then writes fresh ones.
-- Event title: `Asset: Task` (PM display form). Notes include stable marker + task description snippet.
+- DEV event title: `[DEV] Asset: Task`; production title: `Asset: Task`.
+  Notes include a stable environment marker and task-description snippet.
 
 ### DEV / prod marker strategy
 Every PM-created event has a stable identifier in its Notes field:
 - DEV: `propertymanager://task/<uuid>?env=dev`
 - Prod: `propertymanager://task/<uuid>?env=prod`
 
-This makes DEV and prod events cleanly separable. The **Delete DEV PM calendar events** sidebar button removes all `env=dev`-tagged events in a ±90-day window. Prod events are never touched by the DEV cleanup action.
+This provides two independent safety boundaries: separate calendars and separate event markers.
+The DEV build displays a persistent orange **PROPERTY MANAGER - DEVELOPMENT** banner,
+locks Calendar actions to DEV, and has no operator-selectable production mode.
+The **Delete DEV PM calendar events** button operates only on **OpenClaw DEV** and
+removes only `env=dev`-tagged events. It cannot inspect or modify **OpenClaw**.
 
 ### Pre-prod cutover checklist
-1. Run **Delete DEV PM calendar events** and verify "OpenClaw" calendar is clean of DEV PM events.
-2. Change the env picker in the sidebar (or UserDefaults `propertyManager.calendarSyncEnv`) from `dev` to `prod`.
-3. Do a test Push and confirm events appear with `env=prod` in Notes.
+1. Verify the production app has the production bundle identifier and does not show the DEV banner.
+2. Verify its Calendar label is production and resolves only the **OpenClaw** calendar.
+3. Perform a production test push only after explicit operator approval; confirm the event has
+   no `[DEV]` title prefix and carries `env=prod` in Notes.
 
 ### On Mac complete → calendar cleanup
 When a task is marked complete in the Mac app, its OpenClaw calendar event is deleted immediately.
@@ -635,7 +644,6 @@ of the push filter, so its block disappears on the next Push Today.
 |---|---|---|---|
 | `propertyManager.calendarStartHour` | Int | 8 | Hour (0-23) for first block start |
 | `propertyManager.calendarStartMinute` | Int | 0 | Minute offset |
-| `propertyManager.calendarSyncEnv` | String | `dev` | `dev` or `prod` env tag |
 | `propertyManager.removeCalendarEventOnComplete` | Bool | true | Auto-delete event on Mac complete |
 
 ### Files

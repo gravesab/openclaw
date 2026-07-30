@@ -3,7 +3,6 @@ import Foundation
 /// Calendar.app AppleScript bridge used when EventKit/calaccessd returns 0 calendars
 /// after Full Access (XPC 4099 on ad-hoc Debug builds / macOS betas).
 enum CalendarAppleScriptPush {
-    static let calendarTitle = CalendarSyncService.calendarTitle
     static let markerScheme = CalendarSyncService.markerScheme
 
     static func listCalendarTitles() throws -> [String] {
@@ -26,8 +25,8 @@ enum CalendarAppleScriptPush {
         return joined.components(separatedBy: "|||")
     }
 
-    static func resolveOpenClawTitle(from titles: [String]) -> String? {
-        let target = calendarTitle
+    static func resolveOpenClawTitle(from titles: [String], env: SyncEnv) -> String? {
+        let target = CalendarSyncService.calendarTitle(for: env)
         if titles.contains(where: { $0 == target }) { return target }
         if let t = titles.first(where: { $0.trimmingCharacters(in: .whitespacesAndNewlines) == target }) {
             return t
@@ -44,9 +43,10 @@ enum CalendarAppleScriptPush {
     ) throws -> Int {
         let titles = try listCalendarTitles()
         NSLog("[CalendarSync] AppleScript calendars (%d): %@", titles.count, titles.joined(separator: " | ") as NSString)
-        guard let calName = resolveOpenClawTitle(from: titles) else {
+        let expectedCalendarTitle = CalendarSyncService.calendarTitle(for: env)
+        guard let calName = resolveOpenClawTitle(from: titles, env: env) else {
             throw CalendarSyncError.calendarNotFound(
-                calendarTitle,
+                expectedCalendarTitle,
                 available: titles,
                 authRaw: -1
             )
@@ -97,7 +97,8 @@ enum CalendarAppleScriptPush {
             let duration = max(1, task.estimatedMinutes)
             let eventEnd = cursor.addingTimeInterval(Double(duration) * 60)
             let group = TaskTitle.displayAssetName(area: task.area, assetId: task.assetId, assets: assets)
-            let title = TaskTitle.canonicalItem(assetName: group, title: task.item)
+            let taskTitle = TaskTitle.canonicalItem(assetName: group, title: task.item)
+            let title = env == .dev ? "[DEV] \(taskTitle)" : taskTitle
             var lines = [CalendarSyncService.marker(taskId: task.id, env: env)]
             if !task.taskDescription.isEmpty { lines.append(task.taskDescription) }
             if cal.startOfDay(for: task.nextDue) < todayStart {

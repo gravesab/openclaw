@@ -28,15 +28,29 @@ final class CalendarSyncServiceTests: XCTestCase {
 
     func testCalendarTitleResolutionIsExactButWhitespaceTolerant() {
         XCTAssertEqual(
-            CalendarAppleScriptPush.resolveOpenClawTitle(from: ["Home", "OpenClaw", "Work"]),
-            "OpenClaw"
+            CalendarAppleScriptPush.resolveOpenClawTitle(
+                from: ["Home", "OpenClaw DEV", "Work"],
+                env: .dev
+            ),
+            "OpenClaw DEV"
         )
         XCTAssertEqual(
-            CalendarAppleScriptPush.resolveOpenClawTitle(from: ["Home", " OpenClaw ", "Work"]),
+            CalendarAppleScriptPush.resolveOpenClawTitle(
+                from: ["Home", " OpenClaw ", "Work"],
+                env: .prod
+            ),
             " OpenClaw "
         )
         XCTAssertNil(
-            CalendarAppleScriptPush.resolveOpenClawTitle(from: ["Home", "Open Claw", "Work"])
+            CalendarAppleScriptPush.resolveOpenClawTitle(
+                from: ["Home", "OpenClaw", "Work"],
+                env: .dev
+            )
         )
+    }
+
+    func testEnvironmentUsesSeparateCalendarTitles() {
+        XCTAssertEqual(CalendarSyncService.calendarTitle(for: .dev), "OpenClaw DEV")
+        XCTAssertEqual(CalendarSyncService.calendarTitle(for: .prod), "OpenClaw")
     }
 }

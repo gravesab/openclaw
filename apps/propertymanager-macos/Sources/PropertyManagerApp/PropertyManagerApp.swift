@@ -34,6 +34,15 @@ enum AppAppearance: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppEnvironment {
+    static let isDevelopment =
+        Bundle.main.bundleIdentifier?.localizedCaseInsensitiveContains(".dev") == true
+
+    static var calendarSyncEnv: SyncEnv {
+        isDevelopment ? .dev : .prod
+    }
+}
+
 @main
 struct PropertyManagerApp: App {
     @StateObject private var store = MaintenanceStore()
@@ -408,11 +417,7 @@ final class MaintenanceStore: ObservableObject {
 
     /// DEV or prod sync environment. Default `.dev` while building on M4.
     var calendarSyncEnv: SyncEnv {
-        get {
-            let raw = UserDefaults.standard.string(forKey: "propertyManager.calendarSyncEnv") ?? SyncEnv.dev.rawValue
-            return SyncEnv(rawValue: raw) ?? .dev
-        }
-        set { UserDefaults.standard.set(newValue.rawValue, forKey: "propertyManager.calendarSyncEnv") }
+        AppEnvironment.calendarSyncEnv
     }
 
     /// When true, completing a task in the Mac app immediately removes its
@@ -2316,6 +2321,25 @@ struct ContentView: View {
 
             editorArea
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if AppEnvironment.isDevelopment {
+                HStack {
+                    Image(systemName: "hammer.fill")
+                    Text("PROPERTY MANAGER - DEVELOPMENT")
+                        .fontWeight(.bold)
+                    Spacer()
+                    Text("DEV DATA • DEV CALENDAR EVENTS")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(.black)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .background(Color.orange)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Property Manager development environment")
+            }
+        }
         .background(Color(nsColor: .windowBackgroundColor))
         .task {
             // Window is already visible; refresh offline cache first, then assets.
@@ -2419,7 +2443,6 @@ struct SidebarView: View {
     @AppStorage("propertyManager.appearance") private var appearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("propertyManager.calendarStartHour") private var calendarStartHour: Int = 8
     @AppStorage("propertyManager.calendarStartMinute") private var calendarStartMinute: Int = 0
-    @AppStorage("propertyManager.calendarSyncEnv") private var calendarSyncEnvRaw: String = SyncEnv.dev.rawValue
 
     private var briefingCounts: BriefingCounts {
         BriefingCounts(tasks: tasks)
@@ -2516,7 +2539,7 @@ struct SidebarView: View {
                     .fontWeight(.semibold)
                     .foregroundStyle(.purple)
 
-                // Start time and env picker on one row
+                // Environment is fixed by the signed app's bundle identity.
                 HStack(spacing: 6) {
                     Text("Start")
                         .font(.caption2)
@@ -2530,14 +2553,10 @@ struct SidebarView: View {
                     .frame(width: 68)
                     .font(.caption2)
                     Spacer()
-                    Picker("Env", selection: $calendarSyncEnvRaw) {
-                        ForEach(SyncEnv.allCases) { env in
-                            Text(env.label).tag(env.rawValue)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 56)
-                    .font(.caption2)
+                    Text(AppEnvironment.calendarSyncEnv.label.uppercased())
+                        .font(.caption2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(AppEnvironment.isDevelopment ? Color.orange : Color.green)
                 }
 
                 Button {
@@ -2553,7 +2572,7 @@ struct SidebarView: View {
 
                 // Delete DEV events — only shown when env is DEV so it can't
                 // accidentally nuke prod events after cutover.
-                if calendarSyncEnvRaw == SyncEnv.dev.rawValue {
+                if AppEnvironment.isDevelopment {
                     Button(role: .destructive) {
                         deleteDevCalendarEventsAction()
                     } label: {

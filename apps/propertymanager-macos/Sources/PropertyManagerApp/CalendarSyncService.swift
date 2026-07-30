@@ -58,9 +58,14 @@ final class CalendarSyncService {
 
     static let shared = CalendarSyncService()
 
-    // Title of the Apple Calendar that receives PM events.
-    // Must already exist — the service never auto-creates it.
-    static let calendarTitle = "OpenClaw"
+    // Calendar separation is a hard safety boundary.
+    // Both calendars must already exist — the service never auto-creates them.
+    static let productionCalendarTitle = "OpenClaw"
+    static let developmentCalendarTitle = "OpenClaw DEV"
+
+    static func calendarTitle(for env: SyncEnv) -> String {
+        env == .dev ? developmentCalendarTitle : productionCalendarTitle
+    }
 
     /// Prefix embedded in every PM event's notes field.
     static let markerScheme = "propertymanager://task/"
@@ -183,7 +188,7 @@ final class CalendarSyncService {
                 NSLog("[CalendarSync] EventKit 0 calendars after Full Access — AppleScript fallback")
                 useAppleScript = true
             } else {
-                calendar = try openClawCalendar(in: ekStore)
+                calendar = try openClawCalendar(in: ekStore, title: Self.calendarTitle(for: env))
             }
         } catch {
             NSLog("[CalendarSync] EventKit unavailable (%@) — AppleScript fallback", error.localizedDescription)
@@ -223,7 +228,8 @@ final class CalendarSyncService {
 
             let ev = EKEvent(eventStore: ekStore)
             let group = TaskTitle.displayAssetName(area: task.area, assetId: task.assetId, assets: assets)
-            ev.title = TaskTitle.canonicalItem(assetName: group, title: task.item)
+            let taskTitle = TaskTitle.canonicalItem(assetName: group, title: task.item)
+            ev.title = env == .dev ? "[DEV] \(taskTitle)" : taskTitle
             ev.startDate = cursor
             ev.endDate = eventEnd
             ev.calendar = openClaw
@@ -257,13 +263,16 @@ final class CalendarSyncService {
     /// the product preference changes.
     ///
     /// Searches both today and ±1 day so an event placed near midnight is
-    /// always found.  Does not require knowing the env, so it cleans up
-    /// regardless of which env created the event.
+    /// always found. The signed app identity fixes which environment calendar
+    /// is searched, so DEV completion cannot remove a production event.
     func removeEventsForTask(taskId: UUID) async throws {
         guard try await requestWriteAccess() else { return }
 
         let ekStore = EKEventStore()
-        guard let calendar = try? openClawCalendar(in: ekStore) else { return }
+        guard let calendar = try? openClawCalendar(
+            in: ekStore,
+            title: Self.calendarTitle(for: AppEnvironment.calendarSyncEnv)
+        ) else { return }
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -286,8 +295,8 @@ final class CalendarSyncService {
     // MARK: - Delete all DEV events
 
     /// Deletes all PM events tagged `env=dev` in a ±90-day window.
-    /// Run this before promoting calendar sync to prod so the "OpenClaw"
-    /// calendar is clean.  Prod events (env=prod marker) are never touched.
+    /// Operates only on the "OpenClaw DEV" calendar. Production events and
+    /// the production "OpenClaw" calendar are never touched.
     ///
     /// Returns the count of events deleted.
     func deleteDevEvents() async throws -> Int {
@@ -304,7 +313,7 @@ final class CalendarSyncService {
             try await Task.sleep(nanoseconds: 400_000_000)
             ekStore = EKEventStore()
         }
-        let calendar = try openClawCalendar(in: ekStore)
+        let calendar = try openClawCalendar(in: ekStore, title: Self.developmentCalendarTitle)
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())
@@ -325,9 +334,8 @@ final class CalendarSyncService {
 
     // MARK: - Private helpers
 
-    private func openClawCalendar(in ekStore: EKEventStore) throws -> EKCalendar {
+    private func openClawCalendar(in ekStore: EKEventStore, title target: String) throws -> EKCalendar {
         let all = ekStore.calendars(for: .event)
-        let target = Self.calendarTitle
         let auth = EKEventStore.authorizationStatus(for: .event).rawValue
         let titles = all.map { Self.describeCalendar($0) }
         NSLog("[CalendarSync] auth=%d calendars=%d titles=%@", auth, all.count, titles.joined(separator: " | ") as NSString)

@@ -1277,6 +1277,11 @@ enum ManufacturerManualImporter {
                 item = "\(subsystem): \(item)"
             }
             item = TaskTitle.canonicalItem(assetName: area, title: item)
+            guard let responseInstructions = nonEmpty(task.responseInstructions) else {
+                // A manufacturer task must carry usable, source-backed procedure text.
+                // Do not create a misleading generic "follow the manual" How-To.
+                continue
+            }
             let warning = max(task.warningDays ?? 30, 1)
             let critical = max(task.criticalDays ?? max(warning * 2, warning + 7), warning)
             let tools = (task.toolsRequired ?? []).map {
@@ -1318,8 +1323,7 @@ enum ManufacturerManualImporter {
                     estimatedMinutes: max(task.estimatedMinutes ?? 30, 5),
                     taskDescription: nonEmpty(task.taskDescription)
                         ?? item,
-                    responseInstructions: nonEmpty(task.responseInstructions)
-                        ?? "Follow the manufacturer procedure in \(manualName).",
+                    responseInstructions: responseInstructions,
                     suppliesNeeded: task.suppliesNeeded ?? "",
                     notes: notesBits.joined(separator: "\n"),
                     manufacturer: manufacturer,

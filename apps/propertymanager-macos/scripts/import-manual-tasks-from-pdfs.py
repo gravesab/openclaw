@@ -281,10 +281,11 @@ def to_task(raw: dict, manufacturer: str, equipment: str, manual_name: str) -> d
             }
         )
     desc = str(raw.get("taskDescription") or f"{area}: {item}").strip()
-    instructions = str(
-        raw.get("responseInstructions")
-        or f"Follow the manufacturer procedure in {manual_name}."
-    ).strip()
+    instructions = str(raw.get("responseInstructions") or "").strip()
+    if not instructions or is_placeholder(instructions):
+        # Never manufacture a generic How-To for a manufacturer task.
+        # Tasks without extracted procedure text remain out of the import.
+        return None
     if is_placeholder(desc) or desc.lower() == "string":
         desc = f"{area}: {item}"
     notes_bits = []

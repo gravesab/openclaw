@@ -4,10 +4,13 @@ from __future__ import annotations
 import logging
 import os
 import json
+import base64
+import hashlib
+import mimetypes
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 import db as pm_db
@@ -207,7 +210,8 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     )
     photos_rows = pm_db.execute_json(
         f"""
-        SELECT id, task_id, file_name, storage_path, created_at
+        SELECT id, task_id, file_name, original_file_name, content_type,
+               byte_size, encode(sha256, 'hex') AS sha256, storage_path, created_at
         FROM propertymanager.maintenance_task_photos
         WHERE task_id IN ({placeholders})
         ORDER BY created_at
@@ -244,6 +248,24 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     return enriched
 
 
+ALLOWED_PHOTO_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/heic",
+    "image/heif",
+    "image/webp",
+    "image/tiff",
+    "image/gif",
+}
+
+
+def _photo_name(original_name: str, photo_id: str) -> str:
+    extension = os.path.splitext(original_name or "")[1].lower()
+    if not extension or len(extension) > 10 or not extension[1:].isalnum():
+        extension = mimetypes.guess_extension(request.files["file"].mimetype or "") or ".jpg"
+    return f"{photo_id}{extension}"
+
+
 def _probe_postgres_and_schema() -> tuple[bool, bool]:
     """Return (postgres_reachable, schema_available). Never raises."""
     try:
@@ -276,7 +298,7 @@ def health():
         "postgres_reachable": postgres_reachable,
         "schema_available": schema_available,
         "db_mode": "docker_exec" if pm_db.use_docker() else "tcp",
-        "schema_version": "006",
+        "schema_version": "008",
         "attachments_root": ATTACHMENTS_ROOT,
         "max_content_length": MAX_UPLOAD_BYTES,
         **auth_status(),
@@ -1011,6 +1033,92 @@ def complete_task(task_id: str):
     if updated is None:
         return jsonify({"error": "Task not found"}), 404
     return jsonify(enrich_tasks([updated])[0])
+
+
+@app.post("/tasks/<task_id>/photos")
+@auth_required()
+def upload_task_photo(task_id: str):
+    if not fetch_task_or_404(task_id):
+        return error_response("not_found", "Task not found.", 404)
+    upload = request.files.get("file")
+    if upload is None or not upload.filename:
+        return validation_error("A photo file is required.", field="file")
+    content_type = (upload.mimetype or "").lower()
+    if content_type not in ALLOWED_PHOTO_TYPES:
+        return validation_error("Unsupported photo type.", field="file")
+    content = upload.read()
+    if not content:
+        return validation_error("The photo is empty.", field="file")
+    photo_id = str(uuid4())
+    file_name = _photo_name(upload.filename, photo_id)
+    digest = hashlib.sha256(content).digest()
+    pm_db.execute(
+        """
+        INSERT INTO propertymanager.maintenance_task_photos
+            (id, task_id, file_name, original_file_name, content_type,
+             byte_size, sha256, content, storage_path)
+        VALUES (%s, %s, %s, %s, %s, %s, decode(%s, 'hex'), decode(%s, 'base64'), %s)
+        """,
+        (
+            photo_id,
+            task_id,
+            file_name,
+            os.path.basename(upload.filename),
+            content_type,
+            len(content),
+            digest.hex(),
+            base64.b64encode(content).decode("ascii"),
+            f"postgres://propertymanager/maintenance_task_photos/{photo_id}",
+        ),
+    )
+    row = pm_db.execute_one_json(
+        """
+        SELECT id, task_id, file_name, original_file_name, content_type,
+               byte_size, encode(sha256, 'hex') AS sha256, storage_path, created_at
+        FROM propertymanager.maintenance_task_photos
+        WHERE id = %s
+        """,
+        (photo_id,),
+    )
+    return jsonify(row), 201
+
+
+@app.get("/tasks/<task_id>/photos/content")
+def download_task_photo(task_id: str):
+    file_name = (request.args.get("file_name") or "").strip()
+    if not file_name:
+        return validation_error("file_name is required.", field="file_name")
+    row = pm_db.execute_one_json(
+        """
+        SELECT content_type, encode(content, 'base64') AS content_base64
+        FROM propertymanager.maintenance_task_photos
+        WHERE task_id = %s AND file_name = %s
+        """,
+        (task_id, file_name),
+    )
+    if not row:
+        return error_response("not_found", "Photo not found.", 404)
+    content = base64.b64decode((row["content_base64"] or "").replace("\n", ""))
+    return Response(content, mimetype=row.get("content_type") or "application/octet-stream")
+
+
+@app.delete("/tasks/<task_id>/photos")
+@auth_required()
+def delete_task_photo(task_id: str):
+    payload = request.get_json(silent=True) or {}
+    file_name = str(payload.get("file_name") or "").strip()
+    if not file_name:
+        return validation_error("file_name is required.", field="file_name")
+    deleted = pm_db.execute(
+        """
+        DELETE FROM propertymanager.maintenance_task_photos
+        WHERE task_id = %s AND file_name = %s
+        """,
+        (task_id, file_name),
+    )
+    if deleted == 0:
+        return error_response("not_found", "Photo not found.", 404)
+    return jsonify({"deleted": True, "task_id": task_id, "file_name": file_name})
 
 
 register_asset_routes(app)

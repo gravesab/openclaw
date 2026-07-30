@@ -263,6 +263,93 @@ struct PropertyAPIClient {
         }
     }
 
+    private struct PhotoUploadResult: Decodable {
+        let fileName: String
+
+        enum CodingKeys: String, CodingKey {
+            case fileName = "file_name"
+        }
+    }
+
+    func uploadPhoto(taskID: UUID, fileURL: URL) async throws -> String {
+        let url = try makeURL("/tasks/\(taskID.uuidString)/photos")
+        let fileData = try Data(contentsOf: fileURL)
+        let boundary = "PropertyManager-\(UUID().uuidString)"
+        let mimeType: String
+        switch fileURL.pathExtension.lowercased() {
+        case "png": mimeType = "image/png"
+        case "heic": mimeType = "image/heic"
+        case "heif": mimeType = "image/heif"
+        case "webp": mimeType = "image/webp"
+        case "tif", "tiff": mimeType = "image/tiff"
+        case "gif": mimeType = "image/gif"
+        default: mimeType = "image/jpeg"
+        }
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"\(fileURL.lastPathComponent)\"\r\n"
+                .data(using: .utf8)!
+        )
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(fileData)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        applyAuth(&request)
+        request.httpBody = body
+        do {
+            let (data, response) = try await Self.sharedSession.data(for: request)
+            try validate(response, data: data)
+            return try decoder.decode(PhotoUploadResult.self, from: data).fileName
+        } catch let error as PropertyAPIError {
+            throw error
+        } catch let error as DecodingError {
+            throw PropertyAPIError.decoding(error)
+        } catch {
+            throw PropertyAPIError.transport(error)
+        }
+    }
+
+    func deletePhoto(taskID: UUID, fileName: String) async throws {
+        let url = try makeURL("/tasks/\(taskID.uuidString)/photos")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(&request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["file_name": fileName])
+        do {
+            let (data, response) = try await Self.sharedSession.data(for: request)
+            try validate(response, data: data)
+        } catch let error as PropertyAPIError {
+            throw error
+        } catch {
+            throw PropertyAPIError.transport(error)
+        }
+    }
+
+    func downloadPhoto(taskID: UUID, fileName: String) async throws -> Data {
+        let base = try makeURL("/tasks/\(taskID.uuidString)/photos/content")
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw PropertyAPIError.invalidURL
+        }
+        components.queryItems = [URLQueryItem(name: "file_name", value: fileName)]
+        guard let url = components.url else {
+            throw PropertyAPIError.invalidURL
+        }
+        do {
+            let (data, response) = try await Self.sharedSession.data(from: url)
+            try validate(response, data: data)
+            return data
+        } catch let error as PropertyAPIError {
+            throw error
+        } catch {
+            throw PropertyAPIError.transport(error)
+        }
+    }
+
 
     /// Mutating-request auth: Bearer/X-API-Key and optional X-Operator-PIN.
     func applyAuth(_ request: inout URLRequest) {

@@ -65,6 +65,6 @@ enum CategoryStyle {
     }
 
     static let builtInNames = [
-        "Pool", "Home", "Grounds", "Equipment", "House", "Safety", "Property"
+        "Home", "Grounds", "Equipment", "House", "Safety", "Property"
     ]
 }

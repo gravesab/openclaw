@@ -649,10 +649,8 @@ final class MaintenanceStore: ObservableObject {
             var moved = 0
             for index in tasks.indices {
                 let matchesCategory = tasks[index].category.caseInsensitiveCompare(category.name) == .orderedSame
-                let matchesArea = tasks[index].area.caseInsensitiveCompare(category.name) == .orderedSame
-                if matchesCategory || matchesArea {
+                if matchesCategory {
                     tasks[index].category = destination
-                    tasks[index].area = destination
                     moved += 1
                 }
             }
@@ -713,39 +711,8 @@ final class MaintenanceStore: ObservableObject {
                 changed = true
             }
         }
-        // Keep picker valid: any existing task area must appear as a category choice.
-        for task in tasks {
-            let area = task.area.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !area.isEmpty else { continue }
-            if !categories.contains(where: { $0.name.caseInsensitiveCompare(area) == .orderedSame }) {
-                categories.append(
-                    CategoryDefinition(
-                        id: UUID(),
-                        name: area,
-                        icon: CategoryStyle.icon(for: area),
-                        colorName: CategoryStyle.colorName(for: area),
-                        isBuiltIn: false
-                    )
-                )
-                changed = true
-            }
-        }
         if changed {
             saveCategories()
-        }
-    }
-
-    func normalizeTaskCategoriesToArea() {
-        var changed = false
-        for index in tasks.indices {
-            let area = tasks[index].area.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !area.isEmpty, tasks[index].category != area {
-                tasks[index].category = area
-                changed = true
-            }
-        }
-        if changed {
-            save(markDirty: false)
         }
     }
 
@@ -909,6 +876,14 @@ final class MaintenanceStore: ObservableObject {
                 saveCategories()
             }
             tasks = remoteTasks
+            for task in tasks {
+                for fileName in task.photoFileNames {
+                    let localURL = TaskPhotoStore.url(taskID: task.id, fileName: fileName)
+                    guard !FileManager.default.fileExists(atPath: localURL.path) else { continue }
+                    let data = try await apiClient.downloadPhoto(taskID: task.id, fileName: fileName)
+                    try TaskPhotoStore.saveDownloadedPhoto(data, taskID: task.id, fileName: fileName)
+                }
+            }
             if selectedTaskID == nil || !tasks.contains(where: { $0.id == selectedTaskID }) {
                 selectedTaskID = tasks.first?.id
             }
@@ -1092,7 +1067,7 @@ final class MaintenanceStore: ObservableObject {
 
     func addPhotoToSelectedTask() {
         guard let selectedTaskID,
-              let index = tasks.firstIndex(where: { $0.id == selectedTaskID }) else {
+              tasks.contains(where: { $0.id == selectedTaskID }) else {
             statusMessage = "Select a task before adding a photo."
             return
         }
@@ -1102,23 +1077,53 @@ final class MaintenanceStore: ObservableObject {
             return
         }
 
-        tasks[index].photoFileNames.append(fileName)
-        writeLocalCacheOnly()
-        Task { await upsertTaskToServer(tasks[index]) }
-        statusMessage = "Photo added."
+        statusMessage = "Uploading photo to DEV database…"
+        Task { @MainActor in
+            do {
+                let localURL = TaskPhotoStore.url(taskID: selectedTaskID, fileName: fileName)
+                let storedName = try await apiClient.uploadPhoto(
+                    taskID: selectedTaskID,
+                    fileURL: localURL
+                )
+                try TaskPhotoStore.renamePhoto(
+                    taskID: selectedTaskID,
+                    from: fileName,
+                    to: storedName
+                )
+                guard let currentIndex = tasks.firstIndex(where: { $0.id == selectedTaskID }) else {
+                    return
+                }
+                tasks[currentIndex].photoFileNames.append(storedName)
+                writeLocalCacheOnly()
+                statusMessage = "Photo saved in DEV PostgreSQL."
+            } catch {
+                TaskPhotoStore.removePhoto(taskID: selectedTaskID, fileName: fileName)
+                statusMessage = "Photo was not saved: \(error.localizedDescription)"
+            }
+        }
     }
 
     func removePhotoFromSelectedTask(_ fileName: String) {
         guard let selectedTaskID,
-              let index = tasks.firstIndex(where: { $0.id == selectedTaskID }) else {
+              tasks.contains(where: { $0.id == selectedTaskID }) else {
             return
         }
 
-        TaskPhotoStore.removePhoto(taskID: selectedTaskID, fileName: fileName)
-        tasks[index].photoFileNames.removeAll { $0 == fileName }
-        writeLocalCacheOnly()
-        Task { await upsertTaskToServer(tasks[index]) }
-        statusMessage = "Photo removed."
+        statusMessage = "Removing photo from DEV database…"
+        Task { @MainActor in
+            do {
+                try await apiClient.deletePhoto(taskID: selectedTaskID, fileName: fileName)
+                TaskPhotoStore.removePhoto(taskID: selectedTaskID, fileName: fileName)
+                guard let currentIndex = tasks.firstIndex(where: { $0.id == selectedTaskID }) else {
+                    return
+                }
+                tasks[currentIndex].photoFileNames.removeAll { $0 == fileName }
+                writeLocalCacheOnly()
+                statusMessage = "Photo removed from DEV PostgreSQL."
+            } catch {
+                statusMessage = "Photo was not removed: \(error.localizedDescription)"
+            }
+        }
     }
 
     func revealPhoto(_ fileName: String) {
@@ -3502,11 +3507,11 @@ struct TaskEditorView: View {
 
 
     var photosCard: some View {
-        CardView(title: task.kind == .workRequest ? "Work Request Photos" : "Photos (Mac only)", icon: "camera.fill") {
+        CardView(title: task.kind == .workRequest ? "Work Request Photos" : "Photos", icon: "camera.fill") {
             VStack(alignment: .leading, spacing: 12) {
                 Text(task.kind == .workRequest
-                     ? "Add a photo of the damage or location (stored on this Mac)."
-                     : "Optional photos for this task (stored on this Mac, not published to Intel).")
+                     ? "Add a photo of the damage or location. Photos are saved in DEV PostgreSQL."
+                     : "Optional photos for this task. Photos are saved in DEV PostgreSQL.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
@@ -3553,9 +3558,8 @@ struct TaskEditorView: View {
                     Picker(
                         "Category",
                         selection: Binding(
-                            get: { task.area },
+                            get: { task.category },
                             set: { newValue in
-                                task.area = newValue
                                 task.category = newValue
                             }
                         )
@@ -3568,7 +3572,7 @@ struct TaskEditorView: View {
                     .frame(maxWidth: 260, alignment: .leading)
                 }
 
-                Text("Category choices come from Add Category. Area/category stay in sync for Publish.")
+                Text("Category describes where the asset belongs. The asset/group name remains separate.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
 

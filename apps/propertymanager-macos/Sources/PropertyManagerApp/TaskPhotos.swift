@@ -60,6 +60,20 @@ enum TaskPhotoStore {
         try? FileManager.default.removeItem(at: fileURL)
     }
 
+    static func renamePhoto(taskID: UUID, from oldName: String, to newName: String) throws {
+        guard oldName != newName else { return }
+        let oldURL = url(taskID: taskID, fileName: oldName)
+        let newURL = url(taskID: taskID, fileName: newName)
+        if FileManager.default.fileExists(atPath: newURL.path) {
+            try FileManager.default.removeItem(at: newURL)
+        }
+        try FileManager.default.moveItem(at: oldURL, to: newURL)
+    }
+
+    static func saveDownloadedPhoto(_ data: Data, taskID: UUID, fileName: String) throws {
+        try data.write(to: url(taskID: taskID, fileName: fileName), options: [.atomic])
+    }
+
     static func removeAllPhotos(taskID: UUID) {
         let folderURL = folder(for: taskID)
         try? FileManager.default.removeItem(at: folderURL)

@@ -191,12 +191,14 @@ def _docker_psql(
     ]
     if field_separator is not None:
         cmd.extend(["-F", field_separator])
-    cmd.extend(["-c", sql])
+    # Send SQL on stdin instead of argv. Binary attachments encoded as bytea can
+    # exceed the host's command-line length limit even when the HTTP upload is
+    # within the approved 32 MiB ceiling.
     # Track Popen explicitly so worker_exit can wait. Do not start a new session
     # (that would detach/orphan children across worker death).
     proc: subprocess.Popen[str] = subprocess.Popen(
         cmd,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -205,7 +207,7 @@ def _docker_psql(
     with _inflight_lock:
         _inflight_procs.add(proc)
     try:
-        stdout, stderr = proc.communicate()
+        stdout, stderr = proc.communicate(sql)
         return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
     finally:
         with _inflight_lock:

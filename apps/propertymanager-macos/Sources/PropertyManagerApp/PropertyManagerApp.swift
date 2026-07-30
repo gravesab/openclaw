@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 import Foundation
 import AppKit
 import EventKit
@@ -1559,7 +1560,7 @@ final class MaintenanceStore: ObservableObject {
                 let message: String
 
                 if process.terminationStatus == 0 {
-                    message = self.dashboardBackupSuccessMessage(from: cleanOutput)
+                    message = Self.dashboardBackupSuccessMessage(from: cleanOutput)
                 } else {
                     message = cleanError.isEmpty ? "Dashboard backup failed." : cleanError
                 }
@@ -1575,12 +1576,12 @@ final class MaintenanceStore: ObservableObject {
         }
     }
 
-    private func dashboardBackupSuccessMessage(from output: String) -> String {
+    private nonisolated static func dashboardBackupSuccessMessage(from output: String) -> String {
         guard !output.isEmpty else {
             return "Backup completed successfully."
         }
 
-        if let backupPath = dashboardBackupPath(from: output) {
+        if let backupPath = Self.dashboardBackupPath(from: output) {
             let backupFolder = URL(fileURLWithPath: backupPath).lastPathComponent
 
             return """
@@ -1605,7 +1606,7 @@ final class MaintenanceStore: ObservableObject {
         """
     }
 
-    private func dashboardBackupPath(from output: String) -> String? {
+    private nonisolated static func dashboardBackupPath(from output: String) -> String? {
         let pathPrefix = "/home/gravesab/ai/projects/openclaw/tools/dashboard/backups/propertymanager_app_backups/"
 
         for token in output.components(separatedBy: .whitespacesAndNewlines).reversed() {

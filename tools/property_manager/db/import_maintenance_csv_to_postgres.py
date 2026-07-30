@@ -20,7 +20,7 @@ def category_from_area(area: str) -> str:
     if "pool" in a:
         return "Pool"
     if "hot" in a or "tub" in a or "spa" in a:
-        return "Hot Tub"
+        return "Home"
     if "tractor" in a:
         return "Tractor"
     if "ground" in a or "yard" in a or "tree" in a or "fence" in a:

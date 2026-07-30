@@ -204,7 +204,7 @@ def normalize_category(raw: str | None, area: str) -> str:
     if "pool" in text:
         return "Pool"
     if "hot" in text or "tub" in text or "spa" in text:
-        return "Hot Tub"
+        return "Home"
     if "ground" in text or "yard" in text or "mower" in text or "lawn" in text:
         return "Grounds"
     if "safety" in text:

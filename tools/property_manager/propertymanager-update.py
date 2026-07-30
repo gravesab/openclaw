@@ -15,11 +15,11 @@ COMMANDS = {
     "pool skimmer cleaned": ("Pool", "Skimmer basket clean"),
     "pool shock done": ("Pool", "Shock treatment"),
 
-    "hot tub water test done": ("Hot Tub", "Water test"),
-    "hot tub filter cleaned": ("Hot Tub", "Filter cleaning"),
-    "hot tub shock done": ("Hot Tub", "Shock treatment"),
-    "hot tub shocked": ("Hot Tub", "Shock treatment"),
-    "hot tub drained": ("Hot Tub", "Drain and refill"),
+    "spa ph tested": ("Spa", "Spa: Test and adjust pH balance"),
+    "spa sanitizer tested": ("Spa", "Spa: Test and adjust sanitizer levels"),
+    "spa filter cleaned": ("Spa", "Spa: Clean and reinstall filter"),
+    "spa drained and refilled": ("Spa", "Spa: Drain, clean, and refill spa"),
+    "spa gfci tested": ("Spa", "Spa: Test and reset GFCI"),
 
     "tractor inspection done": ("Tractor", "Inspection"),
     "tractor oil changed": ("Tractor", "Oil change"),

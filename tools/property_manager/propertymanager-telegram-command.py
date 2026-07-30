@@ -36,12 +36,12 @@ Pool:
 • pool skimmer cleaned
 • pool shock done
 
-Hot Tub:
-• hot tub water test done
-• hot tub filter cleaned
-• hot tub shock done
-• hot tub shocked
-• hot tub drained
+Spa:
+• spa ph tested
+• spa sanitizer tested
+• spa filter cleaned
+• spa drained and refilled
+• spa gfci tested
 
 Tractor:
 • tractor inspection done

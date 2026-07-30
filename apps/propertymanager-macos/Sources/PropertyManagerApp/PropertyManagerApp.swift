@@ -55,7 +55,7 @@ struct PropertyManagerApp: App {
 
 enum TaskCategory: String, CaseIterable, Codable, Identifiable {
     case pool = "Pool"
-    case hotTub = "Hot Tub"
+    case home = "Home"
     case grounds = "Grounds"
     case equipment = "Equipment"
     case house = "House"
@@ -1950,7 +1950,7 @@ final class MaintenanceStore: ObservableObject {
         }
 
         if lower.contains("hot") || lower.contains("tub") || lower.contains("spa") {
-            return "Hot Tub"
+            return "Home"
         }
 
         if lower.contains("tractor") || lower.contains("mower") || lower.contains("pump") || lower.contains("equipment") {
@@ -2155,30 +2155,6 @@ final class MaintenanceStore: ObservableObject {
                 criticalDays: 14,
                 lastDone: Calendar.current.date(byAdding: .day, value: -7, to: today) ?? today,
                 nextDue: today
-            ),
-            MaintenanceTask(
-                area: "Hot Tub",
-                item: "Filter cleaning",
-                category: "Hot Tub",
-                priority: .low,
-                frequency: .monthly,
-                taskDescription: "Hot Tub: Filter cleaning",
-                responseInstructions: """
-                1. Turn off jets.
-
-                2. Remove filter.
-
-                3. Rinse filter with hose.
-
-                4. Reinstall filter and check flow.
-                """,
-                suppliesNeeded: "Hose, filter cleaner",
-                notes: "Sample task.",
-                estimatedMinutes: 30,
-                warningDays: 30,
-                criticalDays: 45,
-                lastDone: Calendar.current.date(byAdding: .day, value: -29, to: today) ?? today,
-                nextDue: Calendar.current.date(byAdding: .day, value: 1, to: today) ?? today
             )
         ]
     }
@@ -2517,6 +2493,22 @@ struct SidebarView: View {
             .background(Color.blue.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 12))
 
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Appearance")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Picker("Appearance", selection: $appearanceRaw) {
+                    ForEach(AppAppearance.allCases) { mode in
+                        Text(mode.label).tag(mode.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+            .padding(10)
+            .background(Color.gray.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+
             // MARK: Calendar sync section
             VStack(alignment: .leading, spacing: 8) {
                 Label("OpenClaw Calendar", systemImage: "calendar")
@@ -2588,22 +2580,6 @@ struct SidebarView: View {
             .padding(10)
             .background(Color.purple.opacity(0.08))
             .clipShape(RoundedRectangle(cornerRadius: 12))
-
-
-            Spacer()
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Appearance")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                Picker("Appearance", selection: $appearanceRaw) {
-                    ForEach(AppAppearance.allCases) { mode in
-                        Text(mode.label).tag(mode.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
 
             VStack(alignment: .leading, spacing: 10) {
                 Label("Daily Briefing", systemImage: "sun.max.fill")
@@ -3381,22 +3357,30 @@ struct TaskEditorView: View {
 
             Divider()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    summaryStrip
-                    basicInfoCard
-                    photosCard
-                    scheduleCard
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 16) {
+                        Color.clear.frame(height: 0).id("editorTop")
+                        summaryStrip
+                        basicInfoCard
+                        photosCard
+                        scheduleCard
 
-                    responseCard
-                    manufacturerPartsCard
-                    responsePreviewCard
+                        responseCard
+                        manufacturerPartsCard
+                        responsePreviewCard
 
-                    completionCard
-                    historyCard
-                    automationCard
+                        completionCard
+                        historyCard
+                        automationCard
+                    }
+                    .padding(20)
                 }
-                .padding(20)
+                .onChange(of: task.id) { _ in
+                    withAnimation {
+                        proxy.scrollTo("editorTop", anchor: .top)
+                    }
+                }
             }
 
             Divider()

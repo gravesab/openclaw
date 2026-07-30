@@ -190,7 +190,7 @@ Legacy Export / Push split and Downloads coupling are retired.
 Built-in `TaskCategory` values:
 
 - Pool
-- Hot Tub
+- Home (including the Spa asset)
 - Grounds
 - Equipment
 - House

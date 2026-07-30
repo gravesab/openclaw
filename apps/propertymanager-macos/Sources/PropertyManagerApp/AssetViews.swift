@@ -4,10 +4,6 @@ struct MacAssetsPanel: View {
     @ObservedObject var store: MaintenanceStore
     @State private var selectedAssetId: UUID?
 
-    var meteredAssets: [MacRanchAsset] {
-        store.assets.filter { $0.meter?.hasMeter == true || $0.meterNeedsActivation }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -23,7 +19,7 @@ struct MacAssetsPanel: View {
             .padding()
 
             List(selection: $selectedAssetId) {
-                ForEach(meteredAssets) { asset in
+                ForEach(store.assets) { asset in
                     VStack(alignment: .leading) {
                         Text(asset.name).font(.headline)
                         if asset.meterNeedsActivation {
@@ -31,15 +27,21 @@ struct MacAssetsPanel: View {
                                 .font(.caption)
                                 .foregroundStyle(.orange)
                         } else if let meter = asset.meter {
-                            Text("\(format(meter.currentValue)) \(meter.unit)")
-                                .foregroundStyle(.secondary)
+                            if meter.hasMeter {
+                                Text("\(format(meter.currentValue)) \(meter.unit)")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("No operating meter")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .tag(asset.id as UUID?)
                 }
             }
 
-            if let asset = meteredAssets.first(where: { $0.id == selectedAssetId }) {
+            if let asset = store.assets.first(where: { $0.id == selectedAssetId }) {
                 Divider()
                 MacAssetDetailPanel(asset: asset, store: store) {
                     selectedAssetId = nil
@@ -133,32 +135,39 @@ struct MacAssetDetailPanel: View {
                         .foregroundStyle(.secondary)
                 }
 
-                GroupBox("New reading") {
-                    Picker("Mode", selection: $entryMode) {
-                        ForEach(MacMeterEntryMode.allCases) { mode in
-                            Text(mode.title(for: asset.meter?.meterType)).tag(mode)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .disabled(pendingPreview != nil)
-                    TextField(entryMode.fieldLabel(for: asset.meter?.meterType), text: $valueText)
-                    TextField("Note", text: $note)
-                    if let preview = pendingPreview {
-                        if let prev = preview.previousValue, let proposed = preview.proposedValue {
-                            Text("Previous: \(prev) → Proposed: \(proposed)")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Picker("Reason", selection: $correctionReason) {
-                            ForEach(preview.options ?? ["correction", "replacement", "rollover"], id: \.self) { opt in
-                                Text(opt.capitalized).tag(opt)
+                if asset.meter?.hasMeter == true {
+                    GroupBox("New reading") {
+                        Picker("Mode", selection: $entryMode) {
+                            ForEach(MacMeterEntryMode.allCases) { mode in
+                                Text(mode.title(for: asset.meter?.meterType)).tag(mode)
                             }
                         }
+                        .pickerStyle(.segmented)
+                        .disabled(pendingPreview != nil)
+                        TextField(entryMode.fieldLabel(for: asset.meter?.meterType), text: $valueText)
+                        TextField("Note", text: $note)
+                        if let preview = pendingPreview {
+                            if let prev = preview.previousValue, let proposed = preview.proposedValue {
+                                Text("Previous: \(prev) → Proposed: \(proposed)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Picker("Reason", selection: $correctionReason) {
+                                ForEach(preview.options ?? ["correction", "replacement", "rollover"], id: \.self) { opt in
+                                    Text(opt.capitalized).tag(opt)
+                                }
+                            }
+                        }
+                        Button(pendingPreview == nil ? "Save reading" : "Confirm reading") {
+                            Task { await saveReading() }
+                        }
+                        .disabled(valueText.isEmpty)
                     }
-                    Button(pendingPreview == nil ? "Save reading" : "Confirm reading") {
-                        Task { await saveReading() }
+                } else {
+                    GroupBox("Operating meter") {
+                        Text("This asset does not use an hours, mileage, or cycles meter.")
+                            .foregroundStyle(.secondary)
                     }
-                    .disabled(valueText.isEmpty)
                 }
 
                 if let tasks = asset.tasks?.filter({ $0.remainingMeter != nil }), !tasks.isEmpty {

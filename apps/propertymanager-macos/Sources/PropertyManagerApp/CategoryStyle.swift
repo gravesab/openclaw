@@ -5,8 +5,8 @@ enum CategoryStyle {
         switch name {
         case "Pool":
             return "drop.fill"
-        case "Hot Tub":
-            return "figure.pool.swim"
+        case "Home":
+            return "house.fill"
         case "Grounds":
             return "leaf.fill"
         case "Equipment":
@@ -47,8 +47,8 @@ enum CategoryStyle {
         switch name {
         case "Pool":
             return "blue"
-        case "Hot Tub":
-            return "purple"
+        case "Home":
+            return "teal"
         case "Grounds":
             return "green"
         case "Equipment":
@@ -65,6 +65,6 @@ enum CategoryStyle {
     }
 
     static let builtInNames = [
-        "Pool", "Hot Tub", "Grounds", "Equipment", "House", "Safety", "Property"
+        "Pool", "Home", "Grounds", "Equipment", "House", "Safety", "Property"
     ]
 }

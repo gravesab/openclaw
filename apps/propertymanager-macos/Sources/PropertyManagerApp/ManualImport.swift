@@ -1540,7 +1540,7 @@ enum ManufacturerManualImporter {
             {
               "area": "string",
               "item": "string",
-              "category": "Pool|Hot Tub|Grounds|Equipment|House|Safety|Property",
+              "category": "Pool|Home|Grounds|Equipment|House|Safety|Property",
               "frequency": "Daily|Weekly|Every 2 Weeks|Monthly|Quarterly|Yearly",
               "warningDays": 30,
               "criticalDays": 45,
@@ -1596,7 +1596,7 @@ enum ManufacturerManualImporter {
     private static func category(from raw: String?, area: String) -> String {
         let text = (raw ?? area).lowercased()
         if text.contains("pool") { return "Pool" }
-        if text.contains("hot") || text.contains("tub") || text.contains("spa") { return "Hot Tub" }
+        if text.contains("hot") || text.contains("tub") || text.contains("spa") { return "Home" }
         if text.contains("fence") || text.contains("gate") || text.contains("property") { return "Property" }
         if text.contains("ground") || text.contains("yard") || text.contains("lawn") {
             return "Grounds"

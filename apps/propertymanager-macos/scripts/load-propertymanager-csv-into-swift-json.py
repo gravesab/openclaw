@@ -30,7 +30,7 @@ def category_from_area(area):
         return "Pool"
 
     if "hot" in lower or "tub" in lower or "spa" in lower:
-        return "Hot Tub"
+        return "Home"
 
     if "tractor" in lower or "mower" in lower or "pump" in lower or "equipment" in lower:
         return "Equipment"

@@ -57,7 +57,7 @@ INSERT INTO propertymanager.maintenance_categories
 (id, name, icon, color_name, is_built_in, sort_order)
 VALUES
 ('00000000-0000-0000-0000-000000000001', 'Pool', 'drop.fill', 'blue', true, 10),
-('00000000-0000-0000-0000-000000000002', 'Hot Tub', 'bubbles.and.sparkles.fill', 'cyan', true, 20),
+('00000000-0000-0000-0000-000000000002', 'Home', 'house.fill', 'blue', true, 20),
 ('00000000-0000-0000-0000-000000000003', 'Grounds', 'leaf.fill', 'green', true, 30),
 ('00000000-0000-0000-0000-000000000004', 'Equipment', 'wrench.and.screwdriver.fill', 'orange', true, 40),
 ('00000000-0000-0000-0000-000000000005', 'House', 'house.fill', 'purple', true, 50),

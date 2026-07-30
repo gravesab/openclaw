@@ -16,6 +16,10 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "PropertyManagerApp"
+        ),
+        .testTarget(
+            name: "PropertyManagerAppTests",
+            dependencies: ["PropertyManagerApp"]
         )
     ]
 )

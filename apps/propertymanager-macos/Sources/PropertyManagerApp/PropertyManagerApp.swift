@@ -361,7 +361,7 @@ final class MaintenanceStore: ObservableObject {
         get {
             let value = UserDefaults.standard.string(forKey: apiBaseURLKey)?.trimmingCharacters(in: .whitespacesAndNewlines)
             if let value, !value.isEmpty { return value }
-            return "http://100.85.36.72:5062"
+            return "http://192.168.50.117:15062"
         }
         set {
             UserDefaults.standard.set(newValue, forKey: apiBaseURLKey)
@@ -369,13 +369,21 @@ final class MaintenanceStore: ObservableObject {
     }
 
     var apiKey: String {
-        get { UserDefaults.standard.string(forKey: apiKeyKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: apiKeyKey) }
+        get { SecureCredentialStore.read("api-key") }
+        set {
+            objectWillChange.send()
+            SecureCredentialStore.write(newValue, account: "api-key")
+            UserDefaults.standard.removeObject(forKey: apiKeyKey)
+        }
     }
 
     var operatorPIN: String {
-        get { UserDefaults.standard.string(forKey: operatorPINKey) ?? "" }
-        set { UserDefaults.standard.set(newValue, forKey: operatorPINKey) }
+        get { SecureCredentialStore.read("operator-pin") }
+        set {
+            objectWillChange.send()
+            SecureCredentialStore.write(newValue, account: "operator-pin")
+            UserDefaults.standard.removeObject(forKey: operatorPINKey)
+        }
     }
 
     // MARK: Calendar sync settings (UserDefaults)
@@ -454,6 +462,8 @@ final class MaintenanceStore: ObservableObject {
     }
 
     init() {
+        SecureCredentialStore.migrateFromUserDefaults(key: apiKeyKey, account: "api-key")
+        SecureCredentialStore.migrateFromUserDefaults(key: operatorPINKey, account: "operator-pin")
         loadCategories()
         loadSyncState()
         load()

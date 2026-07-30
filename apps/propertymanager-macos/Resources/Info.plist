@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleDisplayName</key>
-	<string>PropertyManagerApp</string>
+	<string>Property Manager DEV</string>
 	<key>CFBundleExecutable</key>
 	<string>PropertyManagerApp</string>
 	<key>CFBundleIconFile</key>
 	<string>PropertyManagerIcon</string>
 	<key>CFBundleIdentifier</key>
-	<string>local.andrewgraves.PropertyManagerApp</string>
+	<string>ai.openclaw.propertymanager.macos.dev</string>
 	<key>CFBundleName</key>
-	<string>PropertyManagerApp</string>
+	<string>Property Manager DEV</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

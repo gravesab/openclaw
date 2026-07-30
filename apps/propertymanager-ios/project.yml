@@ -17,14 +17,14 @@ settings:
     STRING_CATALOG_GENERATE_SYMBOLS: YES
 
 schemes:
-  PropertyManager:
+  PropertyManagerDEV:
     shared: true
     build:
       targets:
-        PropertyManager: all
+        PropertyManagerDEV: all
 
 targets:
-  PropertyManager:
+  PropertyManagerDEV:
     type: application
     platform: iOS
     sources:
@@ -32,7 +32,7 @@ targets:
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: PropertyManager
+        CFBundleDisplayName: PropertyManager DEV
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -42,9 +42,9 @@ targets:
         NSMicrophoneUsageDescription: PropertyManager uses the microphone for voice meter entry.
         NSSpeechRecognitionUsageDescription: PropertyManager converts speech to meter readings.
         CFBundleURLTypes:
-          - CFBundleURLName: ai.openclaw.propertymanager
+          - CFBundleURLName: ai.openclaw.propertymanager.dev
             CFBundleURLSchemes:
-              - propertymanager
+              - propertymanager-dev
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
@@ -58,9 +58,12 @@ targets:
               NSIncludesSubdomains: true
             127.0.0.1:
               NSExceptionAllowsInsecureHTTPLoads: true
+            192.168.50.117:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.propertymanager
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.propertymanager.dev
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.2.1"

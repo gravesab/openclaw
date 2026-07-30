@@ -7,26 +7,27 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		069D8A8537AE24D8635C1086 /* VoiceMeterEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEFFEBC49BF0424AC0E1CA6 /* VoiceMeterEntry.swift */; };
-		11959289E53A223EAAF68421 /* TaskPartDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 821805D7A9565876E1231DCC /* TaskPartDraft.swift */; };
-		3D71E2F9FF961935890B632A /* AssetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E238721C0B4E825C08A772C /* AssetModels.swift */; };
-		3FA3002D301196C36F328D4D /* TaskTitleHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A275FE8B3EF82508A0DB18A /* TaskTitleHelpers.swift */; };
-		413E4BE7C4C3AAF12CE4E76E /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE904FCD0E6E296BE0280DA /* SettingsView.swift */; };
-		43945D61358A74E167A747CD /* PropertyAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC7B9657058C54324030FA1 /* PropertyAPIClient.swift */; };
-		5C61F9531EF3D0790ED29411 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023093999D743305833F30C2 /* TaskDetailView.swift */; };
-		659B9F66766604273CB7B775 /* TaskListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03C0D159BDC9BEC3188EBE2 /* TaskListView.swift */; };
-		6775B824320E14795CCC3785 /* PropertyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F671E23757B190E198B6028B /* PropertyStore.swift */; };
-		71A2C4016D4054B529EE13BA /* AssetAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDB20EC1AC203C8DCA86D12 /* AssetAPIClient.swift */; };
-		86A90FFE584363F0D2CEF909 /* MeterEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D406E130D1642CB8C6629477 /* MeterEntrySheet.swift */; };
-		ABDF22C86150A30CA3FCF6D8 /* CategoryDeleteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8200B623E46B0F06130C30 /* CategoryDeleteSheet.swift */; };
-		AD5CED1FCD4213DA5C40D173 /* AssetListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 261B773B69CF4B49F065620A /* AssetListView.swift */; };
-		B8276936E5E7EC525E800D2D /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DFF5D47D7CB41D1C8933A724 /* Assets.xcassets */; };
-		C0DD5149C0EC7A36942F8CB6 /* PropertyManagerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50ED5183762E240500D171AD /* PropertyManagerApp.swift */; };
-		C37188AE2D778155C4E41F76 /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44BB0D475C157F307DFCF510 /* RootView.swift */; };
-		CA3BC3CA5CE0AE0D7A64D16C /* AssetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F75167974A185DF1C8499A /* AssetDetailView.swift */; };
-		D7A53445E3468BEE30E9F27A /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A16A821FA18C9F56E73198 /* Models.swift */; };
-		ECB98E37EABD7CB2E8AA65FD /* TaskEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7024D52AC8A29FCDDA888235 /* TaskEditView.swift */; };
-		FF7186CA4D7633487FC03161 /* RunHoursTriggerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B5F578B875E2AD52FE1EB3 /* RunHoursTriggerSheet.swift */; };
+		1E4FF287BB9781469CF4C3EC /* TaskListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03C0D159BDC9BEC3188EBE2 /* TaskListView.swift */; };
+		258D9D6ACDB66A9349D08CCF /* AssetAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDB20EC1AC203C8DCA86D12 /* AssetAPIClient.swift */; };
+		2C57F712F014B67C7DBAC038 /* PropertyAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = FDC7B9657058C54324030FA1 /* PropertyAPIClient.swift */; };
+		3190A2C83F493DDDA3CCAEB4 /* TaskPartDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 821805D7A9565876E1231DCC /* TaskPartDraft.swift */; };
+		32910FEB1F10E3F940287077 /* SecureCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = C85C5ABB87EC99E59A451C76 /* SecureCredentialStore.swift */; };
+		344BC4A89A282CC1660599DF /* PropertyManagerApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 50ED5183762E240500D171AD /* PropertyManagerApp.swift */; };
+		41A7C60AB7A7B3F5974DA4EC /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 44BB0D475C157F307DFCF510 /* RootView.swift */; };
+		4D1D662051F50ECC46D2DE14 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = DFF5D47D7CB41D1C8933A724 /* Assets.xcassets */; };
+		5E8268A43961F0FE97A3CA12 /* AssetListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 261B773B69CF4B49F065620A /* AssetListView.swift */; };
+		6341B04643CA4CFC30A02BAD /* PropertyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F671E23757B190E198B6028B /* PropertyStore.swift */; };
+		6C2F4402195A1276419EEA09 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7EE904FCD0E6E296BE0280DA /* SettingsView.swift */; };
+		6DE84A7AAC5EB28350EDA52F /* VoiceMeterEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEFFEBC49BF0424AC0E1CA6 /* VoiceMeterEntry.swift */; };
+		6FE230D0767F6FBF7CB5F5F9 /* MeterEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D406E130D1642CB8C6629477 /* MeterEntrySheet.swift */; };
+		70CF3603F94993BE61D04922 /* TaskEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7024D52AC8A29FCDDA888235 /* TaskEditView.swift */; };
+		74631C146D99F7CED87AA145 /* AssetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E238721C0B4E825C08A772C /* AssetModels.swift */; };
+		858D49C08289AC40408B2A9D /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023093999D743305833F30C2 /* TaskDetailView.swift */; };
+		906AFB541A101A7198693AFE /* AssetDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47F75167974A185DF1C8499A /* AssetDetailView.swift */; };
+		A2CB7DC6768C8D8EA59E28BD /* TaskTitleHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A275FE8B3EF82508A0DB18A /* TaskTitleHelpers.swift */; };
+		BD516574AD08CAD6672CF1D6 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95A16A821FA18C9F56E73198 /* Models.swift */; };
+		C478CFB8058C783041161D4B /* RunHoursTriggerSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8B5F578B875E2AD52FE1EB3 /* RunHoursTriggerSheet.swift */; };
+		F13F961E2FADF982B8A36408 /* CategoryDeleteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8200B623E46B0F06130C30 /* CategoryDeleteSheet.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -37,6 +38,7 @@
 		44BB0D475C157F307DFCF510 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
 		47F75167974A185DF1C8499A /* AssetDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetDetailView.swift; sourceTree = "<group>"; };
 		50ED5183762E240500D171AD /* PropertyManagerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyManagerApp.swift; sourceTree = "<group>"; };
+		54BF8B4262A3C7A286D60523 /* PropertyManagerDEV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PropertyManagerDEV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7024D52AC8A29FCDDA888235 /* TaskEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditView.swift; sourceTree = "<group>"; };
 		7EE904FCD0E6E296BE0280DA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		821805D7A9565876E1231DCC /* TaskPartDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPartDraft.swift; sourceTree = "<group>"; };
@@ -44,12 +46,12 @@
 		95A16A821FA18C9F56E73198 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		AB8200B623E46B0F06130C30 /* CategoryDeleteSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryDeleteSheet.swift; sourceTree = "<group>"; };
 		ADEFFEBC49BF0424AC0E1CA6 /* VoiceMeterEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceMeterEntry.swift; sourceTree = "<group>"; };
+		C85C5ABB87EC99E59A451C76 /* SecureCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecureCredentialStore.swift; sourceTree = "<group>"; };
 		D406E130D1642CB8C6629477 /* MeterEntrySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeterEntrySheet.swift; sourceTree = "<group>"; };
 		D8B5F578B875E2AD52FE1EB3 /* RunHoursTriggerSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunHoursTriggerSheet.swift; sourceTree = "<group>"; };
 		DFF5D47D7CB41D1C8933A724 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F03C0D159BDC9BEC3188EBE2 /* TaskListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListView.swift; sourceTree = "<group>"; };
 		F671E23757B190E198B6028B /* PropertyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyStore.swift; sourceTree = "<group>"; };
-		F8CBD72BB102DF9D87D90599 /* PropertyManager.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PropertyManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FDC7B9657058C54324030FA1 /* PropertyAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyAPIClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -70,6 +72,7 @@
 				F671E23757B190E198B6028B /* PropertyStore.swift */,
 				44BB0D475C157F307DFCF510 /* RootView.swift */,
 				D8B5F578B875E2AD52FE1EB3 /* RunHoursTriggerSheet.swift */,
+				C85C5ABB87EC99E59A451C76 /* SecureCredentialStore.swift */,
 				7EE904FCD0E6E296BE0280DA /* SettingsView.swift */,
 				023093999D743305833F30C2 /* TaskDetailView.swift */,
 				7024D52AC8A29FCDDA888235 /* TaskEditView.swift */,
@@ -84,7 +87,7 @@
 		7F3264866DEBE656C488A79F /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				F8CBD72BB102DF9D87D90599 /* PropertyManager.app */,
+				54BF8B4262A3C7A286D60523 /* PropertyManagerDEV.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -100,22 +103,22 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		904DC22D06F0ADD34201C371 /* PropertyManager */ = {
+		C8A3B9A8881E35277DBEE485 /* PropertyManagerDEV */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 2C2573326ECD261BDB7F041B /* Build configuration list for PBXNativeTarget "PropertyManager" */;
+			buildConfigurationList = A189D361E63C271F7CDF2C8F /* Build configuration list for PBXNativeTarget "PropertyManagerDEV" */;
 			buildPhases = (
-				5248B6A84FCB3D55F464D271 /* Sources */,
-				E4C663875B658C48D9927160 /* Resources */,
+				B57B13BF46C738D0E791B651 /* Sources */,
+				234234BE14561CDB0EFAE75D /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = PropertyManager;
+			name = PropertyManagerDEV;
 			packageProductDependencies = (
 			);
-			productName = PropertyManager;
-			productReference = F8CBD72BB102DF9D87D90599 /* PropertyManager.app */;
+			productName = PropertyManagerDEV;
+			productReference = 54BF8B4262A3C7A286D60523 /* PropertyManagerDEV.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -127,7 +130,7 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					904DC22D06F0ADD34201C371 = {
+					C8A3B9A8881E35277DBEE485 = {
 						DevelopmentTeam = ZYJVHJWT3P;
 						ProvisioningStyle = Automatic;
 					};
@@ -147,73 +150,53 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				904DC22D06F0ADD34201C371 /* PropertyManager */,
+				C8A3B9A8881E35277DBEE485 /* PropertyManagerDEV */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		E4C663875B658C48D9927160 /* Resources */ = {
+		234234BE14561CDB0EFAE75D /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B8276936E5E7EC525E800D2D /* Assets.xcassets in Resources */,
+				4D1D662051F50ECC46D2DE14 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
-		5248B6A84FCB3D55F464D271 /* Sources */ = {
+		B57B13BF46C738D0E791B651 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				71A2C4016D4054B529EE13BA /* AssetAPIClient.swift in Sources */,
-				CA3BC3CA5CE0AE0D7A64D16C /* AssetDetailView.swift in Sources */,
-				AD5CED1FCD4213DA5C40D173 /* AssetListView.swift in Sources */,
-				3D71E2F9FF961935890B632A /* AssetModels.swift in Sources */,
-				ABDF22C86150A30CA3FCF6D8 /* CategoryDeleteSheet.swift in Sources */,
-				86A90FFE584363F0D2CEF909 /* MeterEntrySheet.swift in Sources */,
-				D7A53445E3468BEE30E9F27A /* Models.swift in Sources */,
-				43945D61358A74E167A747CD /* PropertyAPIClient.swift in Sources */,
-				C0DD5149C0EC7A36942F8CB6 /* PropertyManagerApp.swift in Sources */,
-				6775B824320E14795CCC3785 /* PropertyStore.swift in Sources */,
-				C37188AE2D778155C4E41F76 /* RootView.swift in Sources */,
-				FF7186CA4D7633487FC03161 /* RunHoursTriggerSheet.swift in Sources */,
-				413E4BE7C4C3AAF12CE4E76E /* SettingsView.swift in Sources */,
-				5C61F9531EF3D0790ED29411 /* TaskDetailView.swift in Sources */,
-				ECB98E37EABD7CB2E8AA65FD /* TaskEditView.swift in Sources */,
-				659B9F66766604273CB7B775 /* TaskListView.swift in Sources */,
-				11959289E53A223EAAF68421 /* TaskPartDraft.swift in Sources */,
-				3FA3002D301196C36F328D4D /* TaskTitleHelpers.swift in Sources */,
-				069D8A8537AE24D8635C1086 /* VoiceMeterEntry.swift in Sources */,
+				258D9D6ACDB66A9349D08CCF /* AssetAPIClient.swift in Sources */,
+				906AFB541A101A7198693AFE /* AssetDetailView.swift in Sources */,
+				5E8268A43961F0FE97A3CA12 /* AssetListView.swift in Sources */,
+				74631C146D99F7CED87AA145 /* AssetModels.swift in Sources */,
+				F13F961E2FADF982B8A36408 /* CategoryDeleteSheet.swift in Sources */,
+				6FE230D0767F6FBF7CB5F5F9 /* MeterEntrySheet.swift in Sources */,
+				BD516574AD08CAD6672CF1D6 /* Models.swift in Sources */,
+				2C57F712F014B67C7DBAC038 /* PropertyAPIClient.swift in Sources */,
+				344BC4A89A282CC1660599DF /* PropertyManagerApp.swift in Sources */,
+				6341B04643CA4CFC30A02BAD /* PropertyStore.swift in Sources */,
+				41A7C60AB7A7B3F5974DA4EC /* RootView.swift in Sources */,
+				C478CFB8058C783041161D4B /* RunHoursTriggerSheet.swift in Sources */,
+				32910FEB1F10E3F940287077 /* SecureCredentialStore.swift in Sources */,
+				6C2F4402195A1276419EEA09 /* SettingsView.swift in Sources */,
+				858D49C08289AC40408B2A9D /* TaskDetailView.swift in Sources */,
+				70CF3603F94993BE61D04922 /* TaskEditView.swift in Sources */,
+				1E4FF287BB9781469CF4C3EC /* TaskListView.swift in Sources */,
+				3190A2C83F493DDDA3CCAEB4 /* TaskPartDraft.swift in Sources */,
+				A2CB7DC6768C8D8EA59E28BD /* TaskTitleHelpers.swift in Sources */,
+				6DE84A7AAC5EB28350EDA52F /* VoiceMeterEntry.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		1B5ACD6E5C3230F4F77B35AD /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_IDENTITY = "iPhone Developer";
-				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 3;
-				DEVELOPMENT_TEAM = ZYJVHJWT3P;
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Info.plist;
-				LD_RUNPATH_SEARCH_PATHS = (
-					"$(inherited)",
-					"@executable_path/Frameworks",
-				);
-				MARKETING_VERSION = 0.2.1;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.propertymanager;
-				SDKROOT = iphoneos;
-				TARGETED_DEVICE_FAMILY = "1,2";
-			};
-			name = Release;
-		};
 		3C7D43F07A323140A041A74C /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -283,7 +266,7 @@
 			};
 			name = Debug;
 		};
-		D037A2A14FE3D56592A31994 /* Debug */ = {
+		6E6D250EF64BD0002FDA92FF /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
@@ -298,11 +281,32 @@
 					"@executable_path/Frameworks",
 				);
 				MARKETING_VERSION = 0.2.1;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.propertymanager;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.propertymanager.dev;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
+		};
+		777D612D2918B965B8924902 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 3;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.2.1;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.propertymanager.dev;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
 		};
 		D8E74A0C19C1F1367F2C2B26 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -369,11 +373,11 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		2C2573326ECD261BDB7F041B /* Build configuration list for PBXNativeTarget "PropertyManager" */ = {
+		A189D361E63C271F7CDF2C8F /* Build configuration list for PBXNativeTarget "PropertyManagerDEV" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				D037A2A14FE3D56592A31994 /* Debug */,
-				1B5ACD6E5C3230F4F77B35AD /* Release */,
+				6E6D250EF64BD0002FDA92FF /* Debug */,
+				777D612D2918B965B8924902 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

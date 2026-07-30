@@ -3,9 +3,13 @@ import SwiftUI
 
 @MainActor
 final class PropertyStore: ObservableObject {
-    @AppStorage("propertyManager.apiBaseURL") var apiBaseURL: String = "http://100.85.36.72:5062"
-    @AppStorage("propertyManager.apiKey") var apiKey: String = ""
-    @AppStorage("propertyManager.operatorPIN") var operatorPIN: String = ""
+    @AppStorage("propertyManager.apiBaseURL") var apiBaseURL: String = "http://192.168.50.117:15062"
+    @Published var apiKey: String {
+        didSet { SecureCredentialStore.write(apiKey, account: "api-key") }
+    }
+    @Published var operatorPIN: String {
+        didSet { SecureCredentialStore.write(operatorPIN, account: "operator-pin") }
+    }
     @AppStorage("propertyManager.operatorIdentity") var operatorIdentity: String = "ios-operator"
 
     @Published var categories: [MaintenanceCategory] = []
@@ -22,6 +26,19 @@ final class PropertyStore: ObservableObject {
     @Published var isSaving = false
     @Published var errorMessage: String?
     @Published var statusMessage: String?
+
+    init() {
+        SecureCredentialStore.migrateFromUserDefaults(
+            key: "propertyManager.apiKey",
+            account: "api-key"
+        )
+        SecureCredentialStore.migrateFromUserDefaults(
+            key: "propertyManager.operatorPIN",
+            account: "operator-pin"
+        )
+        apiKey = SecureCredentialStore.read("api-key")
+        operatorPIN = SecureCredentialStore.read("operator-pin")
+    }
 
     var client: PropertyAPIClient {
         PropertyAPIClient(

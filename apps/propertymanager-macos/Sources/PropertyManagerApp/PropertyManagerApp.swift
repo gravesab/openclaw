@@ -837,6 +837,7 @@ final class MaintenanceStore: ObservableObject {
     func pushToCalendar() async {
         guard !isSyncingCalendar else { return }
         isSyncingCalendar = true
+        defer { isSyncingCalendar = false }
         calendarSyncMessage = "Pushing to OpenClaw..."
         do {
             let count = try await CalendarSyncService.shared.pushTodaysTasks(
@@ -854,7 +855,6 @@ final class MaintenanceStore: ObservableObject {
         } catch {
             calendarSyncMessage = "Calendar: \(error.localizedDescription)"
         }
-        isSyncingCalendar = false
     }
 
     /// Deletes all PM events tagged env=dev from "OpenClaw" in a +/-90-day window.
@@ -863,6 +863,7 @@ final class MaintenanceStore: ObservableObject {
     func deleteDevCalendarEvents() async {
         guard !isSyncingCalendar else { return }
         isSyncingCalendar = true
+        defer { isSyncingCalendar = false }
         calendarSyncMessage = "Deleting DEV events..."
         do {
             let count = try await CalendarSyncService.shared.deleteDevEvents()
@@ -870,7 +871,6 @@ final class MaintenanceStore: ObservableObject {
         } catch {
             calendarSyncMessage = "Calendar: \(error.localizedDescription)"
         }
-        isSyncingCalendar = false
     }
 
     /// Removes calendar events for a single task after Mac completion.

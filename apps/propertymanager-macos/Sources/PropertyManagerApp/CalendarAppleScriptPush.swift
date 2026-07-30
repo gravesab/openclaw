@@ -8,6 +8,7 @@ enum CalendarAppleScriptPush {
 
     static func listCalendarTitles() throws -> [String] {
         let script = """
+        with timeout of 15 seconds
         tell application "Calendar"
           set out to {}
           repeat with c in calendars
@@ -18,6 +19,7 @@ enum CalendarAppleScriptPush {
           set AppleScript's text item delimiters to ""
           return joined
         end tell
+        end timeout
         """
         let joined = try run(script)
         if joined.isEmpty { return [] }
@@ -52,6 +54,7 @@ enum CalendarAppleScriptPush {
 
         // Idempotent cleanup of today's PM markers for this env.
         let deleteScript = """
+        with timeout of 15 seconds
         tell application "Calendar"
           set cal to first calendar whose name is \(asString(calName))
           set d0 to current date
@@ -76,6 +79,7 @@ enum CalendarAppleScriptPush {
           end repeat
           return count of doomed
         end tell
+        end timeout
         """
         _ = try run(deleteScript)
 
@@ -106,12 +110,14 @@ enum CalendarAppleScriptPush {
             let script = """
             set startDate to date \(asString(asDate(cursor)))
             set endDate to date \(asString(asDate(eventEnd)))
+            with timeout of 15 seconds
             tell application "Calendar"
               set cal to first calendar whose name is \(asString(calName))
               tell cal
                 make new event at end with properties {summary:\(asString(title)), start date:startDate, end date:endDate, description:\(asString(notes))}
               end tell
             end tell
+            end timeout
             return "ok"
             """
             _ = try run(script)
@@ -143,6 +149,11 @@ enum CalendarAppleScriptPush {
         let result = script.executeAndReturnError(&error)
         if let error {
             let msg = error[NSAppleScript.errorMessage] as? String ?? error.description
+            if (error[NSAppleScript.errorNumber] as? Int) == -1712 {
+                throw CalendarSyncError.appleScriptFailed(
+                    "Calendar did not respond within 15 seconds. Open Calendar once, confirm the OpenClaw calendar exists, then try again."
+                )
+            }
             throw CalendarSyncError.appleScriptFailed(msg)
         }
         return result.stringValue ?? ""

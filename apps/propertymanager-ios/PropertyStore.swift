@@ -1,0 +1,273 @@
+import Foundation
+import SwiftUI
+
+@MainActor
+final class PropertyStore: ObservableObject {
+    @AppStorage("propertyManager.apiBaseURL") var apiBaseURL: String = "http://100.85.36.72:5062"
+    @AppStorage("propertyManager.apiKey") var apiKey: String = ""
+    @AppStorage("propertyManager.operatorPIN") var operatorPIN: String = ""
+    @AppStorage("propertyManager.operatorIdentity") var operatorIdentity: String = "ios-operator"
+
+    @Published var categories: [MaintenanceCategory] = []
+    @Published var tasks: [MaintenanceTask] = []
+    @Published var assets: [RanchAsset] = []
+    @Published var deepLinkAssetId: UUID?
+    @Published var filter: TaskFilter = .all
+    @Published var selectedCategory: String = "All"
+    @Published var searchText: String = ""
+    @Published var isLoading = false
+    @Published var isLoadingAssets = false
+    @Published var isCompleting = false
+    @Published var isSaving = false
+    @Published var errorMessage: String?
+    @Published var statusMessage: String?
+
+    var client: PropertyAPIClient {
+        PropertyAPIClient(
+            baseURLString: apiBaseURL,
+            apiKey: apiKey.isEmpty ? nil : apiKey,
+            operatorPIN: operatorPIN.isEmpty ? nil : operatorPIN,
+            operatorIdentity: operatorIdentity.isEmpty ? nil : operatorIdentity
+        )
+    }
+
+    var categoryNames: [String] {
+        ["All"] + categories.map(\.name).sorted()
+    }
+
+    var filteredTasks: [MaintenanceTask] {
+        tasks
+            .filter { task in
+                if selectedCategory != "All", task.categoryName != selectedCategory {
+                    return false
+                }
+                switch filter {
+                case .all:
+                    break
+                case .due:
+                    switch task.dueStatus {
+                    case .dueSoon, .overdue, .critical:
+                        break
+                    case .ok:
+                        return false
+                    }
+                case .overdue:
+                    switch task.dueStatus {
+                    case .overdue, .critical:
+                        break
+                    default:
+                        return false
+                    }
+                }
+                if !searchText.isEmpty {
+                    let needle = searchText.lowercased()
+                    let haystack = [
+                        task.area,
+                        task.item,
+                        task.categoryName,
+                        task.priority,
+                        task.notes ?? "",
+                        task.taskDescription ?? "",
+                        task.partNumber ?? "",
+                        task.vendor ?? "",
+                        task.suppliesNeeded ?? "",
+                        task.primaryPartNumber ?? "",
+                    ].joined(separator: " ").lowercased()
+                    if !haystack.contains(needle) {
+                        return false
+                    }
+                }
+                return true
+            }
+            .sorted { lhs, rhs in
+                if lhs.dueStatus.sortRank != rhs.dueStatus.sortRank {
+                    return lhs.dueStatus.sortRank < rhs.dueStatus.sortRank
+                }
+                return lhs.nextDue < rhs.nextDue
+            }
+    }
+
+    var overdueCount: Int {
+        tasks.filter {
+            switch $0.dueStatus {
+            case .overdue, .critical: return true
+            default: return false
+            }
+        }.count
+    }
+
+    var dueSoonCount: Int {
+        tasks.filter {
+            if case .dueSoon = $0.dueStatus { return true }
+            return false
+        }.count
+    }
+
+    func activeTaskCount(inCategoryNamed name: String) -> Int {
+        tasks.filter { $0.categoryName.caseInsensitiveCompare(name) == .orderedSame && $0.isActive }.count
+    }
+
+    func destinationCategories(excluding name: String) -> [MaintenanceCategory] {
+        categories
+            .filter { $0.name.caseInsensitiveCompare(name) != .orderedSame }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func testConnection() async {
+        errorMessage = nil
+        statusMessage = "Testing connection…"
+        do {
+            let health = try await client.health()
+            // Refresh without wiping the connection probe message until the end.
+            await refresh(clearStatus: false)
+            if errorMessage != nil {
+                statusMessage = nil
+                return
+            }
+            await refreshAssets(clearStatus: false)
+            if errorMessage != nil {
+                statusMessage = nil
+                return
+            }
+            let label = health.status ?? "ok"
+            statusMessage = "Online — \(label) · \(tasks.count) tasks, \(assets.count) assets"
+        } catch {
+            statusMessage = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func refresh(clearStatus: Bool = true) async {
+        isLoading = true
+        errorMessage = nil
+        if clearStatus {
+            statusMessage = nil
+        }
+        defer { isLoading = false }
+
+        do {
+            async let fetchedCategories = client.fetchCategories()
+            async let fetchedTasks = client.fetchTasks()
+            categories = try await fetchedCategories
+            tasks = try await fetchedTasks
+            statusMessage = "Updated \(tasks.count) tasks"
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func refreshAssets(clearStatus: Bool = true) async {
+        isLoadingAssets = true
+        if clearStatus {
+            errorMessage = nil
+        }
+        defer { isLoadingAssets = false }
+        do {
+            assets = try await client.fetchAssets()
+            if statusMessage == nil
+                || statusMessage?.hasPrefix("Updated") == true
+                || statusMessage?.hasPrefix("Testing") == true
+            {
+                statusMessage = "Updated \(tasks.count) tasks, \(assets.count) assets"
+            }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func handleDeepLink(_ url: URL) {
+        guard url.scheme == "propertymanager" else { return }
+        if url.host == "asset" {
+            let token = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+            Task {
+                do {
+                    let asset = try await client.fetchAssetByQR(token: token)
+                    deepLinkAssetId = asset.id
+                } catch {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func complete(
+        task: MaintenanceTask,
+        note: String?,
+        meterValue: Double? = nil,
+        confirmCurrentMeter: Bool = false
+    ) async -> Bool {
+        isCompleting = true
+        errorMessage = nil
+        defer { isCompleting = false }
+
+        do {
+            let updated = try await client.completeTask(
+                id: task.id,
+                note: note,
+                meterValueAtCompletion: meterValue,
+                confirmCurrentMeter: confirmCurrentMeter
+            )
+            if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
+                tasks[index] = updated
+            }
+            statusMessage = "Marked \(updated.area) / \(updated.item) done"
+            await refreshAssets()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func saveEdits(taskID: UUID, fields: [String: Any], parts: [[String: Any]]? = nil) async -> Bool {
+        isSaving = true
+        errorMessage = nil
+        defer { isSaving = false }
+
+        do {
+            var updated = try await client.updateTask(id: taskID, fields: fields)
+            if let parts {
+                updated = try await client.replaceParts(taskID: taskID, parts: parts)
+            }
+            if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
+                tasks[index] = updated
+            }
+            statusMessage = "Saved \(updated.area) / \(updated.item)"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func delete(task: MaintenanceTask) async -> Bool {
+        do {
+            _ = try await client.deleteTask(id: task.id)
+            tasks.removeAll { $0.id == task.id }
+            statusMessage = "Deleted \(task.area) / \(task.item)"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func deleteCategory(_ category: MaintenanceCategory, reassignTo: String? = nil) async -> Bool {
+        do {
+            _ = try await client.deleteCategory(id: category.id, reassignTo: reassignTo)
+            categories.removeAll { $0.id == category.id }
+            if let reassignTo {
+                for index in tasks.indices where tasks[index].categoryName.caseInsensitiveCompare(category.name) == .orderedSame {
+                    tasks[index].categoryName = reassignTo
+                }
+            } else {
+                tasks.removeAll { $0.categoryName.caseInsensitiveCompare(category.name) == .orderedSame }
+            }
+            statusMessage = "Deleted category \(category.name)"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+}

@@ -37,6 +37,7 @@ def install_stubs():
     flask.Flask = DummyFlask
     flask.Response = lambda *args, **kwargs: (args, kwargs)
     flask.request = DummyRequest()
+    flask.session = {}
     flask.redirect = lambda location: location
     flask.abort = lambda code: (_ for _ in ()).throw(PermissionError(code))
     flask.send_from_directory = lambda *_args, **_kwargs: None
@@ -539,7 +540,9 @@ class ScorecardDashboardTests(unittest.TestCase):
         with mock.patch.object(dashboard, "REPORT_DIR", telemetry_dir.parent):
             rendered = dashboard.ai_routing_telemetry_panel_html()
 
-        self.assertIn("Report age:", rendered)
+        self.assertIn("Report generation age:", rendered)
+        self.assertIn("Newest telemetry observation age:", rendered)
+        self.assertIn("No request observations in this reporting window", rendered)
         self.assertIn("Updated:", rendered)
         self.assertIn("healthy", rendered)
 

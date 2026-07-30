@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import logging
 import os
 import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from flask import Flask, jsonify, request
+from werkzeug.exceptions import HTTPException
 
 import db as pm_db
 import meter_schedule as ms
@@ -18,10 +20,17 @@ from mapping_proposals import register_mapping_routes
 
 app = Flask(__name__)
 
+# Intentional upload ceiling (aligned with Gunicorn request timeout for large bodies).
+# 32 MiB covers photo/manual attachments without unbounded memory growth.
+MAX_UPLOAD_BYTES = int(os.environ.get("PROPERTYMANAGER_MAX_CONTENT_LENGTH", str(32 * 1024 * 1024)))
+app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
+
 ATTACHMENTS_ROOT = os.environ.get(
     "PROPERTYMANAGER_ATTACHMENTS_ROOT",
     "/mnt/ai-storage/openclaw-documents/Property/attachments",
 )
+
+logger = logging.getLogger("propertymanager_api")
 
 TASK_COLUMNS = """
     id, area, item, category_name, priority, frequency,
@@ -235,19 +244,105 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     return enriched
 
 
+def _probe_postgres_and_schema() -> tuple[bool, bool]:
+    """Return (postgres_reachable, schema_available). Never raises."""
+    try:
+        row = pm_db.execute_one_json(
+            """
+            SELECT
+                to_regclass('propertymanager.assets')::text AS assets_table,
+                to_regclass('propertymanager.asset_meter')::text AS meter_table,
+                to_regclass('propertymanager.maintenance_tasks')::text AS tasks_table
+            """
+        )
+        if row is None:
+            return True, False
+        schema_ok = bool(row.get("assets_table") and row.get("meter_table") and row.get("tasks_table"))
+        return True, schema_ok
+    except Exception:
+        logger.exception("health check: postgres/schema probe failed")
+        return False, False
+
+
 @app.get("/health")
 def health():
-    return jsonify(
-        {
-            "status": "ok",
-            "service": "propertymanager-api",
-            "api_version": "v1",
-            "db_mode": "docker_exec" if pm_db.use_docker() else "tcp",
-            "schema_version": "006",
-            "attachments_root": ATTACHMENTS_ROOT,
-            **auth_status(),
-        }
+    postgres_reachable, schema_available = _probe_postgres_and_schema()
+    healthy = postgres_reachable and schema_available
+    body = {
+        "status": "ok" if healthy else "degraded",
+        "service": "propertymanager-api",
+        "api_version": "v1",
+        "api_process": "healthy",
+        "postgres_reachable": postgres_reachable,
+        "schema_available": schema_available,
+        "db_mode": "docker_exec" if pm_db.use_docker() else "tcp",
+        "schema_version": "006",
+        "attachments_root": ATTACHMENTS_ROOT,
+        "max_content_length": MAX_UPLOAD_BYTES,
+        **auth_status(),
+    }
+    return jsonify(body), (200 if healthy else 503)
+
+
+@app.get("/v1/test/slow-db")
+def test_slow_db():
+    """Test-only drain probe: sleep inside docker-exec when env gate is set.
+
+    Enabled only when ``PROPERTYMANAGER_TEST_SLOW_DB_MS`` is a positive integer.
+    Used by ``tests/test_restart_drain.py`` to prove in-flight DB work survives
+    ``systemctl --user restart propertymanager-api``.
+    """
+    raw = os.environ.get("PROPERTYMANAGER_TEST_SLOW_DB_MS", "").strip()
+    if not raw:
+        return error_response(
+            "NOT_FOUND",
+            "slow-db probe disabled (set PROPERTYMANAGER_TEST_SLOW_DB_MS)",
+            status=404,
+        )
+    try:
+        ms = int(raw)
+    except ValueError:
+        return error_response(
+            "VALIDATION_ERROR",
+            "PROPERTYMANAGER_TEST_SLOW_DB_MS must be an integer millisecond value",
+            status=400,
+        )
+    if ms <= 0:
+        return error_response(
+            "NOT_FOUND",
+            "slow-db probe disabled (PROPERTYMANAGER_TEST_SLOW_DB_MS <= 0)",
+            status=404,
+        )
+    ms = min(ms, 30_000)
+    pm_db.test_slow_sleep(ms / 1000.0)
+    return jsonify({"ok": True, "slept_ms": ms, "db_mode": "docker_exec" if pm_db.use_docker() else "tcp"})
+
+
+@app.errorhandler(413)
+def handle_payload_too_large(_exc):
+    return error_response(
+        "PAYLOAD_TOO_LARGE",
+        "Request body exceeds configured size limit.",
+        status=413,
+        extra={"max_content_length": MAX_UPLOAD_BYTES},
     )
+
+
+@app.errorhandler(Exception)
+def handle_unexpected(exc):
+    """Sanitize client errors; keep diagnostics in logs only."""
+    if isinstance(exc, HTTPException):
+        status = exc.code or 500
+        if status < 500:
+            return error_response(
+                "HTTP_ERROR",
+                exc.description or exc.name or "Request error",
+                status=status,
+            )
+        logger.exception("HTTP %s from werkzeug", status)
+        return error_response("INTERNAL_ERROR", "An internal error occurred.", status=status)
+    logger.exception("Unhandled API exception")
+    return error_response("INTERNAL_ERROR", "An internal error occurred.", status=500)
 
 
 @app.get("/categories")
@@ -263,6 +358,7 @@ def categories():
 
 
 @app.post("/categories")
+@auth_required()
 def create_category():
     """Create a category (used by Mac/iPhone when adding a category)."""
     payload = request.get_json(silent=True)
@@ -324,6 +420,7 @@ FALLBACK_CATEGORY_NAME = "House"
 
 
 @app.delete("/categories/<category_id>")
+@auth_required()
 def delete_category(category_id: str):
     """Delete a category. If active tasks remain, require explicit reassign_to."""
     category = pm_db.execute_one_json(
@@ -458,6 +555,7 @@ def task_detail(task_id: str):
 
 
 @app.post("/tasks")
+@auth_required()
 def upsert_task():
     """Create or replace a task (used by Mac Publish)."""
     payload = request.get_json(silent=True)
@@ -648,6 +746,7 @@ def upsert_task():
 
 
 @app.patch("/tasks/<task_id>")
+@auth_required()
 def patch_task(task_id: str):
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
@@ -685,6 +784,7 @@ def patch_task(task_id: str):
 
 
 @app.delete("/tasks/<task_id>")
+@auth_required()
 def delete_task(task_id: str):
     """Soft-delete a task by setting is_active=false (keeps history/parts)."""
     affected = pm_db.execute(
@@ -702,6 +802,7 @@ def delete_task(task_id: str):
 
 
 @app.put("/tasks/<task_id>/parts")
+@auth_required()
 def replace_task_parts(task_id: str):
     """Replace the full parts list for a task (used by iPhone edit form)."""
     if fetch_task_or_404(task_id) is None:
@@ -767,6 +868,7 @@ def replace_task_parts(task_id: str):
 
 
 @app.post("/tasks/<task_id>/parts")
+@auth_required()
 def create_task_part(task_id: str):
     if fetch_task_or_404(task_id) is None:
         return jsonify({"error": "Task not found"}), 404
@@ -916,5 +1018,22 @@ register_mapping_routes(app)
 
 
 if __name__ == "__main__":
+    # Normal operation: tools/property_manager/api/run_api.sh (Gunicorn).
+    # Direct Flask is an emergency rollback only — never debug/reloader.
+    import sys
+
+    print(
+        "Do not run propertymanager_api.py directly for normal service operation.\n"
+        "Use: tools/property_manager/api/run_api.sh  (Gunicorn WSGI)\n"
+        "Emergency Flask rollback only:\n"
+        "  PROPERTYMANAGER_ALLOW_FLASK_DEV=1 python3 propertymanager_api.py",
+        file=sys.stderr,
+    )
+    if os.environ.get("PROPERTYMANAGER_ALLOW_FLASK_DEV", "").strip().lower() not in {
+        "1",
+        "true",
+        "yes",
+    }:
+        sys.exit(2)
     port = int(os.environ.get("PROPERTYMANAGER_API_PORT", "5062"))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)

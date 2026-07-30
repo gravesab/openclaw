@@ -33,7 +33,41 @@ Track operating meters (runtime hours, mileage, cycles) for ranch equipment and 
 - **Dashboard-first QR entry.** Scanning a label opens a mobile web page; write actions require auth beyond the QR token (see [QR access policy](#qr-access-policy)).
 - **Five-minute learning.** Asset pages show current reading and remaining until next service.
 - **Manufacturer manual is PM source of truth.** Meter intervals are stored at manual import and drive meter-based schedules.
+- **Documents are retained independently of task extraction.** Every uploaded PDF remains queryable even when it has no asset match or accepted maintenance recommendation.
 - **Audit-first meter history.** Every reading is reconstructable; corrections append new rows.
+
+---
+
+## PDF-to-asset ingestion flow
+
+Dashboard PDF upload first writes the immutable source file to the approved reference-document store and catalogs its checksum and metadata. Maintenance extraction runs only after storage succeeds.
+
+```mermaid
+flowchart LR
+  Upload["Dashboard PDF upload"] --> Store["Retain original PDF and checksum"]
+  Store --> Classify["Classify and extract evidence"]
+  Classify --> Match{"One authoritative asset match?"}
+  Match -->|"Yes"| Propose["Create source-linked manufacturer recommendations"]
+  Match -->|"No or ambiguous"| Queue["Create asset-mapping review item"]
+  Propose --> Review["Operator review when uncertain"]
+  Queue --> Review
+  Store --> Query["Future PDF question answering"]
+  Review --> Tasks["Accepted PropertyManager tasks"]
+```
+
+Asset matching uses stable identifiers when supplied by the document or upload metadata. Exact manufacturer, model, asset name, and alias matches may support a proposal. Fuzzy text matching alone never auto-applies a task-to-asset link.
+
+Each extracted recommendation requires evidence fields sufficient to reconstruct the decision:
+
+| Evidence       | Requirement                                                       |
+| -------------- | ----------------------------------------------------------------- |
+| Document       | Catalog identifier, original filename, and SHA-256 checksum       |
+| Location       | PDF page number and relevant passage                              |
+| Interpretation | Extracted interval, unit, procedure, warning, and any uncertainty |
+| Provenance     | `origin=manufacturer` and extraction method/model version         |
+| Review         | Confidence, status, reviewer, and timestamps                      |
+
+Task creation is idempotent by asset, document checksum, page, and normalized recommendation. Reprocessing the same PDF must update or preserve its proposal record without duplicating active tasks. Document retention is not conditional on matching an asset or approving tasks.
 
 ---
 

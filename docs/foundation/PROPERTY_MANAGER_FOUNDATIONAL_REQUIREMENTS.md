@@ -120,6 +120,23 @@ All PropertyManager work follows a **two-environment, two-gate** model aligned w
 
 See the client topology diagram in [PropertyManager Asset Architecture](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#client-topology).
 
+## Reference-document ingestion and maintenance recommendations
+
+Every document accepted by the Dashboard PDF upload workflow must be retained in the approved reference-document store. The original file, checksum, catalog metadata, and storage location remain available for future document questions even when the document produces no PropertyManager tasks.
+
+After a PDF is stored and cataloged, the ingestion workflow must:
+
+1. Classify whether the document contains manufacturer maintenance guidance.
+2. Search PropertyManager for a matching active asset using authoritative identifiers first, then exact manufacturer/model/name/alias evidence.
+3. If one unambiguous asset matches, generate manufacturer-origin maintenance recommendations linked to that asset.
+4. If no asset or multiple plausible assets match, retain the PDF and create a reviewable mapping proposal. The system must not invent an asset or silently choose an uncertain match.
+5. Preserve source evidence for every recommendation: document identity and checksum, page number, relevant passage, extraction method, and confidence/review status.
+6. Normalize stored task titles as `Asset Name: Task Name`, avoid duplicates, and preserve manufacturer wording for intervals and safety instructions.
+7. Never record a recommendation as completed maintenance. Initial scheduling baselines must be distinguishable from actual completion records.
+8. Keep recommendations under operator review when extraction or mapping is uncertain. Rejected recommendations remain auditable and must not become active tasks.
+
+PDF retention and task extraction are separate outcomes: a document remains queryable regardless of whether any maintenance recommendation is accepted.
+
 ---
 
 ## Operating meters — requirements

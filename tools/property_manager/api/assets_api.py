@@ -532,13 +532,52 @@ def confirm_meter_reading(asset_id: str):
 
 
 _VALUE_PATTERN = re.compile(
-    r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|miles?|mi|cycles?)?",
+    r"(?P<value>\d[\d,]*(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|miles?|mi|cycles?)?",
     re.IGNORECASE,
 )
+
+_SPOKEN_UNIT_METER_TYPES = {
+    "hour": "runtime_hours",
+    "hours": "runtime_hours",
+    "hr": "runtime_hours",
+    "hrs": "runtime_hours",
+    "mile": "mileage",
+    "miles": "mileage",
+    "mi": "mileage",
+    "cycle": "cycles",
+    "cycles": "cycles",
+}
 
 
 def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+
+def _extract_spoken_meter_value(text: str, asset_names: list[str]) -> tuple[str, str | None]:
+    """Prefer an explicitly unit-tagged value and ignore numbers in asset names."""
+
+    matches = list(_VALUE_PATTERN.finditer(text))
+    explicit = [match for match in matches if match.group("unit")]
+    if explicit:
+        selected = explicit[-1]
+    else:
+        value_text = text
+        for name in sorted(
+            {name.strip() for name in asset_names if name and name.strip()},
+            key=len,
+            reverse=True,
+        ):
+            value_text = re.sub(re.escape(name), " ", value_text, flags=re.IGNORECASE)
+        remaining = list(_VALUE_PATTERN.finditer(value_text))
+        if not remaining:
+            raise ValueError("Could not find a meter value in text")
+        selected = remaining[-1]
+
+    raw_value = selected.group("value").replace(",", "")
+    value = format_decimal(parse_decimal(raw_value))
+    spoken_unit = (selected.group("unit") or "").lower() or None
+    spoken_meter_type = _SPOKEN_UNIT_METER_TYPES.get(spoken_unit or "")
+    return value, spoken_meter_type
 
 
 def parse_meter_reading():
@@ -546,12 +585,6 @@ def parse_meter_reading():
     text = str(payload.get("text") or "").strip()
     if not text:
         return validation_error("text is required", field="text")
-
-    match = _VALUE_PATTERN.search(text)
-    if not match:
-        return validation_error("Could not find a meter value in text", field="text")
-
-    value = format_decimal(parse_decimal(match.group("value")))
 
     assets = pm_db.execute_json(
         f"""
@@ -564,6 +597,7 @@ def parse_meter_reading():
 
     text_lower = text.lower()
     best = None
+    best_names: list[str] = []
     best_score = 0.0
     for row in assets:
         names = [str(row.get("name") or "")]
@@ -581,6 +615,7 @@ def parse_meter_reading():
             if score > best_score:
                 best_score = score
                 best = row
+                best_names = names
 
     if best is None or best_score < 0.35:
         return error_response(
@@ -591,6 +626,22 @@ def parse_meter_reading():
         )
 
     meter_type = best.get("meter_type") or "none"
+    try:
+        value, spoken_meter_type = _extract_spoken_meter_value(text, best_names)
+    except ValueError as exc:
+        return validation_error(str(exc), field="text")
+
+    if (
+        spoken_meter_type
+        and meter_type != "none"
+        and spoken_meter_type != meter_type
+    ):
+        return error_response(
+            "PARSE_UNIT_MISMATCH",
+            f"Spoken unit does not match the asset meter type ({meter_type}).",
+            status=422,
+        )
+
     unit = best.get("unit") or ms.meter_unit_for_type(meter_type)
     return jsonify(
         {

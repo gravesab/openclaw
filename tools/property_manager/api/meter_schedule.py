@@ -172,9 +172,18 @@ def recalc_tasks_for_asset(asset_id: str, current_meter: Decimal | None) -> list
         if interval is None or interval <= 0:
             continue
         last_done = _as_decimal(task.get("last_done_meter_value"))
-        if last_done is None:
-            last_done = current_meter if current_meter is not None else Decimal("0")
-        next_due = decimal_to_db(last_done + interval)
+        existing_next_due = _as_decimal(task.get("next_due_meter_value"))
+
+        # An operator-entered absolute trigger is authoritative until the task
+        # is completed. New meter readings update remaining/overdue status but
+        # must not move that trigger forward.
+        if last_done is None and existing_next_due is not None:
+            continue
+
+        scheduling_base = last_done
+        if scheduling_base is None:
+            scheduling_base = current_meter if current_meter is not None else Decimal("0")
+        next_due = decimal_to_db(scheduling_base + interval)
         pm_db.execute(
             """
             UPDATE propertymanager.maintenance_tasks

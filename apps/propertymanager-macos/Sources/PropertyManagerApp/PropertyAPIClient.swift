@@ -499,7 +499,23 @@ private struct APITaskDTO: Decodable {
     var asMaintenanceTask: MaintenanceTask {
         let mappedKind = TaskKind(rawValue: kind ?? "") ?? .scheduled
         let mappedPriority = TaskPriority(rawValue: priority) ?? .medium
-        let mappedFrequency = TaskFrequency(rawValue: frequency) ?? .monthly
+        let mappedFrequency: TaskFrequency
+        switch frequency.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "every 7 days":
+            mappedFrequency = .weekly
+        case "every 30 days":
+            mappedFrequency = .monthly
+        case "every 90 days":
+            mappedFrequency = .quarterly
+        case "every 105 days":
+            mappedFrequency = .everyThreeToFourMonths
+        case "every 365 days":
+            mappedFrequency = .yearly
+        case "every 730 days":
+            mappedFrequency = .biennial
+        default:
+            mappedFrequency = TaskFrequency(rawValue: frequency) ?? .monthly
+        }
         let mappedOrigin = TaskOrigin(rawValue: origin ?? "")
             ?? ((sourceManualName ?? "").isEmpty ? .owner : .manufacturer)
         let mappedParts = (parts ?? []).map(\.asPartRequirement)

@@ -111,7 +111,9 @@ enum TaskFrequency: String, CaseIterable, Codable, Identifiable {
     case biweekly = "Every 2 Weeks"
     case monthly = "Monthly"
     case quarterly = "Quarterly"
+    case everyThreeToFourMonths = "Every 3-4 Months"
     case yearly = "Yearly"
+    case biennial = "Every 2 Years"
 
     var id: String { rawValue }
 
@@ -129,8 +131,12 @@ enum TaskFrequency: String, CaseIterable, Codable, Identifiable {
             return calendar.date(byAdding: .month, value: 1, to: lastDone) ?? lastDone
         case .quarterly:
             return calendar.date(byAdding: .month, value: 3, to: lastDone) ?? lastDone
+        case .everyThreeToFourMonths:
+            return calendar.date(byAdding: .day, value: 105, to: lastDone) ?? lastDone
         case .yearly:
             return calendar.date(byAdding: .year, value: 1, to: lastDone) ?? lastDone
+        case .biennial:
+            return calendar.date(byAdding: .year, value: 2, to: lastDone) ?? lastDone
         }
     }
 }

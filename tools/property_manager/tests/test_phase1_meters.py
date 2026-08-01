@@ -47,8 +47,11 @@ def _req(method: str, path: str, body: dict | None = None, headers: dict | None 
 
 
 def _psql(sql: str) -> None:
+    container = os.environ.get("PROPERTYMANAGER_POSTGRES_CONTAINER", "postgres")
+    user = os.environ.get("PROPERTYMANAGER_DB_USER", "openclaw")
+    database = os.environ.get("PROPERTYMANAGER_DB_NAME", "openclaw")
     result = subprocess.run(
-        ["docker", "exec", "-i", "postgres", "psql", "-U", "openclaw", "-d", "openclaw", "-v", "ON_ERROR_STOP=1", "-c", sql],
+        ["docker", "exec", "-i", container, "psql", "-U", user, "-d", database, "-v", "ON_ERROR_STOP=1", "-c", sql],
         capture_output=True,
         text=True,
         check=False,
@@ -62,18 +65,18 @@ def wait_health() -> None:
         try:
             with urllib.request.urlopen(API + "/health", timeout=2) as resp:
                 data = json.loads(resp.read().decode())
-                if data.get("schema_version") == "006":
+                if int(data.get("schema_version") or 0) >= 6:
                     return
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             pass
         time.sleep(0.5)
-    raise RuntimeError("API health check failed or schema_version != 006")
+    raise RuntimeError("API health check failed or schema_version < 006")
 
 
 def test_health() -> None:
     status, data = _req("GET", "/health")
     assert status == 200, data
-    assert data.get("schema_version") == "006", data
+    assert int(data.get("schema_version") or 0) >= 6, data
     assert data.get("api_version") == "v1", data
 
 

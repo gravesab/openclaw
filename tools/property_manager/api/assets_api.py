@@ -411,10 +411,25 @@ def create_meter_reading(asset_id: str):
         return error_response("NOT_FOUND", "Asset not found", status=404)
 
     payload = request.get_json(silent=True) or {}
+    has_value = payload.get("value") is not None
+    has_delta = payload.get("delta") is not None
+    if has_value == has_delta:
+        return validation_error("Provide exactly one of value or delta", field="value")
+
     try:
-        value = parse_decimal(payload.get("value"), field="value")
+        if has_delta:
+            delta = parse_decimal(payload.get("delta"), field="delta")
+            if delta <= 0:
+                return validation_error("delta must be greater than zero", field="delta")
+            meter = ms.fetch_meter_row(asset_id)
+            if meter is None:
+                return validation_error("asset_meter not found", field="delta")
+            current = ms._as_decimal(meter.get("current_value")) or parse_decimal("0", field="delta")
+            value = current + delta
+        else:
+            value = parse_decimal(payload.get("value"), field="value")
     except ValueError as exc:
-        return validation_error(str(exc), field="value")
+        return validation_error(str(exc), field="delta" if has_delta else "value")
 
     idempotency_key = request.headers.get("Idempotency-Key") or payload.get("idempotency_key")
     idempotency_key = str(idempotency_key).strip() if idempotency_key else None

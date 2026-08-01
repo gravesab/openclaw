@@ -59,6 +59,24 @@ def test_meter_readings_paginated(asset_id: str) -> None:
     assert isinstance(page["items"], list), page
 
 
+def test_positive_delta_reading(asset_id: str) -> None:
+    status, result = _req(
+        "POST",
+        f"/v1/assets/{asset_id}/meter-readings",
+        {"delta": "5.5", "entry_method": "manual", "note": "delta contract test"},
+    )
+    assert status == 200, result
+    assert result.get("current_value") == "205.5", result
+
+    status, error = _req(
+        "POST",
+        f"/v1/assets/{asset_id}/meter-readings",
+        {"delta": "0", "entry_method": "manual"},
+    )
+    assert status == 400, error
+    assert error.get("message") == "delta must be greater than zero", error
+
+
 def test_parse_meter_text() -> None:
     status, result = _req("POST", "/v1/meter-readings/parse", {"text": "mower 42.5 hours"})
     assert status == 200, result
@@ -132,6 +150,8 @@ def main() -> int:
     # Seed a high reading before lower-reading test on activate-meter asset
     status, _ = _req("POST", f"/v1/assets/{asset_id}/meter-readings", {"value": "200", "entry_method": "api"})
     assert status == 200, _
+    test_positive_delta_reading(asset_id)
+    print("  OK positive delta reading and zero-delta rejection")
     test_lower_reading_preview_confirm(asset_id)
     print("  OK lower-reading preview/confirm")
     test_normal_reading_flow()

@@ -371,11 +371,18 @@ struct PropertyAPIClient {
         }
         guard (200..<300).contains(http.statusCode) else {
             if let data,
-               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-               let message = obj["error"] as? String,
-               !message.isEmpty
-            {
-                throw PropertyAPIError.serverMessage(message)
+               let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                if let message = obj["message"] as? String, !message.isEmpty {
+                    throw PropertyAPIError.serverMessage(message)
+                }
+                if let message = obj["error"] as? String, !message.isEmpty {
+                    throw PropertyAPIError.serverMessage(message)
+                }
+                if let error = obj["error"] as? [String: Any],
+                   let message = error["message"] as? String,
+                   !message.isEmpty {
+                    throw PropertyAPIError.serverMessage(message)
+                }
             }
             throw PropertyAPIError.badStatus(http.statusCode)
         }

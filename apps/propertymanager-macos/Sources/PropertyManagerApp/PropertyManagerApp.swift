@@ -438,6 +438,18 @@ final class MaintenanceStore: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: "propertyManager.removeCalendarEventOnComplete") }
     }
 
+    /// Safety gate while Calendar deletion/republication is under DEV review.
+    /// Manual publication remains available. Production promotion must set this
+    /// explicitly only after duplicate-free acceptance testing.
+    var automaticCalendarPublishingEnabled: Bool {
+        get {
+            UserDefaults.standard.bool(forKey: "propertyManager.automaticCalendarPublishingEnabled")
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "propertyManager.automaticCalendarPublishingEnabled")
+        }
+    }
+
     private var calendarLedgerKey: String {
         "propertyManager.calendarPublicationLedger.\(calendarSyncEnv.rawValue)"
     }
@@ -809,6 +821,10 @@ final class MaintenanceStore: ObservableObject {
     /// Coalesces rapid editor autosaves into one calendar refresh. PostgreSQL
     /// must accept the task first; Calendar is a derived plan view.
     func scheduleAutomaticCalendarPublish() {
+        guard automaticCalendarPublishingEnabled else {
+            calendarSyncMessage = "Automatic calendar publishing paused for DEV safety"
+            return
+        }
         calendarPublishTask?.cancel()
         calendarPublishTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -2442,8 +2458,11 @@ struct ContentView: View {
             await store.refreshFromServer()
             await store.refreshAssets()
             await store.detectDeletedCalendarEvents()
-            if store.pendingCalendarCompletionIDs.isEmpty {
+            if store.pendingCalendarCompletionIDs.isEmpty,
+               store.automaticCalendarPublishingEnabled {
                 await store.pushToCalendar()
+            } else if store.pendingCalendarCompletionIDs.isEmpty {
+                store.calendarSyncMessage = "Automatic calendar publishing paused for DEV safety"
             }
             NSLog("[CalendarSync] automatic publish status=%@", store.calendarSyncMessage as NSString)
         }

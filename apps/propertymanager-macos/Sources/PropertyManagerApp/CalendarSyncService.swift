@@ -30,8 +30,8 @@ enum SyncEnv: String, CaseIterable, Identifiable {
 ///   `propertymanager://task/<uuid>?env=dev`   ← DEV push
 ///   `propertymanager://task/<uuid>?env=prod`  ← prod push
 ///
-/// Re-publish is fully idempotent: existing PM events in the same environment
-/// are removed first, then fresh timed blocks are written. Before a rebuild,
+/// Re-publish is task-scoped and idempotent: existing PM events for only the
+/// supplied task IDs are removed first, then fresh timed blocks are written. Before a rebuild,
 /// the app compares the last successful publication ledger with the managed
 /// events that remain. A missing event becomes a pending operator decision;
 /// it is never silently treated as completed.
@@ -97,6 +97,14 @@ final class CalendarSyncService {
         let suffix = notes[markerRange.upperBound...]
         let rawID = suffix.prefix { $0 != "?" && !$0.isWhitespace }
         return UUID(uuidString: String(rawID))
+    }
+
+    static func shouldReplaceManagedEvent(
+        notes: String?,
+        env: SyncEnv,
+        targetTaskIDs: Set<UUID>
+    ) -> Bool {
+        taskID(from: notes, env: env).map(targetTaskIDs.contains) == true
     }
 
     static func scheduledTaskIDs(_ tasks: [MaintenanceTask]) -> Set<UUID> {
@@ -215,8 +223,13 @@ final class CalendarSyncService {
         bounds.year = 2101
         guard let searchEnd = cal.date(from: bounds) else { throw CalendarSyncError.dateArithmetic }
         let pred = ekStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: [openClaw])
+        let targetTaskIDs = Set(tasks.map(\.id))
         let managedEvents = ekStore.events(matching: pred)
-        for ev in managedEvents where Self.hasPMMarker(ev.notes, env: env) {
+        for ev in managedEvents where Self.shouldReplaceManagedEvent(
+            notes: ev.notes,
+            env: env,
+            targetTaskIDs: targetTaskIDs
+        ) {
             try ekStore.remove(ev, span: .thisEvent, commit: false)
         }
 
@@ -259,8 +272,8 @@ final class CalendarSyncService {
     // MARK: - Detect operator-deleted managed events
 
     /// Returns managed task IDs currently present in the environment calendar.
-    /// EventKit is preferred; Calendar.app scripting is the same fallback used
-    /// by publication when macOS exposes no calendars through EventKit.
+    /// EventKit is authoritative. Detection fails closed when EventKit cannot
+    /// enumerate the environment calendar; AppleScript is never a fallback.
     func existingManagedTaskIDs(env: SyncEnv) async throws -> Set<UUID> {
         guard try await requestWriteAccess() else {
             throw CalendarSyncError.permissionDenied
@@ -296,7 +309,7 @@ final class CalendarSyncService {
             })
         }
 
-        return try CalendarAppleScriptPush.existingManagedTaskIDs(env: env)
+        throw CalendarSyncError.eventKitWriteUnavailable
     }
 
     // MARK: - Remove one task's events (on complete)

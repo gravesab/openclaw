@@ -2490,6 +2490,9 @@ struct ContentView: View {
             guard newPhase == .active else { return }
             Task { await store.detectDeletedCalendarEvents() }
         }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            Task { await store.detectDeletedCalendarEvents() }
+        }
         .alert(
             "Calendar event deleted",
             isPresented: Binding(

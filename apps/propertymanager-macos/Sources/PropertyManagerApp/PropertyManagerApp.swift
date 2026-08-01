@@ -2297,6 +2297,7 @@ final class MaintenanceStore: ObservableObject {
 
 struct ContentView: View {
     @ObservedObject var store: MaintenanceStore
+    @Environment(\.scenePhase) private var scenePhase
     @State private var searchText = ""
     @State private var selectedOriginFilter: TaskOrigin? = nil
     @State private var selectedCategoryFilter: String?
@@ -2385,6 +2386,7 @@ struct ContentView: View {
                 showAssetsPanel: store.showAssetsPanel,
                 toggleAssetsAction: { store.showAssetsPanel.toggle() },
                 calendarPushAction: { Task { await store.pushSelectedTaskToCalendarForTesting() } },
+                calendarDeletionCheckAction: { Task { await store.detectDeletedCalendarEvents() } },
                 deleteDevCalendarEventsAction: { Task { await store.deleteDevCalendarEvents() } },
                 calendarSyncMessage: store.calendarSyncMessage,
                 isSyncingCalendar: store.isSyncingCalendar
@@ -2483,6 +2485,10 @@ struct ContentView: View {
                 store.calendarSyncMessage = "Automatic calendar publishing paused for DEV safety"
             }
             NSLog("[CalendarSync] automatic publish status=%@", store.calendarSyncMessage as NSString)
+        }
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            Task { await store.detectDeletedCalendarEvents() }
         }
         .alert(
             "Calendar event deleted",
@@ -2586,6 +2592,7 @@ struct SidebarView: View {
     let showAssetsPanel: Bool
     let toggleAssetsAction: () -> Void
     let calendarPushAction: () -> Void
+    let calendarDeletionCheckAction: () -> Void
     let deleteDevCalendarEventsAction: () -> Void
     let calendarSyncMessage: String
     let isSyncingCalendar: Bool
@@ -2717,6 +2724,14 @@ struct SidebarView: View {
                             systemImage: "calendar.badge.plus"
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .disabled(isSyncingCalendar)
+
+                    Button {
+                        calendarDeletionCheckAction()
+                    } label: {
+                        Label("Check deleted DEV event", systemImage: "calendar.badge.exclamationmark")
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     .disabled(isSyncingCalendar)
                 } else {

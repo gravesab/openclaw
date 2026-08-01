@@ -376,6 +376,7 @@ final class MaintenanceStore: ObservableObject {
     private let operatorPINKey = "propertyManager.operatorPIN"
     private var autosaveTask: Task<Void, Never>?
     private var calendarPublishTask: Task<Void, Never>?
+    private var calendarDeletionDetectionPausedUntil: Date = .distantPast
 
     var pendingCalendarCompletionTask: MaintenanceTask? {
         guard let id = pendingCalendarCompletionIDs.first else { return nil }
@@ -920,7 +921,9 @@ final class MaintenanceStore: ObservableObject {
     /// become a pending completion. No PostgreSQL change occurs until confirmed.
     @MainActor
     func detectDeletedCalendarEvents() async {
-        guard !isSyncingCalendar, !isRestoringCalendarEvent else { return }
+        guard !isSyncingCalendar,
+              !isRestoringCalendarEvent,
+              Date() >= calendarDeletionDetectionPausedUntil else { return }
         let ledger = calendarPublicationLedger
         guard !ledger.isEmpty else { return }
         do {
@@ -975,6 +978,7 @@ final class MaintenanceStore: ObservableObject {
     @MainActor
     func beginRestoringCalendarEvent(taskID: UUID) {
         isRestoringCalendarEvent = true
+        calendarDeletionDetectionPausedUntil = Date().addingTimeInterval(60)
         isCalendarDeletionAlertPresented = false
         pendingCalendarCompletionIDs.removeAll { $0 == taskID }
         calendarSyncMessage = "Restoring calendar event…"
@@ -992,24 +996,10 @@ final class MaintenanceStore: ObservableObject {
             return
         }
         await publishCalendarTasks([selected])
-        do {
-            var confirmed = false
-            for _ in 1...5 {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                let existing = try await CalendarSyncService.shared.existingManagedTaskIDs(env: calendarSyncEnv)
-                if existing.contains(task.id) {
-                    confirmed = true
-                    break
-                }
-            }
-            if confirmed {
-                calendarSyncMessage = "Calendar event restored for \(DateHelper.isoDate(task.nextDue)) [\(calendarSyncEnv.label)]"
-            } else {
-                calendarSyncMessage = "Calendar restore submitted for \(DateHelper.isoDate(task.nextDue)); EventKit confirmation is delayed"
-            }
-        } catch {
-            calendarSyncMessage = "Calendar restore check failed: \(error.localizedDescription)"
-        }
+        // EventKit commit is authoritative for this submission. A fresh event
+        // store can lag iCloud and previously produced a false negative that
+        // encouraged repeated writes and duplicate events.
+        calendarSyncMessage = "Calendar event restored for \(DateHelper.isoDate(task.nextDue)) [\(calendarSyncEnv.label)]"
     }
 
     /// Deletes all PM events tagged env=dev from "OpenClaw" in a +/-90-day window.

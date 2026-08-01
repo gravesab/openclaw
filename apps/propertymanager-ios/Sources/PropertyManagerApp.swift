@@ -31,7 +31,8 @@ enum AppAppearance: String, CaseIterable, Identifiable {
 @main
 struct PropertyManagerApp: App {
     @StateObject private var store = PropertyStore()
-    @AppStorage("propertyManager.appearance") private var appearanceRaw: String = AppAppearance.system.rawValue
+    @AppStorage(PropertyManagerBuildEnvironment.appearanceKey)
+    private var appearanceRaw: String = AppAppearance.system.rawValue
 
     var body: some Scene {
         WindowGroup {

@@ -1,12 +1,38 @@
 import Foundation
 import SwiftUI
 
+enum PropertyManagerBuildEnvironment {
+#if DEBUG
+    static let isDevelopment = true
+    static let apiBaseURLKey = "propertyManager.dev.v2.apiBaseURL"
+    static let apiBaseURL = "http://192.168.50.117:15062"
+    static let apiKeyKey = "propertyManager.dev.apiKey"
+    static let operatorPINKey = "propertyManager.dev.operatorPIN"
+    static let operatorIdentityKey = "propertyManager.dev.operatorIdentity"
+    static let operatorIdentity = "ios-dev-operator"
+    static let appearanceKey = "propertyManager.dev.appearance"
+#else
+    static let isDevelopment = false
+    static let apiBaseURLKey = "propertyManager.apiBaseURL"
+    static let apiBaseURL = "http://100.85.36.72:5062"
+    static let apiKeyKey = "propertyManager.apiKey"
+    static let operatorPINKey = "propertyManager.operatorPIN"
+    static let operatorIdentityKey = "propertyManager.operatorIdentity"
+    static let operatorIdentity = "ios-operator"
+    static let appearanceKey = "propertyManager.appearance"
+#endif
+}
+
 @MainActor
 final class PropertyStore: ObservableObject {
-    @AppStorage("propertyManager.apiBaseURL") var apiBaseURL: String = "http://100.85.36.72:5062"
-    @AppStorage("propertyManager.apiKey") var apiKey: String = ""
-    @AppStorage("propertyManager.operatorPIN") var operatorPIN: String = ""
-    @AppStorage("propertyManager.operatorIdentity") var operatorIdentity: String = "ios-operator"
+    @AppStorage(PropertyManagerBuildEnvironment.apiBaseURLKey)
+    var apiBaseURL: String = PropertyManagerBuildEnvironment.apiBaseURL
+    @AppStorage(PropertyManagerBuildEnvironment.apiKeyKey)
+    var apiKey: String = ""
+    @AppStorage(PropertyManagerBuildEnvironment.operatorPINKey)
+    var operatorPIN: String = ""
+    @AppStorage(PropertyManagerBuildEnvironment.operatorIdentityKey)
+    var operatorIdentity: String = PropertyManagerBuildEnvironment.operatorIdentity
 
     @Published var categories: [MaintenanceCategory] = []
     @Published var tasks: [MaintenanceTask] = []

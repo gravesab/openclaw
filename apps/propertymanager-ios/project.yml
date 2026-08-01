@@ -29,14 +29,16 @@ targets:
     platform: iOS
     sources:
       - path: Sources
-      - path: Assets.xcassets
+      - path: Resources
+        buildPhase: resources
     info:
       path: Info.plist
       properties:
-        CFBundleDisplayName: PropertyManager
+        CFBundleDisplayName: $(APP_DISPLAY_NAME)
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSLocalNetworkUsageDescription: PropertyManager connects to your ranch PropertyManager API on the local network or Tailscale.
@@ -45,7 +47,7 @@ targets:
         CFBundleURLTypes:
           - CFBundleURLName: ai.openclaw.propertymanager
             CFBundleURLSchemes:
-              - propertymanager
+              - $(APP_URL_SCHEME)
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
@@ -62,10 +64,17 @@ targets:
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.propertymanager
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        APP_DISPLAY_NAME: Property
+        APP_URL_SCHEME: propertymanager
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: "0.2.1"
-        CURRENT_PROJECT_VERSION: "3"
+        MARKETING_VERSION: "0.2.0"
+        CURRENT_PROJECT_VERSION: "2"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: "ZYJVHJWT3P"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+      configs:
+        Debug:
+          PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.propertymanager.dev
+          APP_DISPLAY_NAME: DEV
+          APP_URL_SCHEME: propertymanager-dev

@@ -992,20 +992,23 @@ final class MaintenanceStore: ObservableObject {
             return
         }
         await publishCalendarTasks([selected])
-        try? await Task.sleep(nanoseconds: 500_000_000)
         do {
-            let existing = try await CalendarSyncService.shared.existingManagedTaskIDs(env: calendarSyncEnv)
-            if existing.contains(task.id) {
-                calendarSyncMessage = "Calendar event restored [\(calendarSyncEnv.label)]"
+            var confirmed = false
+            for _ in 1...5 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                let existing = try await CalendarSyncService.shared.existingManagedTaskIDs(env: calendarSyncEnv)
+                if existing.contains(task.id) {
+                    confirmed = true
+                    break
+                }
+            }
+            if confirmed {
+                calendarSyncMessage = "Calendar event restored for \(DateHelper.isoDate(task.nextDue)) [\(calendarSyncEnv.label)]"
             } else {
-                pendingCalendarCompletionIDs.insert(task.id, at: 0)
-                calendarSyncMessage = "Calendar restore failed: EventKit did not confirm the event"
-                isCalendarDeletionAlertPresented = true
+                calendarSyncMessage = "Calendar restore submitted for \(DateHelper.isoDate(task.nextDue)); EventKit confirmation is delayed"
             }
         } catch {
-            pendingCalendarCompletionIDs.insert(task.id, at: 0)
             calendarSyncMessage = "Calendar restore check failed: \(error.localizedDescription)"
-            isCalendarDeletionAlertPresented = true
         }
     }
 

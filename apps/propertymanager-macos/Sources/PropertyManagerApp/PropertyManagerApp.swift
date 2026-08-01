@@ -369,6 +369,7 @@ final class MaintenanceStore: ObservableObject {
     @Published var isSyncingCalendar: Bool = false
     @Published var pendingCalendarCompletionIDs: [UUID] = []
     @Published private(set) var isRestoringCalendarEvent: Bool = false
+    @Published var isCalendarDeletionAlertPresented: Bool = false
 
     private let apiBaseURLKey = "propertyManager.apiBaseURL"
     private let apiKeyKey = "propertyManager.apiKey"
@@ -938,6 +939,7 @@ final class MaintenanceStore: ObservableObject {
             }
             if !pendingCalendarCompletionIDs.isEmpty {
                 calendarSyncMessage = "Calendar event removed — completion confirmation required"
+                isCalendarDeletionAlertPresented = true
             }
         } catch {
             calendarSyncMessage = "Calendar deletion check: \(error.localizedDescription)"
@@ -948,6 +950,7 @@ final class MaintenanceStore: ObservableObject {
     func confirmCalendarDeletionAsComplete() async {
         guard let task = pendingCalendarCompletionTask,
               let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        isCalendarDeletionAlertPresented = false
         statusMessage = "Completing from Calendar…"
         do {
             let note = "Completed from deleted \(CalendarSyncService.calendarTitle(for: calendarSyncEnv)) calendar event."
@@ -962,6 +965,7 @@ final class MaintenanceStore: ObservableObject {
             await publishCalendarTasks([updated])
         } catch {
             statusMessage = "Calendar completion failed: \(error.localizedDescription)"
+            isCalendarDeletionAlertPresented = true
         }
     }
 
@@ -969,6 +973,7 @@ final class MaintenanceStore: ObservableObject {
     @MainActor
     func restoreDeletedCalendarEvent() async {
         guard let task = pendingCalendarCompletionTask else { return }
+        isCalendarDeletionAlertPresented = false
         isRestoringCalendarEvent = true
         pendingCalendarCompletionIDs.removeAll { $0 == task.id }
         calendarSyncMessage = "Restoring calendar event…"
@@ -984,10 +989,12 @@ final class MaintenanceStore: ObservableObject {
             } else {
                 pendingCalendarCompletionIDs.insert(task.id, at: 0)
                 calendarSyncMessage = "Calendar restore failed: EventKit did not confirm the event"
+                isCalendarDeletionAlertPresented = true
             }
         } catch {
             pendingCalendarCompletionIDs.insert(task.id, at: 0)
             calendarSyncMessage = "Calendar restore check failed: \(error.localizedDescription)"
+            isCalendarDeletionAlertPresented = true
         }
     }
 
@@ -2514,15 +2521,20 @@ struct ContentView: View {
         .alert(
             "Calendar event deleted",
             isPresented: Binding(
-                get: { store.pendingCalendarCompletionTask != nil },
-                set: { _ in }
+                get: {
+                    store.isCalendarDeletionAlertPresented &&
+                    store.pendingCalendarCompletionTask != nil
+                },
+                set: { store.isCalendarDeletionAlertPresented = $0 }
             ),
             presenting: store.pendingCalendarCompletionTask
         ) { _ in
             Button("Mark Task Completed") {
+                store.isCalendarDeletionAlertPresented = false
                 Task { await store.confirmCalendarDeletionAsComplete() }
             }
             Button("Restore Calendar Event") {
+                store.isCalendarDeletionAlertPresented = false
                 Task { await store.restoreDeletedCalendarEvent() }
             }
         } message: { task in

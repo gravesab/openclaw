@@ -52,69 +52,10 @@ enum CalendarAppleScriptPush {
             )
         }
 
-        // OpenClaw DEV is dedicated to PropertyManager testing, so DEV can
-        // safely clear the entire calendar before rebuilding it. Production
-        // remains marker-scoped because its calendar may contain other items.
-        let cleanupBody: String
-        if env == .dev {
-            cleanupBody = """
-            set removedCount to 0
-            try
-              set removedCount to count of every event of cal
-              delete every event of cal
-            end try
-            """
-        } else {
-            cleanupBody = """
-            set removedCount to 0
-            set d0 to current date
-            set year of d0 to 2000
-            set month of d0 to January
-            set day of d0 to 1
-            set hours of d0 to 0
-            set minutes of d0 to 0
-            set seconds of d0 to 0
-            set d1 to current date
-            set year of d1 to 2101
-            set month of d1 to January
-            set day of d1 to 1
-            set hours of d1 to 0
-            set minutes of d1 to 0
-            set seconds of d1 to 0
-            set marker to \(asString(markerScheme))
-            set envTag to \(asString("env=\(env.rawValue)"))
-            set doomed to {}
-            set candidates to {}
-            try
-              set candidates to every event of cal whose start date ≥ d0 and start date < d1
-            end try
-            repeat with e in candidates
-              set n to ""
-              try
-                set n to description of e as text
-              end try
-              if n contains marker and n contains envTag then
-                set end of doomed to e
-              end if
-            end repeat
-            set removedCount to count of doomed
-            repeat with e in doomed
-              delete e
-            end repeat
-            """
-        }
-
-        // Idempotent cleanup of all PM-managed events for this environment.
-        let deleteScript = """
-        with timeout of 60 seconds
-        tell application "Calendar"
-          set cal to first calendar whose name is \(asString(calName))
-          \(cleanupBody)
-          return removedCount
-        end tell
-        end timeout
-        """
-        _ = try run(deleteScript)
+        // Calendar/iCloud applies deletion asynchronously. Wait until managed
+        // events are actually gone before rebuilding, otherwise rapid launches
+        // can multiply the same task event.
+        _ = try deleteManagedEvents(env: env)
 
         let cal = Calendar.current
         var dayCursors: [Date: Date] = [:]
@@ -137,15 +78,38 @@ enum CalendarAppleScriptPush {
             f.timeStyle = .none
             lines.append("PropertyManager due date: \(f.string(from: task.nextDue))")
             let notes = lines.joined(separator: "\n")
+            let exactMarker = CalendarSyncService.marker(taskId: task.id, env: env)
             let script = """
             set startDate to date \(asString(asDate(cursor)))
             set endDate to date \(asString(asDate(eventEnd)))
             with timeout of 15 seconds
             tell application "Calendar"
               set cal to first calendar whose name is \(asString(calName))
-              tell cal
-                make new event at end with properties {summary:\(asString(title)), start date:startDate, end date:endDate, description:\(asString(notes))}
-              end tell
+              set exactMarker to \(asString(exactMarker))
+              set matchingEvents to {}
+              repeat with existingEvent in every event of cal
+                set existingNotes to ""
+                try
+                  set existingNotes to description of existingEvent as text
+                end try
+                if existingNotes contains exactMarker then set end of matchingEvents to existingEvent
+              end repeat
+              if (count of matchingEvents) is greater than 0 then
+                set targetEvent to item 1 of matchingEvents
+                set summary of targetEvent to \(asString(title))
+                set start date of targetEvent to startDate
+                set end date of targetEvent to endDate
+                set description of targetEvent to \(asString(notes))
+                if (count of matchingEvents) is greater than 1 then
+                  repeat with duplicateEvent in items 2 thru -1 of matchingEvents
+                    delete duplicateEvent
+                  end repeat
+                end if
+              else
+                tell cal
+                  make new event at end with properties {summary:\(asString(title)), start date:startDate, end date:endDate, description:\(asString(notes))}
+                end tell
+              end if
             end tell
             end timeout
             return "ok"
@@ -154,6 +118,47 @@ enum CalendarAppleScriptPush {
             dayCursors[dueDay] = eventEnd
         }
         return scheduledTasks.count
+    }
+
+    /// Deletes only PropertyManager-managed events for one environment and
+    /// waits for Calendar/iCloud to confirm they are gone before returning.
+    static func deleteManagedEvents(env: SyncEnv) throws -> Int {
+        let titles = try listCalendarTitles()
+        let expectedTitle = CalendarSyncService.calendarTitle(for: env)
+        guard let calName = resolveOpenClawTitle(from: titles, env: env) else {
+            throw CalendarSyncError.calendarNotFound(expectedTitle, available: titles, authRaw: -1)
+        }
+        let script = """
+        with timeout of 60 seconds
+        tell application "Calendar"
+          set cal to first calendar whose name is \(asString(calName))
+          set marker to \(asString(markerScheme))
+          set envTag to \(asString("env=\(env.rawValue)"))
+          set removedCount to 0
+          repeat with cleanupAttempt from 1 to 12
+            set doomed to {}
+            repeat with existingEvent in every event of cal
+              set existingNotes to ""
+              try
+                set existingNotes to description of existingEvent as text
+              end try
+              if existingNotes contains marker and existingNotes contains envTag then
+                set end of doomed to existingEvent
+              end if
+            end repeat
+            if cleanupAttempt is 1 then set removedCount to count of doomed
+            if (count of doomed) is 0 then exit repeat
+            repeat with doomedEvent in doomed
+              delete doomedEvent
+            end repeat
+            delay 0.5
+          end repeat
+          return removedCount
+        end tell
+        end timeout
+        """
+        let result = try run(script)
+        return Int(result.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     }
 
     /// Reads only PropertyManager markers from the environment calendar.

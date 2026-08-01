@@ -369,7 +369,9 @@ final class CalendarSyncService {
             try await Task.sleep(nanoseconds: 400_000_000)
             ekStore = EKEventStore()
         }
-        let calendar = try openClawCalendar(in: ekStore, title: Self.developmentCalendarTitle)
+        guard let calendar = try? openClawCalendar(in: ekStore, title: Self.developmentCalendarTitle) else {
+            return try CalendarAppleScriptPush.deleteManagedEvents(env: .dev)
+        }
 
         let cal = Calendar.current
         let today = cal.startOfDay(for: Date())

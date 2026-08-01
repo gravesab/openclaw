@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import subprocess
 import uuid
@@ -23,12 +24,12 @@ PSQL = [
     "docker",
     "exec",
     "-i",
-    "postgres",
+    os.environ.get("PROPERTYMANAGER_POSTGRES_CONTAINER", "postgres"),
     "psql",
     "-U",
-    "openclaw",
+    os.environ.get("PROPERTYMANAGER_DB_USER", "openclaw"),
     "-d",
-    "openclaw",
+    os.environ.get("PROPERTYMANAGER_DB_NAME", "openclaw"),
     "-v",
     "ON_ERROR_STOP=1",
 ]

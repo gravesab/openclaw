@@ -969,17 +969,28 @@ final class MaintenanceStore: ObservableObject {
         }
     }
 
+    /// Synchronously closes the deletion race before the alert dismisses.
+    /// Returning to the app can fire activation detection immediately, so this
+    /// guard must be set before an asynchronous restoration Task is scheduled.
+    @MainActor
+    func beginRestoringCalendarEvent(taskID: UUID) {
+        isRestoringCalendarEvent = true
+        isCalendarDeletionAlertPresented = false
+        pendingCalendarCompletionIDs.removeAll { $0 == taskID }
+        calendarSyncMessage = "Restoring calendar event…"
+    }
+
     /// Keeps the task incomplete and restores its event on the next rebuild.
     @MainActor
-    func restoreDeletedCalendarEvent() async {
-        guard let task = pendingCalendarCompletionTask else { return }
-        isCalendarDeletionAlertPresented = false
-        isRestoringCalendarEvent = true
-        pendingCalendarCompletionIDs.removeAll { $0 == task.id }
-        calendarSyncMessage = "Restoring calendar event…"
+    func restoreDeletedCalendarEvent(_ task: MaintenanceTask) async {
         defer { isRestoringCalendarEvent = false }
 
-        guard let selected = tasks.first(where: { $0.id == task.id }) else { return }
+        guard let selected = tasks.first(where: { $0.id == task.id }) else {
+            pendingCalendarCompletionIDs.insert(task.id, at: 0)
+            isCalendarDeletionAlertPresented = true
+            calendarSyncMessage = "Calendar restore failed: task is no longer available"
+            return
+        }
         await publishCalendarTasks([selected])
         try? await Task.sleep(nanoseconds: 500_000_000)
         do {
@@ -2528,14 +2539,14 @@ struct ContentView: View {
                 set: { store.isCalendarDeletionAlertPresented = $0 }
             ),
             presenting: store.pendingCalendarCompletionTask
-        ) { _ in
+        ) { task in
             Button("Mark Task Completed") {
                 store.isCalendarDeletionAlertPresented = false
                 Task { await store.confirmCalendarDeletionAsComplete() }
             }
             Button("Restore Calendar Event") {
-                store.isCalendarDeletionAlertPresented = false
-                Task { await store.restoreDeletedCalendarEvent() }
+                store.beginRestoringCalendarEvent(taskID: task.id)
+                Task { await store.restoreDeletedCalendarEvent(task) }
             }
         } message: { task in
             Text("You removed \"\(task.item)\" from \(CalendarSyncService.calendarTitle(for: store.calendarSyncEnv)). Was the work completed? Completion is recorded only after you confirm.")

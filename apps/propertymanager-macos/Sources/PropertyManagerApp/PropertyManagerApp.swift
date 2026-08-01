@@ -823,7 +823,7 @@ final class MaintenanceStore: ObservableObject {
 
     /// Coalesces rapid editor autosaves into one calendar refresh. PostgreSQL
     /// must accept the task first; Calendar is a derived plan view.
-    func scheduleAutomaticCalendarPublish() {
+    func scheduleAutomaticCalendarPublish(_ task: MaintenanceTask) {
         guard automaticCalendarPublishingEnabled else {
             calendarSyncMessage = "Automatic calendar publishing paused for DEV safety"
             return
@@ -837,7 +837,7 @@ final class MaintenanceStore: ObservableObject {
                 guard !Task.isCancelled else { return }
             }
             guard !isSyncingCalendar else { return }
-            await pushToCalendar()
+            await publishCalendarTasks([task])
         }
     }
 
@@ -1102,7 +1102,7 @@ final class MaintenanceStore: ObservableObject {
             hasLocalChanges = false
             persistSyncState()
             statusMessage = "Saved"
-            scheduleAutomaticCalendarPublish()
+            scheduleAutomaticCalendarPublish(updated)
         } catch {
             isOnline = false
             statusMessage = "Couldn’t save: \(error.localizedDescription)"
@@ -1128,14 +1128,13 @@ final class MaintenanceStore: ObservableObject {
             statusMessage = "Completed · next due \(DateHelper.isoDate(updated.nextDue))"
             // Remove calendar event for this task (Apple Calendar is view-only; PM drives state).
             await removeCalendarEventsForTask(id: selectedTaskID)
-            scheduleAutomaticCalendarPublish()
+            await publishCalendarTasks([updated])
         } catch {
             // Fallback: local complete + upsert so the UI still works if complete endpoint fails.
             markTaskCompleteLocally(at: index)
             await upsertTaskToServer(tasks[index])
             // Also remove calendar event on local-fallback path.
             await removeCalendarEventsForTask(id: selectedTaskID)
-            scheduleAutomaticCalendarPublish()
             if !statusMessage.hasPrefix("Couldn’t") {
                 statusMessage = "Completed (synced)"
             }
@@ -1301,7 +1300,7 @@ final class MaintenanceStore: ObservableObject {
                 isOnline = true
                 lastSyncAt = Date()
                 statusMessage = "Deleted task"
-                scheduleAutomaticCalendarPublish()
+                await removeCalendarEventsForTask(id: removedID)
             } catch {
                 isOnline = false
                 statusMessage = "Deleted on Mac; server: \(error.localizedDescription)"
@@ -2509,7 +2508,7 @@ struct ContentView: View {
             await store.detectDeletedCalendarEvents()
             if store.pendingCalendarCompletionIDs.isEmpty,
                store.automaticCalendarPublishingEnabled {
-                await store.pushToCalendar()
+                store.calendarSyncMessage = "Automatic task-scoped calendar sync enabled [\(store.calendarSyncEnv.label)]"
             } else if store.pendingCalendarCompletionIDs.isEmpty {
                 store.calendarSyncMessage = "Automatic calendar publishing paused for DEV safety"
             }

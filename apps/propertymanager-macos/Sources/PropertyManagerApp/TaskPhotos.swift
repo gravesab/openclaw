@@ -4,105 +4,66 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 enum TaskPhotoStore {
-    static func attachmentsRoot() -> URL {
-        let appSupport = FileManager.default.urls(
-            for: .applicationSupportDirectory,
-            in: .userDomainMask
-        ).first!
-        let folder = appSupport
-            .appendingPathComponent("PropertyManagerApp", isDirectory: true)
-            .appendingPathComponent("attachments", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder
-    }
-
-    static func folder(for taskID: UUID) -> URL {
-        let folder = attachmentsRoot().appendingPathComponent(taskID.uuidString, isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder
-    }
-
-    static func url(taskID: UUID, fileName: String) -> URL {
-        folder(for: taskID).appendingPathComponent(fileName)
-    }
-
-    static func chooseAndCopyPhoto(into taskID: UUID) -> String? {
+    /// Selects an existing photo for immediate upload. PropertyManager does not
+    /// copy the file locally; PostgreSQL is the durable source of truth.
+    static func choosePhoto() -> URL? {
         let panel = NSOpenPanel()
-        panel.title = "Add photograph to work request"
-        panel.prompt = "Add Photo"
+        panel.title = "Add photograph to task"
+        panel.prompt = "Upload Photo"
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
         panel.canChooseFiles = true
         panel.allowedContentTypes = [.jpeg, .png, .heic, .webP, .tiff, .gif]
-        panel.message = "Choose a photo of the problem (fence, damage, location, etc.)."
-
-        guard panel.runModal() == .OK, let source = panel.url else {
-            return nil
-        }
-
-        let ext = source.pathExtension.isEmpty ? "jpg" : source.pathExtension.lowercased()
-        let fileName = "\(UUID().uuidString).\(ext)"
-        let destination = url(taskID: taskID, fileName: fileName)
-
-        do {
-            if FileManager.default.fileExists(atPath: destination.path) {
-                try FileManager.default.removeItem(at: destination)
-            }
-            try FileManager.default.copyItem(at: source, to: destination)
-            return fileName
-        } catch {
-            return nil
-        }
-    }
-
-    static func removePhoto(taskID: UUID, fileName: String) {
-        let fileURL = url(taskID: taskID, fileName: fileName)
-        try? FileManager.default.removeItem(at: fileURL)
-    }
-
-    static func renamePhoto(taskID: UUID, from oldName: String, to newName: String) throws {
-        guard oldName != newName else { return }
-        let oldURL = url(taskID: taskID, fileName: oldName)
-        let newURL = url(taskID: taskID, fileName: newName)
-        if FileManager.default.fileExists(atPath: newURL.path) {
-            try FileManager.default.removeItem(at: newURL)
-        }
-        try FileManager.default.moveItem(at: oldURL, to: newURL)
-    }
-
-    static func saveDownloadedPhoto(_ data: Data, taskID: UUID, fileName: String) throws {
-        try data.write(to: url(taskID: taskID, fileName: fileName), options: [.atomic])
-    }
-
-    static func removeAllPhotos(taskID: UUID) {
-        let folderURL = folder(for: taskID)
-        try? FileManager.default.removeItem(at: folderURL)
+        panel.message = "Choose a photo to upload to PropertyManager PostgreSQL."
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
     }
 }
 
 struct TaskPhotoThumbnail: View {
     let taskID: UUID
     let fileName: String
+    let loadPhoto: (UUID, String) async throws -> Data
     var maxHeight: CGFloat = 160
 
+    @State private var image: NSImage?
+    @State private var loadError: String?
+
     var body: some View {
-        let fileURL = TaskPhotoStore.url(taskID: taskID, fileName: fileName)
-        if let nsImage = NSImage(contentsOf: fileURL) {
-            Image(nsImage: nsImage)
-                .resizable()
-                .scaledToFit()
-                .frame(maxHeight: maxHeight)
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.secondary.opacity(0.25))
-                )
-        } else {
-            Text("Missing photo file")
-                .foregroundStyle(.secondary)
-                .frame(maxWidth: .infinity, minHeight: 80)
-                .background(Color.secondary.opacity(0.08))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
+        Group {
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: maxHeight)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.secondary.opacity(0.25))
+                    )
+            } else if let loadError {
+                Text(loadError)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+                    .background(Color.secondary.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+            } else {
+                ProgressView("Loading photo from PostgreSQL…")
+                    .frame(maxWidth: .infinity, minHeight: 80)
+            }
+        }
+        .task(id: fileName) {
+            do {
+                let data = try await loadPhoto(taskID, fileName)
+                guard let downloaded = NSImage(data: data) else {
+                    loadError = "PostgreSQL returned an unreadable image."
+                    return
+                }
+                image = downloaded
+                loadError = nil
+            } catch {
+                loadError = "Could not load photo from PostgreSQL: \(error.localizedDescription)"
+            }
         }
     }
 }

@@ -880,14 +880,6 @@ final class MaintenanceStore: ObservableObject {
                 saveCategories()
             }
             tasks = remoteTasks
-            for task in tasks {
-                for fileName in task.photoFileNames {
-                    let localURL = TaskPhotoStore.url(taskID: task.id, fileName: fileName)
-                    guard !FileManager.default.fileExists(atPath: localURL.path) else { continue }
-                    let data = try await apiClient.downloadPhoto(taskID: task.id, fileName: fileName)
-                    try TaskPhotoStore.saveDownloadedPhoto(data, taskID: task.id, fileName: fileName)
-                }
-            }
             if selectedTaskID == nil || !tasks.contains(where: { $0.id == selectedTaskID }) {
                 selectedTaskID = tasks.first?.id
             }
@@ -1076,7 +1068,7 @@ final class MaintenanceStore: ObservableObject {
             return
         }
 
-        guard let fileName = TaskPhotoStore.chooseAndCopyPhoto(into: selectedTaskID) else {
+        guard let sourceURL = TaskPhotoStore.choosePhoto() else {
             statusMessage = "No photo added."
             return
         }
@@ -1084,15 +1076,9 @@ final class MaintenanceStore: ObservableObject {
         statusMessage = "Uploading photo to DEV database…"
         Task { @MainActor in
             do {
-                let localURL = TaskPhotoStore.url(taskID: selectedTaskID, fileName: fileName)
                 let storedName = try await apiClient.uploadPhoto(
                     taskID: selectedTaskID,
-                    fileURL: localURL
-                )
-                try TaskPhotoStore.renamePhoto(
-                    taskID: selectedTaskID,
-                    from: fileName,
-                    to: storedName
+                    fileURL: sourceURL
                 )
                 guard let currentIndex = tasks.firstIndex(where: { $0.id == selectedTaskID }) else {
                     return
@@ -1101,7 +1087,6 @@ final class MaintenanceStore: ObservableObject {
                 writeLocalCacheOnly()
                 statusMessage = "Photo saved in DEV PostgreSQL."
             } catch {
-                TaskPhotoStore.removePhoto(taskID: selectedTaskID, fileName: fileName)
                 statusMessage = "Photo was not saved: \(error.localizedDescription)"
             }
         }
@@ -1117,7 +1102,6 @@ final class MaintenanceStore: ObservableObject {
         Task { @MainActor in
             do {
                 try await apiClient.deletePhoto(taskID: selectedTaskID, fileName: fileName)
-                TaskPhotoStore.removePhoto(taskID: selectedTaskID, fileName: fileName)
                 guard let currentIndex = tasks.firstIndex(where: { $0.id == selectedTaskID }) else {
                     return
                 }
@@ -1130,19 +1114,12 @@ final class MaintenanceStore: ObservableObject {
         }
     }
 
-    func revealPhoto(_ fileName: String) {
-        guard let selectedTaskID else { return }
-        let url = TaskPhotoStore.url(taskID: selectedTaskID, fileName: fileName)
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
-
     func deleteSelectedTask() {
         guard let selectedTaskID else {
             return
         }
 
         let removedID = selectedTaskID
-        TaskPhotoStore.removeAllPhotos(taskID: removedID)
         tasks.removeAll { $0.id == removedID }
         self.selectedTaskID = tasks.first?.id
         writeLocalCacheOnly()
@@ -2407,7 +2384,9 @@ struct ContentView: View {
                 deleteAction: store.deleteSelectedTask,
                 addPhotoAction: store.addPhotoToSelectedTask,
                 removePhotoAction: store.removePhotoFromSelectedTask,
-                revealPhotoAction: store.revealPhoto,
+                loadPhotoAction: { taskID, fileName in
+                    try await store.apiClient.downloadPhoto(taskID: taskID, fileName: fileName)
+                },
                 fillHowToAction: {
                     store.fillHowToFromManual(taskID: selectedTaskID)
                 }
@@ -3375,7 +3354,7 @@ struct TaskEditorView: View {
     let deleteAction: () -> Void
     let addPhotoAction: () -> Void
     let removePhotoAction: (String) -> Void
-    let revealPhotoAction: (String) -> Void
+    let loadPhotoAction: (UUID, String) async throws -> Data
     let fillHowToAction: () -> Void
     @State private var isFillingHowTo = false
 
@@ -3534,12 +3513,16 @@ struct TaskEditorView: View {
                 } else {
                     ForEach(task.photoFileNames, id: \.self) { fileName in
                         VStack(alignment: .leading, spacing: 8) {
-                            TaskPhotoThumbnail(taskID: task.id, fileName: fileName)
+                            TaskPhotoThumbnail(
+                                taskID: task.id,
+                                fileName: fileName,
+                                loadPhoto: loadPhotoAction
+                            )
 
                             HStack {
-                                Button("Show in Finder") {
-                                    revealPhotoAction(fileName)
-                                }
+                                Text("Stored in PostgreSQL")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                                 Spacer()
                                 Button("Remove Photo", role: .destructive) {
                                     removePhotoAction(fileName)

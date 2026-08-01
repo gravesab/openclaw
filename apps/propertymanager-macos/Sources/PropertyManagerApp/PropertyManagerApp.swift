@@ -3895,13 +3895,22 @@ struct TaskEditorView: View {
                             .frame(maxWidth: 160)
                     }
 
-                    Button("Recalculate Next Due") {
-                        task.nextDue = task.frequency.nextDue(after: task.lastDone)
-                    }
-                    .fixedSize()
-                    .help("Set Next Due to Last Done plus Frequency interval")
-
                     Spacer(minLength: 0)
+                }
+
+                DisclosureGroup("Advanced") {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Use only to repair an imported, legacy, or incorrectly scheduled calendar date. Saving and completing tasks normally recalculate it automatically.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+
+                        Button("Repair Next Due Date") {
+                            task.nextDue = task.frequency.nextDue(after: task.lastDone)
+                        }
+                        .fixedSize()
+                        .help("Repair Next Due using Last Done plus the selected calendar frequency")
+                    }
+                    .padding(.top, 6)
                 }
 
                 if task.showsRunHoursTrigger(assets: assets) {

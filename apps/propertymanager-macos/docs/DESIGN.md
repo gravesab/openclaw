@@ -199,9 +199,9 @@ Built-in `TaskCategory` values:
 `CategoryDefinition` also supports persisted custom category metadata (`maintenance_categories.json`).
 
 
-### Recalculate Next Due (Schedule editor)
+### Repair Next Due Date (Schedule editor)
 
-Operator button sets `nextDue = lastDone + frequency interval` (Daily +1d … Quarterly +3mo … Yearly +1y).
+Normal task saves and completions recalculate calendar schedules automatically. A collapsed **Advanced** control named **Repair Next Due Date** remains available only for imported, legacy, or incorrectly scheduled records. It sets `nextDue = lastDone + frequency interval` (Daily +1d … Quarterly +3mo … Yearly +1y).
 `warningDays` / `criticalDays` remain OpenClaw due-soon / critical thresholds — not the repeat interval.
 Local draft until **Save to Postgres**. API `POST /tasks/<id>/complete` still advances calendar `next_due` by `warning_days` (legacy); do not change prod without an explicit migration.
 

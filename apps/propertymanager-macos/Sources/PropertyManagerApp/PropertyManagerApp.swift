@@ -349,6 +349,12 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         }
         return merged
     }
+
+    mutating func recalculateCalendarDueAfterCompletionIfApplicable() {
+        let kind = scheduleKind.lowercased()
+        guard kind == "calendar" || kind == "both" else { return }
+        nextDue = frequency.nextDue(after: lastDone)
+    }
 }
 
 @MainActor
@@ -969,18 +975,21 @@ final class MaintenanceStore: ObservableObject {
         do {
             let note = "Completed from deleted \(CalendarSyncService.calendarTitle(for: calendarSyncEnv)) calendar event."
             let updated = try await apiClient.completeTask(id: task.id, note: note)
-            tasks[index] = updated.mergingEditorFields(from: tasks[index])
+            var corrected = updated.mergingEditorFields(from: tasks[index])
+            corrected.recalculateCalendarDueAfterCompletionIfApplicable()
+            let persisted = try await apiClient.upsertTask(corrected)
+            tasks[index] = persisted
             pendingCalendarCompletionIDs.removeAll { $0 == task.id }
             var ledger = calendarPublicationLedger
             ledger.removeValue(forKey: task.id)
             calendarPublicationLedger = ledger
             writeLocalCacheOnly()
-            statusMessage = "Completed from Calendar · next due \(DateHelper.isoDate(updated.nextDue))"
+            statusMessage = "Completed from Calendar · next due \(DateHelper.isoDate(persisted.nextDue))"
             CalendarSyncService.shared.forgetManagedEventIdentifier(
                 taskID: task.id,
                 env: calendarSyncEnv
             )
-            await publishCalendarTasks([updated])
+            await publishCalendarTasks([persisted])
         } catch {
             statusMessage = "Calendar completion failed: \(error.localizedDescription)"
             isCalendarDeletionAlertPresented = true
@@ -1138,16 +1147,19 @@ final class MaintenanceStore: ObservableObject {
         statusMessage = "Marking complete…"
         do {
             let updated = try await apiClient.completeTask(id: selectedTaskID, note: note)
-            tasks[index] = updated.mergingEditorFields(from: tasks[index])
+            var corrected = updated.mergingEditorFields(from: tasks[index])
+            corrected.recalculateCalendarDueAfterCompletionIfApplicable()
+            let persisted = try await apiClient.upsertTask(corrected)
+            tasks[index] = persisted
             writeLocalCacheOnly()
             isOnline = true
             lastSyncAt = Date()
             hasLocalChanges = false
             persistSyncState()
-            statusMessage = "Completed · next due \(DateHelper.isoDate(updated.nextDue))"
+            statusMessage = "Completed · next due \(DateHelper.isoDate(persisted.nextDue))"
             // Remove calendar event for this task (Apple Calendar is view-only; PM drives state).
             await removeCalendarEventsForTask(id: selectedTaskID)
-            await publishCalendarTasks([updated])
+            await publishCalendarTasks([persisted])
         } catch {
             // Fallback: local complete + upsert so the UI still works if complete endpoint fails.
             markTaskCompleteLocally(at: index)
@@ -1162,11 +1174,7 @@ final class MaintenanceStore: ObservableObject {
 
     private func markTaskCompleteLocally(at index: Int) {
         tasks[index].lastDone = Date()
-        tasks[index].nextDue = Calendar.current.date(
-            byAdding: .day,
-            value: tasks[index].warningDays,
-            to: tasks[index].lastDone
-        ) ?? tasks[index].lastDone
+        tasks[index].recalculateCalendarDueAfterCompletionIfApplicable()
         let trimmedNotes = tasks[index].resultNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         let completionDate = DateHelper.isoDate(tasks[index].lastDone)
         let historyNote: String
@@ -4250,7 +4258,7 @@ struct TaskEditorView: View {
 
     func markComplete() {
         task.lastDone = Date()
-        task.nextDue = Calendar.current.date(byAdding: .day, value: task.warningDays, to: task.lastDone) ?? task.lastDone
+        task.recalculateCalendarDueAfterCompletionIfApplicable()
 
         let trimmedNotes = task.resultNotes.trimmingCharacters(in: .whitespacesAndNewlines)
         let completionDate = DateHelper.isoDate(task.lastDone)

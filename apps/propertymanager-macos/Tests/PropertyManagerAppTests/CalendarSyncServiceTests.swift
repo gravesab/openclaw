@@ -63,4 +63,26 @@ final class CalendarSyncServiceTests: XCTestCase {
         XCTAssertNil(CalendarSyncService.taskID(from: "ordinary event", env: .dev))
     }
 
+    func testTaskScopedReplacementLeavesUnrelatedEventsAlone() {
+        let selected = UUID(uuidString: "12345678-1234-1234-1234-1234567890AB")!
+        let unrelated = UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!
+        let targets: Set<UUID> = [selected]
+
+        XCTAssertTrue(CalendarSyncService.shouldReplaceManagedEvent(
+            notes: CalendarSyncService.marker(taskId: selected, env: .dev),
+            env: .dev,
+            targetTaskIDs: targets
+        ))
+        XCTAssertFalse(CalendarSyncService.shouldReplaceManagedEvent(
+            notes: CalendarSyncService.marker(taskId: unrelated, env: .dev),
+            env: .dev,
+            targetTaskIDs: targets
+        ))
+        XCTAssertFalse(CalendarSyncService.shouldReplaceManagedEvent(
+            notes: CalendarSyncService.marker(taskId: selected, env: .prod),
+            env: .dev,
+            targetTaskIDs: targets
+        ))
+    }
+
 }

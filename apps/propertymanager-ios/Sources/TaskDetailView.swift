@@ -1,4 +1,6 @@
 import SwiftUI
+import PhotosUI
+import UIKit
 
 struct TaskDetailView: View {
     @EnvironmentObject private var store: PropertyStore
@@ -9,6 +11,9 @@ struct TaskDetailView: View {
     @State private var showCompleteConfirm = false
     @State private var showDeleteConfirm = false
     @State private var showEdit = false
+    @State private var selectedPhoto: PhotosPickerItem?
+    @State private var isUploadingPhoto = false
+    @State private var photoPendingDeletion: String?
 
     private var task: MaintenanceTask? {
         store.tasks.first(where: { $0.id == taskID })
@@ -67,6 +72,33 @@ struct TaskDetailView: View {
                     if let notes = task.notes, !notes.isEmpty {
                         Section("Notes") {
                             Text(notes)
+                        }
+                    }
+
+                    Section("Photos — DEV PostgreSQL") {
+                        PhotosPicker(selection: $selectedPhoto, matching: .images) {
+                            if isUploadingPhoto {
+                                ProgressView()
+                            } else {
+                                Label("Add Photograph", systemImage: "photo.badge.plus")
+                            }
+                        }
+                        .disabled(isUploadingPhoto)
+
+                        if task.photoFileNames.isEmpty {
+                            Text("No photos yet.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            ForEach(task.photoFileNames, id: \.self) { fileName in
+                                PostgreSQLTaskPhoto(
+                                    taskID: task.id,
+                                    fileName: fileName,
+                                    client: store.client
+                                )
+                                Button("Remove Photo", role: .destructive) {
+                                    photoPendingDeletion = fileName
+                                }
+                            }
                         }
                     }
 
@@ -183,6 +215,40 @@ struct TaskDetailView: View {
                     TaskEditView(task: task)
                         .environmentObject(store)
                 }
+                .onChange(of: selectedPhoto) { _, item in
+                    guard let item else { return }
+                    Task {
+                        isUploadingPhoto = true
+                        defer {
+                            isUploadingPhoto = false
+                            selectedPhoto = nil
+                        }
+                        guard let selectedData = try? await item.loadTransferable(type: Data.self),
+                              let image = UIImage(data: selectedData),
+                              let data = image.jpegData(compressionQuality: 0.9) else {
+                            store.errorMessage = "The selected photo could not be read."
+                            return
+                        }
+                        _ = await store.uploadPhoto(taskID: task.id, data: data)
+                    }
+                }
+                .confirmationDialog(
+                    "Remove this photo from PostgreSQL?",
+                    isPresented: Binding(
+                        get: { photoPendingDeletion != nil },
+                        set: { if !$0 { photoPendingDeletion = nil } }
+                    ),
+                    titleVisibility: .visible
+                ) {
+                    Button("Remove Photo", role: .destructive) {
+                        guard let fileName = photoPendingDeletion else { return }
+                        photoPendingDeletion = nil
+                        Task { _ = await store.deletePhoto(taskID: task.id, fileName: fileName) }
+                    }
+                    Button("Cancel", role: .cancel) { photoPendingDeletion = nil }
+                } message: {
+                    Text("This permanently removes the photo from the DEV database.")
+                }
                 .confirmationDialog(
                     "Mark \(task.item) done?",
                     isPresented: $showCompleteConfirm,
@@ -219,6 +285,42 @@ struct TaskDetailView: View {
                     systemImage: "exclamationmark.triangle",
                     description: Text("Pull to refresh the task list.")
                 )
+            }
+        }
+    }
+}
+
+private struct PostgreSQLTaskPhoto: View {
+    let taskID: UUID
+    let fileName: String
+    let client: PropertyAPIClient
+
+    @State private var image: UIImage?
+    @State private var failed = false
+
+    var body: some View {
+        Group {
+            if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxHeight: 260)
+                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .accessibilityLabel("Task photograph")
+            } else if failed {
+                Label("Photo unavailable", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.secondary)
+            } else {
+                ProgressView("Loading photo…")
+            }
+        }
+        .task(id: fileName) {
+            do {
+                let data = try await client.downloadPhoto(taskID: taskID, fileName: fileName)
+                image = UIImage(data: data)
+                failed = image == nil
+            } catch {
+                failed = true
             }
         }
     }

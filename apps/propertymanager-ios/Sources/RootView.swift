@@ -26,6 +26,23 @@ struct RootView: View {
                 Label("Settings", systemImage: "gearshape")
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack {
+                Image(systemName: "hammer.fill")
+                Text("PROPERTY MANAGER — DEVELOPMENT")
+                    .fontWeight(.bold)
+                Spacer()
+                Text("DEV DATA")
+                    .font(.caption.bold())
+            }
+            .font(.caption)
+            .foregroundStyle(.black)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Color.orange)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Property Manager development environment")
+        }
         .task {
             await store.refresh()
             await store.refreshAssets()

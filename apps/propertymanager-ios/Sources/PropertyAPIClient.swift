@@ -177,6 +177,68 @@ final class PropertyAPIClient {
         try validate(response, data: data)
         return try decoder.decode(MaintenanceTask.self, from: data)
     }
+
+    // MARK: - PostgreSQL task photos
+
+    private struct PhotoUploadResult: Decodable {
+        let fileName: String
+
+        enum CodingKeys: String, CodingKey {
+            case fileName = "file_name"
+        }
+    }
+
+    func uploadPhoto(
+        taskID: UUID,
+        data: Data,
+        fileName: String = "iphone-photo.jpg",
+        mimeType: String = "image/jpeg"
+    ) async throws -> String {
+        let url = try makeURL("/tasks/\(taskID.uuidString)/photos")
+        let boundary = "PropertyManager-iOS-\(UUID().uuidString)"
+        var body = Data()
+        body.append("--\(boundary)\r\n".data(using: .utf8)!)
+        body.append(
+            "Content-Disposition: form-data; name=\"file\"; filename=\"\(fileName)\"\r\n"
+                .data(using: .utf8)!
+        )
+        body.append("Content-Type: \(mimeType)\r\n\r\n".data(using: .utf8)!)
+        body.append(data)
+        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+        request.httpBody = body
+        let (responseData, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: responseData)
+        return try decoder.decode(PhotoUploadResult.self, from: responseData).fileName
+    }
+
+    func downloadPhoto(taskID: UUID, fileName: String) async throws -> Data {
+        let base = try makeURL("/tasks/\(taskID.uuidString)/photos/content")
+        guard var components = URLComponents(url: base, resolvingAgainstBaseURL: false) else {
+            throw PropertyAPIError.invalidURL
+        }
+        components.queryItems = [URLQueryItem(name: "file_name", value: fileName)]
+        guard let url = components.url else { throw PropertyAPIError.invalidURL }
+        let request = authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return data
+    }
+
+    func deletePhoto(taskID: UUID, fileName: String) async throws {
+        let url = try makeURL("/tasks/\(taskID.uuidString)/photos")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["file_name": fileName])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+    }
 }
 
 struct APIErrorBody: Codable {

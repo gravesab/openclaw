@@ -98,6 +98,7 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
     var sourceManualName: String?
     var origin: TaskOrigin
     var parts: [TaskPart]?
+    var photoFileNames: [String]
     var createdAt: Date?
     var updatedAt: Date?
 
@@ -139,6 +140,7 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         case sourceManualName = "source_manual_name"
         case origin
         case parts
+        case photoFileNames = "photo_file_names"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
     }
@@ -187,6 +189,7 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
             origin = manual.isEmpty ? .owner : .manufacturer
         }
         parts = try c.decodeIfPresent([TaskPart].self, forKey: .parts)
+        photoFileNames = try c.decodeIfPresent([String].self, forKey: .photoFileNames) ?? []
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt)
         updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt)
     }

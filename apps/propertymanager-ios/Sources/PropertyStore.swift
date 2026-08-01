@@ -293,6 +293,39 @@ final class PropertyStore: ObservableObject {
         }
     }
 
+    func uploadPhoto(taskID: UUID, data: Data) async -> Bool {
+        errorMessage = nil
+        statusMessage = "Uploading photo to DEV PostgreSQL…"
+        do {
+            let fileName = try await client.uploadPhoto(taskID: taskID, data: data)
+            if let index = tasks.firstIndex(where: { $0.id == taskID }),
+               !tasks[index].photoFileNames.contains(fileName) {
+                tasks[index].photoFileNames.append(fileName)
+            }
+            statusMessage = "Photo saved in DEV PostgreSQL"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            statusMessage = nil
+            return false
+        }
+    }
+
+    func deletePhoto(taskID: UUID, fileName: String) async -> Bool {
+        errorMessage = nil
+        do {
+            try await client.deletePhoto(taskID: taskID, fileName: fileName)
+            if let index = tasks.firstIndex(where: { $0.id == taskID }) {
+                tasks[index].photoFileNames.removeAll { $0 == fileName }
+            }
+            statusMessage = "Photo removed from DEV PostgreSQL"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     /// Soft-deactivate: hides from lists; meter history remains on the server.
     func deactivateAsset(id: UUID) async -> Bool {
         do {

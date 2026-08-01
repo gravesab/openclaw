@@ -372,6 +372,7 @@ final class MaintenanceStore: ObservableObject {
     private let apiKeyKey = "propertyManager.apiKey"
     private let operatorPINKey = "propertyManager.operatorPIN"
     private var autosaveTask: Task<Void, Never>?
+    private var calendarPublishTask: Task<Void, Never>?
 
     var apiBaseURL: String {
         get {
@@ -777,6 +778,22 @@ final class MaintenanceStore: ObservableObject {
         }
     }
 
+    /// Coalesces rapid editor autosaves into one calendar refresh. PostgreSQL
+    /// must accept the task first; Calendar is a derived plan view.
+    func scheduleAutomaticCalendarPublish() {
+        calendarPublishTask?.cancel()
+        calendarPublishTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            for _ in 0..<10 where isSyncingCalendar {
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                guard !Task.isCancelled else { return }
+            }
+            guard !isSyncingCalendar else { return }
+            await pushToCalendar()
+        }
+    }
+
     /// Explicit Save: upsert selected task without completing it.
     @MainActor
     func saveSelectedTask() async {
@@ -804,11 +821,9 @@ final class MaintenanceStore: ObservableObject {
 
     // MARK: - Calendar sync (PM -> OpenClaw, one-way)
 
-    /// Pushes today's due (and overdue/incomplete) tasks to the "OpenClaw"
-    /// Apple Calendar as stacked timed blocks.
-    /// Idempotent: re-running removes the old blocks first.
-    /// Roll-forward: tasks where nextDue <= today keep appearing each day
-    /// until the operator marks them complete in PM.
+    /// Publishes every active calendar-based task on its individual due date.
+    /// Idempotent: re-running replaces existing PM-managed events in the
+    /// environment-specific calendar.
     @MainActor
     func pushToCalendar() async {
         guard !isSyncingCalendar else { return }
@@ -816,7 +831,7 @@ final class MaintenanceStore: ObservableObject {
         defer { isSyncingCalendar = false }
         calendarSyncMessage = "Pushing to OpenClaw..."
         do {
-            let count = try await CalendarSyncService.shared.pushTodaysTasks(
+            let count = try await CalendarSyncService.shared.pushScheduledTasks(
                 tasks,
                 startHour: calendarStartHour,
                 startMinute: calendarStartMinute,
@@ -824,9 +839,9 @@ final class MaintenanceStore: ObservableObject {
                 assets: assets
             )
             if count == 0 {
-                calendarSyncMessage = "0 due tasks (active, schedule calendar|both, nextDue ≤ today). Nothing pushed [\(calendarSyncEnv.label)]. Set a task Next Due to today to verify."
+                calendarSyncMessage = "No active calendar-based tasks have due dates to publish [\(calendarSyncEnv.label)]."
             } else {
-                calendarSyncMessage = "Pushed \(count) task\(count == 1 ? "" : "s") [\(calendarSyncEnv.label)]"
+                calendarSyncMessage = "Published \(count) scheduled task\(count == 1 ? "" : "s") by due date [\(calendarSyncEnv.label)]"
             }
         } catch {
             calendarSyncMessage = "Calendar: \(error.localizedDescription)"
@@ -933,6 +948,7 @@ final class MaintenanceStore: ObservableObject {
             hasLocalChanges = false
             persistSyncState()
             statusMessage = "Saved"
+            scheduleAutomaticCalendarPublish()
         } catch {
             isOnline = false
             statusMessage = "Couldn’t save: \(error.localizedDescription)"
@@ -958,12 +974,14 @@ final class MaintenanceStore: ObservableObject {
             statusMessage = "Completed · next due \(DateHelper.isoDate(updated.nextDue))"
             // Remove calendar event for this task (Apple Calendar is view-only; PM drives state).
             await removeCalendarEventsForTask(id: selectedTaskID)
+            scheduleAutomaticCalendarPublish()
         } catch {
             // Fallback: local complete + upsert so the UI still works if complete endpoint fails.
             markTaskCompleteLocally(at: index)
             await upsertTaskToServer(tasks[index])
             // Also remove calendar event on local-fallback path.
             await removeCalendarEventsForTask(id: selectedTaskID)
+            scheduleAutomaticCalendarPublish()
             if !statusMessage.hasPrefix("Couldn’t") {
                 statusMessage = "Completed (synced)"
             }
@@ -1129,6 +1147,7 @@ final class MaintenanceStore: ObservableObject {
                 isOnline = true
                 lastSyncAt = Date()
                 statusMessage = "Deleted task"
+                scheduleAutomaticCalendarPublish()
             } catch {
                 isOnline = false
                 statusMessage = "Deleted on Mac; server: \(error.localizedDescription)"
@@ -2331,14 +2350,8 @@ struct ContentView: View {
             // Window is already visible; refresh offline cache first, then assets.
             await store.refreshFromServer()
             await store.refreshAssets()
-            let envPush = ProcessInfo.processInfo.environment["PROPERTYMANAGER_AUTOPUSH_CALENDAR"] == "1"
-            let sentinel = FileManager.default.temporaryDirectory.appendingPathComponent("pm-autopush-calendar")
-            let filePush = FileManager.default.fileExists(atPath: sentinel.path)
-            if envPush || filePush {
-                await store.pushToCalendar()
-                NSLog("[CalendarSync] autopush status=%@", store.calendarSyncMessage as NSString)
-                try? FileManager.default.removeItem(at: sentinel)
-            }
+            await store.pushToCalendar()
+            NSLog("[CalendarSync] automatic publish status=%@", store.calendarSyncMessage as NSString)
         }
         .sheet(isPresented: $showingManualImportReview) {
             ManualImportReviewSheet(
@@ -2547,16 +2560,22 @@ struct SidebarView: View {
                         .foregroundStyle(AppEnvironment.isDevelopment ? Color.orange : Color.green)
                 }
 
-                Button {
-                    calendarPushAction()
-                } label: {
-                    Label(
-                        isSyncingCalendar ? "Working..." : "Push today's due tasks to OpenClaw",
-                        systemImage: "calendar.badge.plus"
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if AppEnvironment.isDevelopment {
+                    Button {
+                        calendarPushAction()
+                    } label: {
+                        Label(
+                            isSyncingCalendar ? "Working..." : "Publish all task due dates",
+                            systemImage: "calendar.badge.plus"
+                        )
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .disabled(isSyncingCalendar)
+                } else {
+                    Label("Task due dates sync automatically", systemImage: "calendar.badge.checkmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-                .disabled(isSyncingCalendar)
 
                 // Delete DEV events — only shown when env is DEV so it can't
                 // accidentally nuke prod events after cutover.

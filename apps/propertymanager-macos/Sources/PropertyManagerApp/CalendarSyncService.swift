@@ -23,25 +23,21 @@ enum SyncEnv: String, CaseIterable, Identifiable {
 
 // MARK: - Calendar sync service
 
-/// One-way push of today's PropertyManager tasks to the "OpenClaw" Apple Calendar.
+/// One-way publication of PropertyManager task due dates to Apple Calendar.
 ///
 /// ### Marker strategy
 /// Every PM-managed event has a stable identifier embedded in its notes field:
 ///   `propertymanager://task/<uuid>?env=dev`   ← DEV push
 ///   `propertymanager://task/<uuid>?env=prod`  ← prod push
 ///
-/// Re-push is fully idempotent: existing PM events for today in the same env
-/// are removed first, then fresh timed blocks are written.  If the operator
+/// Re-publish is fully idempotent: existing PM events in the same environment
+/// are removed first, then fresh timed blocks are written. If the operator
 /// deleted an event from Calendar.app manually, re-push recreates it for any
 /// task that is still incomplete — that is intentional (Calendar is view-only;
 /// completing tasks is done in PropertyManager only).
 ///
-/// ### Roll-forward
-/// Filter is `active + scheduleKind calendar|both + nextDue ≤ today`.
-/// Since nextDue only advances when the operator marks a task complete in PM,
-/// incomplete overdue tasks keep getting a calendar block on every push
-/// until they are completed.  This is the "roll to next day" behaviour: PM
-/// drives it by not advancing nextDue until done.
+/// Each active `calendar` or `both` task is placed on its own `nextDue` date.
+/// Tasks sharing a date are stacked from the operator-selected start time.
 ///
 /// ### Calendar authority
 /// Apple Calendar is a **read-only plan view**.  Deleting or editing a
@@ -129,21 +125,21 @@ final class CalendarSyncService {
         }
     }
 
-    // MARK: - Push today's tasks
+    // MARK: - Publish scheduled tasks
 
-    /// Pushes tasks due today (or overdue/incomplete) to "OpenClaw" as timed blocks.
+    /// Publishes every active calendar-based task on its individual due date.
     ///
     /// Steps:
     /// 1. Request write access.
     /// 2. Find the "OpenClaw" calendar (error if missing).
-    /// 3. Remove all existing PM events for today in the same env (idempotent).
-    /// 4. Filter tasks: active + calendar|both + nextDue ≤ today.
-    /// 5. Sort high→low priority, then earliest nextDue first.
-    /// 6. Stack timed blocks from startHour:startMinute, each estimatedMinutes (or 30).
+    /// 3. Remove existing PM events in the same env (idempotent).
+    /// 4. Filter tasks: active + calendar|both.
+    /// 5. Sort by due date, then high→low priority.
+    /// 6. Stack same-day blocks from startHour:startMinute.
     /// 7. Commit.
     ///
     /// Returns the number of events written.
-    func pushTodaysTasks(
+    func pushScheduledTasks(
         _ tasks: [MaintenanceTask],
         startHour: Int,
         startMinute: Int,
@@ -151,26 +147,22 @@ final class CalendarSyncService {
         assets: [MacRanchAsset]
     ) async throws -> Int {
         let cal = Calendar.current
-        let todayStart = cal.startOfDay(for: Date())
-        guard let todayEnd = cal.date(byAdding: .day, value: 1, to: todayStart) else {
-            throw CalendarSyncError.dateArithmetic
-        }
-
-        // Filter: active, calendar-type, nextDue (local day) ≤ today.
-        let dueTasks = tasks
+        let scheduledTasks = tasks
             .filter { task in
                 guard task.isActive else { return false }
                 let kind = task.scheduleKind.lowercased()
-                guard kind == "calendar" || kind == "both" else { return false }
-                return cal.startOfDay(for: task.nextDue) <= todayStart
+                return kind == "calendar" || kind == "both"
             }
             .sorted { lhs, rhs in
+                let leftDay = cal.startOfDay(for: lhs.nextDue)
+                let rightDay = cal.startOfDay(for: rhs.nextDue)
+                if leftDay != rightDay { return leftDay < rightDay }
                 let lp = priorityRank(lhs.priority)
                 let rp = priorityRank(rhs.priority)
                 if lp != rp { return lp < rp }
-                return lhs.nextDue < rhs.nextDue
+                return lhs.item.localizedCaseInsensitiveCompare(rhs.item) == .orderedAscending
             }
-        NSLog("[CalendarSync] eligible due tasks=%d (of %d loaded)", dueTasks.count, tasks.count)
+        NSLog("[CalendarSync] eligible scheduled tasks=%d (of %d loaded)", scheduledTasks.count, tasks.count)
 
         // EventKit path. On this Mac, Full Access can still yield 0 calendars
         // (calaccessd XPC 4099) — fall back to Calendar.app AppleScript.
@@ -196,8 +188,8 @@ final class CalendarSyncService {
         }
 
         if useAppleScript || calendar == nil {
-            return try CalendarAppleScriptPush.pushTodaysTasks(
-                dueTasks,
+            return try CalendarAppleScriptPush.pushScheduledTasks(
+                scheduledTasks,
                 startHour: startHour,
                 startMinute: startMinute,
                 env: env,
@@ -206,23 +198,27 @@ final class CalendarSyncService {
         }
 
         let openClaw = calendar!
-        // Remove all existing PM events for today in this env (idempotent re-push).
-        let pred = ekStore.predicateForEvents(withStart: todayStart, end: todayEnd, calendars: [openClaw])
-        let todayEvents = ekStore.events(matching: pred)
-        for ev in todayEvents where Self.hasPMMarker(ev.notes, env: env) {
+        var bounds = DateComponents()
+        bounds.year = 2000
+        bounds.month = 1
+        bounds.day = 1
+        guard let searchStart = cal.date(from: bounds) else { throw CalendarSyncError.dateArithmetic }
+        bounds.year = 2101
+        guard let searchEnd = cal.date(from: bounds) else { throw CalendarSyncError.dateArithmetic }
+        let pred = ekStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: [openClaw])
+        let managedEvents = ekStore.events(matching: pred)
+        for ev in managedEvents where Self.hasPMMarker(ev.notes, env: env) {
             try ekStore.remove(ev, span: .thisEvent, commit: false)
         }
 
-        // Stack timed blocks from the configured start time.
-        var cursor: Date = {
-            var c = cal.dateComponents([.year, .month, .day], from: todayStart)
-            c.hour = startHour
-            c.minute = startMinute
-            c.second = 0
-            return cal.date(from: c) ?? todayStart
-        }()
-
-        for task in dueTasks {
+        var dayCursors: [Date: Date] = [:]
+        for task in scheduledTasks {
+            let dueDay = cal.startOfDay(for: task.nextDue)
+            var components = cal.dateComponents([.year, .month, .day], from: dueDay)
+            components.hour = startHour
+            components.minute = startMinute
+            components.second = 0
+            let cursor = dayCursors[dueDay] ?? cal.date(from: components) ?? dueDay
             let duration = max(1, task.estimatedMinutes)
             let eventEnd = cursor.addingTimeInterval(Double(duration) * 60)
 
@@ -240,31 +236,28 @@ final class CalendarSyncService {
             if !task.taskDescription.isEmpty {
                 lines.append(task.taskDescription)
             }
-            if cal.startOfDay(for: task.nextDue) < todayStart {
-                lines.append("⚠️ Overdue · was due \(shortDate(task.nextDue))")
-            }
+            lines.append("PropertyManager due date: \(shortDate(task.nextDue))")
             ev.notes = lines.joined(separator: "\n")
 
             try ekStore.save(ev, span: .thisEvent, commit: false)
-            cursor = eventEnd
+            dayCursors[dueDay] = eventEnd
         }
 
         try ekStore.commit()
-        return dueTasks.count
+        return scheduledTasks.count
     }
 
     // MARK: - Remove one task's events (on complete)
 
-    /// Removes all PM-managed events for `taskId` across a ±1-day window.
+    /// Removes all PM-managed events for `taskId` across the managed date range.
     /// Called immediately when the Mac app completes a task.
     ///
     /// Controlled by the `removeCalendarEventOnComplete` UserDefaults key
     /// (default true) so it can be toggled off with one settings change if
     /// the product preference changes.
     ///
-    /// Searches both today and ±1 day so an event placed near midnight is
-    /// always found. The signed app identity fixes which environment calendar
-    /// is searched, so DEV completion cannot remove a production event.
+    /// The signed app identity fixes which environment calendar is searched,
+    /// so DEV completion cannot remove a production event.
     func removeEventsForTask(taskId: UUID) async throws {
         guard try await requestWriteAccess() else { return }
 
@@ -275,11 +268,13 @@ final class CalendarSyncService {
         ) else { return }
 
         let cal = Calendar.current
-        let today = cal.startOfDay(for: Date())
-        guard
-            let searchStart = cal.date(byAdding: .day, value: -1, to: today),
-            let searchEnd = cal.date(byAdding: .day, value: 2, to: today)
-        else { return }
+        var bounds = DateComponents()
+        bounds.year = 2000
+        bounds.month = 1
+        bounds.day = 1
+        guard let searchStart = cal.date(from: bounds) else { return }
+        bounds.year = 2101
+        guard let searchEnd = cal.date(from: bounds) else { return }
 
         let pred = ekStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: [calendar])
         let events = ekStore.events(matching: pred)

@@ -34,8 +34,8 @@ enum CalendarAppleScriptPush {
         return nil
     }
 
-    static func pushTodaysTasks(
-        _ dueTasks: [MaintenanceTask],
+    static func pushScheduledTasks(
+        _ scheduledTasks: [MaintenanceTask],
         startHour: Int,
         startMinute: Int,
         env: SyncEnv,
@@ -52,48 +52,79 @@ enum CalendarAppleScriptPush {
             )
         }
 
-        // Idempotent cleanup of today's PM markers for this env.
+        // OpenClaw DEV is dedicated to PropertyManager testing, so DEV can
+        // safely clear the entire calendar before rebuilding it. Production
+        // remains marker-scoped because its calendar may contain other items.
+        let cleanupBody: String
+        if env == .dev {
+            cleanupBody = """
+            set removedCount to 0
+            try
+              set removedCount to count of every event of cal
+              delete every event of cal
+            end try
+            """
+        } else {
+            cleanupBody = """
+            set removedCount to 0
+            set d0 to current date
+            set year of d0 to 2000
+            set month of d0 to January
+            set day of d0 to 1
+            set hours of d0 to 0
+            set minutes of d0 to 0
+            set seconds of d0 to 0
+            set d1 to current date
+            set year of d1 to 2101
+            set month of d1 to January
+            set day of d1 to 1
+            set hours of d1 to 0
+            set minutes of d1 to 0
+            set seconds of d1 to 0
+            set marker to \(asString(markerScheme))
+            set envTag to \(asString("env=\(env.rawValue)"))
+            set doomed to {}
+            set candidates to {}
+            try
+              set candidates to every event of cal whose start date ≥ d0 and start date < d1
+            end try
+            repeat with e in candidates
+              set n to ""
+              try
+                set n to description of e as text
+              end try
+              if n contains marker and n contains envTag then
+                set end of doomed to e
+              end if
+            end repeat
+            set removedCount to count of doomed
+            repeat with e in doomed
+              delete e
+            end repeat
+            """
+        }
+
+        // Idempotent cleanup of all PM-managed events for this environment.
         let deleteScript = """
-        with timeout of 15 seconds
+        with timeout of 60 seconds
         tell application "Calendar"
           set cal to first calendar whose name is \(asString(calName))
-          set d0 to current date
-          set hours of d0 to 0
-          set minutes of d0 to 0
-          set seconds of d0 to 0
-          set d1 to d0 + (1 * days)
-          set marker to \(asString(markerScheme))
-          set envTag to \(asString("env=\(env.rawValue)"))
-          set doomed to {}
-          repeat with e in (every event of cal whose start date ≥ d0 and start date < d1)
-            set n to ""
-            try
-              set n to description of e as text
-            end try
-            if n contains marker and n contains envTag then
-              set end of doomed to e
-            end if
-          end repeat
-          repeat with e in doomed
-            delete e
-          end repeat
-          return count of doomed
+          \(cleanupBody)
+          return removedCount
         end tell
         end timeout
         """
         _ = try run(deleteScript)
 
         let cal = Calendar.current
-        let todayStart = cal.startOfDay(for: Date())
-        var cursor: Date = {
-            var c = cal.dateComponents([.year, .month, .day], from: todayStart)
-            c.hour = startHour
-            c.minute = startMinute
-            c.second = 0
-            return cal.date(from: c) ?? todayStart
-        }()
-
-        for task in dueTasks {
+        var dayCursors: [Date: Date] = [:]
+        for task in scheduledTasks {
+            let dueDay = cal.startOfDay(for: task.nextDue)
+            var components = cal.dateComponents([.year, .month, .day], from: dueDay)
+            components.hour = startHour
+            components.minute = startMinute
+            components.second = 0
+            let cursor = dayCursors[dueDay] ?? cal.date(from: components) ?? dueDay
             let duration = max(1, task.estimatedMinutes)
             let eventEnd = cursor.addingTimeInterval(Double(duration) * 60)
             let group = TaskTitle.displayAssetName(area: task.area, assetId: task.assetId, assets: assets)
@@ -101,12 +132,10 @@ enum CalendarAppleScriptPush {
             let title = env == .dev ? "[DEV] \(taskTitle)" : taskTitle
             var lines = [CalendarSyncService.marker(taskId: task.id, env: env)]
             if !task.taskDescription.isEmpty { lines.append(task.taskDescription) }
-            if cal.startOfDay(for: task.nextDue) < todayStart {
-                let f = DateFormatter()
-                f.dateStyle = .short
-                f.timeStyle = .none
-                lines.append("⚠️ Overdue · was due \(f.string(from: task.nextDue))")
-            }
+            let f = DateFormatter()
+            f.dateStyle = .short
+            f.timeStyle = .none
+            lines.append("PropertyManager due date: \(f.string(from: task.nextDue))")
             let notes = lines.joined(separator: "\n")
             let script = """
             set startDate to date \(asString(asDate(cursor)))
@@ -122,9 +151,9 @@ enum CalendarAppleScriptPush {
             return "ok"
             """
             _ = try run(script)
-            cursor = eventEnd
+            dayCursors[dueDay] = eventEnd
         }
-        return dueTasks.count
+        return scheduledTasks.count
     }
 
     private static func asString(_ s: String) -> String {

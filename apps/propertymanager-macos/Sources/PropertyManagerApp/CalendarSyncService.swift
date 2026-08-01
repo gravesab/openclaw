@@ -182,38 +182,29 @@ final class CalendarSyncService {
             }
         NSLog("[CalendarSync] eligible scheduled tasks=%d (of %d loaded)", scheduledTasks.count, tasks.count)
 
-        // EventKit path. On this Mac, Full Access can still yield 0 calendars
-        // (calaccessd XPC 4099) — fall back to Calendar.app AppleScript.
-        var useAppleScript = false
+        // Writes are EventKit-only. Calendar.app AppleScript is intentionally
+        // not a write fallback because iCloud can acknowledge deletes before
+        // applying them, which previously multiplied task events.
         var ekStore = EKEventStore()
         var calendar: EKCalendar?
         do {
-            guard try await requestWriteAccess() else { useAppleScript = true; throw CalendarSyncError.permissionDenied }
-            if !hasFullCalendarAccess() { useAppleScript = true; throw CalendarSyncError.fullAccessRequired }
+            guard try await requestWriteAccess() else { throw CalendarSyncError.permissionDenied }
+            if !hasFullCalendarAccess() { throw CalendarSyncError.fullAccessRequired }
             if ekStore.calendars(for: .event).isEmpty {
                 try await Task.sleep(nanoseconds: 400_000_000)
                 ekStore = EKEventStore()
             }
             if ekStore.calendars(for: .event).isEmpty {
-                NSLog("[CalendarSync] EventKit 0 calendars after Full Access — AppleScript fallback")
-                useAppleScript = true
+                throw CalendarSyncError.eventKitWriteUnavailable
             } else {
                 calendar = try openClawCalendar(in: ekStore, title: Self.calendarTitle(for: env))
             }
         } catch {
-            NSLog("[CalendarSync] EventKit unavailable (%@) — AppleScript fallback", error.localizedDescription)
-            useAppleScript = true
+            NSLog("[CalendarSync] EventKit write unavailable (%@)", error.localizedDescription)
+            throw error
         }
 
-        if useAppleScript || calendar == nil {
-            return try CalendarAppleScriptPush.pushScheduledTasks(
-                scheduledTasks,
-                startHour: startHour,
-                startMinute: startMinute,
-                env: env,
-                assets: assets
-            )
-        }
+        guard calendar != nil else { throw CalendarSyncError.eventKitWriteUnavailable }
 
         let openClaw = calendar!
         var bounds = DateComponents()
@@ -370,7 +361,7 @@ final class CalendarSyncService {
             ekStore = EKEventStore()
         }
         guard let calendar = try? openClawCalendar(in: ekStore, title: Self.developmentCalendarTitle) else {
-            return try CalendarAppleScriptPush.deleteManagedEvents(env: .dev)
+            throw CalendarSyncError.eventKitWriteUnavailable
         }
 
         let cal = Calendar.current
@@ -451,6 +442,7 @@ final class CalendarSyncService {
 enum CalendarSyncError: LocalizedError {
     case permissionDenied
     case fullAccessRequired
+    case eventKitWriteUnavailable
     case calendarNotFound(String, available: [String], authRaw: Int)
     case dateArithmetic
     case appleScriptFailed(String)
@@ -461,6 +453,8 @@ enum CalendarSyncError: LocalizedError {
             return "Calendar access denied. System Settings → Privacy & Security → Calendars → PropertyManagerApp → Full Access."
         case .fullAccessRequired:
             return "Full Access required (write-only cannot list iCloud calendars). System Settings → Privacy & Security → Calendars → PropertyManagerApp → Full Access, then Push again."
+        case .eventKitWriteUnavailable:
+            return "Calendar write paused safely: EventKit cannot currently see the iCloud calendars. No AppleScript write fallback was used and no events were changed."
         case .calendarNotFound(let title, let available, let authRaw):
             // Lead with actionable cause so a truncated sidebar still shows the fix.
             if available.isEmpty {

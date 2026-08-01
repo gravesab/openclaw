@@ -870,19 +870,35 @@ final class MaintenanceStore: ObservableObject {
     /// environment-specific calendar.
     @MainActor
     func pushToCalendar() async {
+        await publishCalendarTasks(tasks)
+    }
+
+    /// DEV acceptance path: publish only the selected task occurrence.
+    @MainActor
+    func pushSelectedTaskToCalendarForTesting() async {
+        guard let selectedTaskID,
+              let selectedTask = tasks.first(where: { $0.id == selectedTaskID }) else {
+            calendarSyncMessage = "Select one task before publishing the DEV test event"
+            return
+        }
+        await publishCalendarTasks([selectedTask])
+    }
+
+    @MainActor
+    private func publishCalendarTasks(_ publicationTasks: [MaintenanceTask]) async {
         guard !isSyncingCalendar else { return }
         isSyncingCalendar = true
         defer { isSyncingCalendar = false }
         calendarSyncMessage = "Pushing to OpenClaw..."
         do {
             let count = try await CalendarSyncService.shared.pushScheduledTasks(
-                tasks,
+                publicationTasks,
                 startHour: calendarStartHour,
                 startMinute: calendarStartMinute,
                 env: calendarSyncEnv,
                 assets: assets
             )
-            calendarPublicationLedger = Dictionary(uniqueKeysWithValues: tasks.compactMap { task in
+            calendarPublicationLedger = Dictionary(uniqueKeysWithValues: publicationTasks.compactMap { task in
                 let kind = task.scheduleKind.lowercased()
                 guard task.isActive, kind == "calendar" || kind == "both" else { return nil }
                 return (task.id, task.nextDue)
@@ -941,7 +957,7 @@ final class MaintenanceStore: ObservableObject {
             calendarPublicationLedger = ledger
             writeLocalCacheOnly()
             statusMessage = "Completed from Calendar · next due \(DateHelper.isoDate(updated.nextDue))"
-            await pushToCalendar()
+            await publishCalendarTasks([updated])
         } catch {
             statusMessage = "Calendar completion failed: \(error.localizedDescription)"
         }
@@ -952,7 +968,9 @@ final class MaintenanceStore: ObservableObject {
     func restoreDeletedCalendarEvent() async {
         guard let task = pendingCalendarCompletionTask else { return }
         pendingCalendarCompletionIDs.removeAll { $0 == task.id }
-        await pushToCalendar()
+        if let selected = tasks.first(where: { $0.id == task.id }) {
+            await publishCalendarTasks([selected])
+        }
     }
 
     /// Deletes all PM events tagged env=dev from "OpenClaw" in a +/-90-day window.
@@ -2366,7 +2384,7 @@ struct ContentView: View {
                 statusMessage: store.statusMessage,
                 showAssetsPanel: store.showAssetsPanel,
                 toggleAssetsAction: { store.showAssetsPanel.toggle() },
-                calendarPushAction: { Task { await store.pushToCalendar() } },
+                calendarPushAction: { Task { await store.pushSelectedTaskToCalendarForTesting() } },
                 deleteDevCalendarEventsAction: { Task { await store.deleteDevCalendarEvents() } },
                 calendarSyncMessage: store.calendarSyncMessage,
                 isSyncingCalendar: store.isSyncingCalendar
@@ -2695,7 +2713,7 @@ struct SidebarView: View {
                         calendarPushAction()
                     } label: {
                         Label(
-                            isSyncingCalendar ? "Working..." : "Publish all task due dates",
+                            isSyncingCalendar ? "Working..." : "Publish selected DEV test event",
                             systemImage: "calendar.badge.plus"
                         )
                         .frame(maxWidth: .infinity, alignment: .leading)

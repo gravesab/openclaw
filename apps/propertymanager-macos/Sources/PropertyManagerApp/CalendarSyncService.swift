@@ -31,19 +31,19 @@ enum SyncEnv: String, CaseIterable, Identifiable {
 ///   `propertymanager://task/<uuid>?env=prod`  ← prod push
 ///
 /// Re-publish is fully idempotent: existing PM events in the same environment
-/// are removed first, then fresh timed blocks are written. If the operator
-/// deleted an event from Calendar.app manually, re-push recreates it for any
-/// task that is still incomplete — that is intentional (Calendar is view-only;
-/// completing tasks is done in PropertyManager only).
+/// are removed first, then fresh timed blocks are written. Before a rebuild,
+/// the app compares the last successful publication ledger with the managed
+/// events that remain. A missing event becomes a pending operator decision;
+/// it is never silently treated as completed.
 ///
 /// Each active `calendar` or `both` task is placed on its own `nextDue` date.
 /// Tasks sharing a date are stacked from the operator-selected start time.
 ///
 /// ### Calendar authority
-/// Apple Calendar is a **read-only plan view**.  Deleting or editing a
-/// calendar event never updates PM task data, due dates, or completion.
-/// Completing, rescheduling, or editing tasks happens only through the PM Mac
-/// or iPhone UI → REST API.  There is no reverse Calendar→PM sync.
+/// Apple Calendar is a plan view with one guarded reverse action: deleting a
+/// managed event may be confirmed in PropertyManager as task completion. The
+/// authenticated REST completion endpoint remains the only state-changing
+/// authority. Calendar edits never directly mutate PostgreSQL.
 ///
 /// ### iOS complete
 /// The iPhone cannot write EventKit on the Mac directly.  When a task is
@@ -87,6 +87,24 @@ final class CalendarSyncService {
     /// Returns true if the notes string contains any PM marker (any env).
     static func hasAnyPMMarker(_ notes: String?) -> Bool {
         notes?.contains(markerScheme) ?? false
+    }
+
+    /// Extracts the task UUID only when the marker belongs to `env`.
+    static func taskID(from notes: String?, env: SyncEnv) -> UUID? {
+        guard let notes,
+              let markerRange = notes.range(of: markerScheme),
+              notes.contains("env=\(env.rawValue)") else { return nil }
+        let suffix = notes[markerRange.upperBound...]
+        let rawID = suffix.prefix { $0 != "?" && !$0.isWhitespace }
+        return UUID(uuidString: String(rawID))
+    }
+
+    static func scheduledTaskIDs(_ tasks: [MaintenanceTask]) -> Set<UUID> {
+        Set(tasks.compactMap { task in
+            guard task.isActive else { return nil }
+            let kind = task.scheduleKind.lowercased()
+            return (kind == "calendar" || kind == "both") ? task.id : nil
+        })
     }
 
     // MARK: - EventKit access
@@ -245,6 +263,49 @@ final class CalendarSyncService {
 
         try ekStore.commit()
         return scheduledTasks.count
+    }
+
+    // MARK: - Detect operator-deleted managed events
+
+    /// Returns managed task IDs currently present in the environment calendar.
+    /// EventKit is preferred; Calendar.app scripting is the same fallback used
+    /// by publication when macOS exposes no calendars through EventKit.
+    func existingManagedTaskIDs(env: SyncEnv) async throws -> Set<UUID> {
+        guard try await requestWriteAccess() else {
+            throw CalendarSyncError.permissionDenied
+        }
+
+        var ekStore = EKEventStore()
+        if ekStore.calendars(for: .event).isEmpty {
+            try await Task.sleep(nanoseconds: 400_000_000)
+            ekStore = EKEventStore()
+        }
+        if let calendar = try? openClawCalendar(
+            in: ekStore,
+            title: Self.calendarTitle(for: env)
+        ) {
+            let cal = Calendar.current
+            var startParts = DateComponents()
+            startParts.year = 2000
+            startParts.month = 1
+            startParts.day = 1
+            var endParts = startParts
+            endParts.year = 2101
+            guard let start = cal.date(from: startParts),
+                  let end = cal.date(from: endParts) else {
+                throw CalendarSyncError.dateArithmetic
+            }
+            let predicate = ekStore.predicateForEvents(
+                withStart: start,
+                end: end,
+                calendars: [calendar]
+            )
+            return Set(ekStore.events(matching: predicate).compactMap {
+                Self.taskID(from: $0.notes, env: env)
+            })
+        }
+
+        return try CalendarAppleScriptPush.existingManagedTaskIDs(env: env)
     }
 
     // MARK: - Remove one task's events (on complete)

@@ -156,6 +156,42 @@ enum CalendarAppleScriptPush {
         return scheduledTasks.count
     }
 
+    /// Reads only PropertyManager markers from the environment calendar.
+    /// No events are created, edited, or deleted by this operation.
+    static func existingManagedTaskIDs(env: SyncEnv) throws -> Set<UUID> {
+        let titles = try listCalendarTitles()
+        let expectedTitle = CalendarSyncService.calendarTitle(for: env)
+        guard let calName = resolveOpenClawTitle(from: titles, env: env) else {
+            throw CalendarSyncError.calendarNotFound(expectedTitle, available: titles, authRaw: -1)
+        }
+        let script = """
+        with timeout of 30 seconds
+        tell application "Calendar"
+          set cal to first calendar whose name is \(asString(calName))
+          set marker to \(asString(markerScheme))
+          set envTag to \(asString("env=\(env.rawValue)"))
+          set found to {}
+          repeat with e in every event of cal
+            set n to ""
+            try
+              set n to description of e as text
+            end try
+            if n contains marker and n contains envTag then set end of found to n
+          end repeat
+          set AppleScript's text item delimiters to "|||PM-EVENT|||"
+          set joined to found as text
+          set AppleScript's text item delimiters to ""
+          return joined
+        end tell
+        end timeout
+        """
+        let output = try run(script)
+        if output.isEmpty { return [] }
+        return Set(output.components(separatedBy: "|||PM-EVENT|||").compactMap {
+            CalendarSyncService.taskID(from: $0, env: env)
+        })
+    }
+
     private static func asString(_ s: String) -> String {
         let escaped = s
             .replacingOccurrences(of: "\\", with: "\\\\")

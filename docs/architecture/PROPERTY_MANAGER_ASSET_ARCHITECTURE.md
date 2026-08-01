@@ -247,6 +247,23 @@ On task complete with meter schedule (after operator confirms meter):
 
 Calendar `next_due` recalculation unchanged for `calendar` / `both` schedules. **Never** derive calendar dates from meter hour intervals.
 
+### Guarded Calendar completion
+
+Apple Calendar is a derived daily-work view, not the system of record. Each
+PropertyManager-created event contains the task UUID and environment marker,
+and each successful publication records the task occurrence in a local
+publication ledger. Before rebuilding managed events, the Mac client compares
+that ledger with the events that remain in the environment-specific calendar.
+
+Deleting a managed event creates a pending operator decision. The operator may
+either confirm that the task was completed or restore the calendar event. A
+deletion never changes PostgreSQL by itself. Confirmed completion uses the same
+authenticated REST completion endpoint as the Mac and iOS applications,
+records Calendar as the completion source in the note/audit trail, recalculates
+the next due occurrence, and republishes the calendar. DEV and production use
+separate calendars and separate ledgers; cross-environment completion is not
+permitted.
+
 ### Meter epoch changes
 
 On **replacement** or **rollover** confirmation:

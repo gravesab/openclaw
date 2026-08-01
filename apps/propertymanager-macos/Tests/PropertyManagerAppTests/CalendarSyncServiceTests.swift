@@ -53,4 +53,14 @@ final class CalendarSyncServiceTests: XCTestCase {
         XCTAssertEqual(CalendarSyncService.calendarTitle(for: .dev), "OpenClaw DEV")
         XCTAssertEqual(CalendarSyncService.calendarTitle(for: .prod), "OpenClaw")
     }
+
+    func testTaskIDParsingRequiresMatchingEnvironment() {
+        let taskID = UUID(uuidString: "12345678-1234-1234-1234-1234567890AB")!
+        let notes = "Instructions\n\(CalendarSyncService.marker(taskId: taskID, env: .dev))\nDue today"
+
+        XCTAssertEqual(CalendarSyncService.taskID(from: notes, env: .dev), taskID)
+        XCTAssertNil(CalendarSyncService.taskID(from: notes, env: .prod))
+        XCTAssertNil(CalendarSyncService.taskID(from: "ordinary event", env: .dev))
+    }
+
 }

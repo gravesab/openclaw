@@ -367,12 +367,18 @@ final class MaintenanceStore: ObservableObject {
     @Published var showAssetsPanel: Bool = false
     @Published var calendarSyncMessage: String = ""
     @Published var isSyncingCalendar: Bool = false
+    @Published var pendingCalendarCompletionIDs: [UUID] = []
 
     private let apiBaseURLKey = "propertyManager.apiBaseURL"
     private let apiKeyKey = "propertyManager.apiKey"
     private let operatorPINKey = "propertyManager.operatorPIN"
     private var autosaveTask: Task<Void, Never>?
     private var calendarPublishTask: Task<Void, Never>?
+
+    var pendingCalendarCompletionTask: MaintenanceTask? {
+        guard let id = pendingCalendarCompletionIDs.first else { return nil }
+        return tasks.first(where: { $0.id == id })
+    }
 
     var apiBaseURL: String {
         get {
@@ -430,6 +436,28 @@ final class MaintenanceStore: ObservableObject {
             return v as? Bool ?? true
         }
         set { UserDefaults.standard.set(newValue, forKey: "propertyManager.removeCalendarEventOnComplete") }
+    }
+
+    private var calendarLedgerKey: String {
+        "propertyManager.calendarPublicationLedger.\(calendarSyncEnv.rawValue)"
+    }
+
+    private var calendarPublicationLedger: [UUID: Date] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: calendarLedgerKey),
+                  let raw = try? JSONDecoder().decode([String: Date].self, from: data) else {
+                return [:]
+            }
+            return Dictionary(uniqueKeysWithValues: raw.compactMap { key, value in
+                UUID(uuidString: key).map { ($0, value) }
+            })
+        }
+        set {
+            let raw = Dictionary(uniqueKeysWithValues: newValue.map { ($0.key.uuidString, $0.value) })
+            if let data = try? JSONEncoder().encode(raw) {
+                UserDefaults.standard.set(data, forKey: calendarLedgerKey)
+            }
+        }
     }
 
     var apiClient: PropertyAPIClient {
@@ -838,6 +866,11 @@ final class MaintenanceStore: ObservableObject {
                 env: calendarSyncEnv,
                 assets: assets
             )
+            calendarPublicationLedger = Dictionary(uniqueKeysWithValues: tasks.compactMap { task in
+                let kind = task.scheduleKind.lowercased()
+                guard task.isActive, kind == "calendar" || kind == "both" else { return nil }
+                return (task.id, task.nextDue)
+            })
             if count == 0 {
                 calendarSyncMessage = "No active calendar-based tasks have due dates to publish [\(calendarSyncEnv.label)]."
             } else {
@@ -846,6 +879,64 @@ final class MaintenanceStore: ObservableObject {
         } catch {
             calendarSyncMessage = "Calendar: \(error.localizedDescription)"
         }
+    }
+
+    /// Checks the last successful publication ledger before rebuilding Calendar.
+    /// Only a still-current task occurrence whose managed event disappeared can
+    /// become a pending completion. No PostgreSQL change occurs until confirmed.
+    @MainActor
+    func detectDeletedCalendarEvents() async {
+        let ledger = calendarPublicationLedger
+        guard !ledger.isEmpty else { return }
+        do {
+            let existing = try await CalendarSyncService.shared.existingManagedTaskIDs(env: calendarSyncEnv)
+            let calendar = Calendar.current
+            pendingCalendarCompletionIDs = tasks.compactMap { task in
+                guard let publishedDue = ledger[task.id],
+                      task.isActive,
+                      calendar.isDate(publishedDue, inSameDayAs: task.nextDue),
+                      !existing.contains(task.id) else { return nil }
+                return task.id
+            }.sorted { left, right in
+                guard let lhs = tasks.first(where: { $0.id == left }),
+                      let rhs = tasks.first(where: { $0.id == right }) else { return false }
+                return lhs.nextDue < rhs.nextDue
+            }
+            if !pendingCalendarCompletionIDs.isEmpty {
+                calendarSyncMessage = "Calendar event removed — completion confirmation required"
+            }
+        } catch {
+            calendarSyncMessage = "Calendar deletion check: \(error.localizedDescription)"
+        }
+    }
+
+    @MainActor
+    func confirmCalendarDeletionAsComplete() async {
+        guard let task = pendingCalendarCompletionTask,
+              let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
+        statusMessage = "Completing from Calendar…"
+        do {
+            let note = "Completed from deleted \(CalendarSyncService.calendarTitle(for: calendarSyncEnv)) calendar event."
+            let updated = try await apiClient.completeTask(id: task.id, note: note)
+            tasks[index] = updated.mergingEditorFields(from: tasks[index])
+            pendingCalendarCompletionIDs.removeAll { $0 == task.id }
+            var ledger = calendarPublicationLedger
+            ledger.removeValue(forKey: task.id)
+            calendarPublicationLedger = ledger
+            writeLocalCacheOnly()
+            statusMessage = "Completed from Calendar · next due \(DateHelper.isoDate(updated.nextDue))"
+            await pushToCalendar()
+        } catch {
+            statusMessage = "Calendar completion failed: \(error.localizedDescription)"
+        }
+    }
+
+    /// Keeps the task incomplete and restores its event on the next rebuild.
+    @MainActor
+    func restoreDeletedCalendarEvent() async {
+        guard let task = pendingCalendarCompletionTask else { return }
+        pendingCalendarCompletionIDs.removeAll { $0 == task.id }
+        await pushToCalendar()
     }
 
     /// Deletes all PM events tagged env=dev from "OpenClaw" in a +/-90-day window.
@@ -2350,8 +2441,28 @@ struct ContentView: View {
             // Window is already visible; refresh offline cache first, then assets.
             await store.refreshFromServer()
             await store.refreshAssets()
-            await store.pushToCalendar()
+            await store.detectDeletedCalendarEvents()
+            if store.pendingCalendarCompletionIDs.isEmpty {
+                await store.pushToCalendar()
+            }
             NSLog("[CalendarSync] automatic publish status=%@", store.calendarSyncMessage as NSString)
+        }
+        .alert(
+            "Calendar event deleted",
+            isPresented: Binding(
+                get: { store.pendingCalendarCompletionTask != nil },
+                set: { _ in }
+            ),
+            presenting: store.pendingCalendarCompletionTask
+        ) { _ in
+            Button("Mark Task Completed") {
+                Task { await store.confirmCalendarDeletionAsComplete() }
+            }
+            Button("Restore Calendar Event", role: .cancel) {
+                Task { await store.restoreDeletedCalendarEvent() }
+            }
+        } message: { task in
+            Text("You removed \"\(task.item)\" from \(CalendarSyncService.calendarTitle(for: store.calendarSyncEnv)). Was the work completed? Completion is recorded only after you confirm.")
         }
         .sheet(isPresented: $showingManualImportReview) {
             ManualImportReviewSheet(

@@ -368,6 +368,7 @@ final class MaintenanceStore: ObservableObject {
     @Published var calendarSyncMessage: String = ""
     @Published var isSyncingCalendar: Bool = false
     @Published var pendingCalendarCompletionIDs: [UUID] = []
+    @Published private(set) var isRestoringCalendarEvent: Bool = false
 
     private let apiBaseURLKey = "propertyManager.apiBaseURL"
     private let apiKeyKey = "propertyManager.apiKey"
@@ -918,6 +919,7 @@ final class MaintenanceStore: ObservableObject {
     /// become a pending completion. No PostgreSQL change occurs until confirmed.
     @MainActor
     func detectDeletedCalendarEvents() async {
+        guard !isSyncingCalendar, !isRestoringCalendarEvent else { return }
         let ledger = calendarPublicationLedger
         guard !ledger.isEmpty else { return }
         do {
@@ -967,9 +969,25 @@ final class MaintenanceStore: ObservableObject {
     @MainActor
     func restoreDeletedCalendarEvent() async {
         guard let task = pendingCalendarCompletionTask else { return }
+        isRestoringCalendarEvent = true
         pendingCalendarCompletionIDs.removeAll { $0 == task.id }
-        if let selected = tasks.first(where: { $0.id == task.id }) {
-            await publishCalendarTasks([selected])
+        calendarSyncMessage = "Restoring calendar event…"
+        defer { isRestoringCalendarEvent = false }
+
+        guard let selected = tasks.first(where: { $0.id == task.id }) else { return }
+        await publishCalendarTasks([selected])
+        try? await Task.sleep(nanoseconds: 500_000_000)
+        do {
+            let existing = try await CalendarSyncService.shared.existingManagedTaskIDs(env: calendarSyncEnv)
+            if existing.contains(task.id) {
+                calendarSyncMessage = "Calendar event restored [\(calendarSyncEnv.label)]"
+            } else {
+                pendingCalendarCompletionIDs.insert(task.id, at: 0)
+                calendarSyncMessage = "Calendar restore failed: EventKit did not confirm the event"
+            }
+        } catch {
+            pendingCalendarCompletionIDs.insert(task.id, at: 0)
+            calendarSyncMessage = "Calendar restore check failed: \(error.localizedDescription)"
         }
     }
 
@@ -2504,7 +2522,7 @@ struct ContentView: View {
             Button("Mark Task Completed") {
                 Task { await store.confirmCalendarDeletionAsComplete() }
             }
-            Button("Restore Calendar Event", role: .cancel) {
+            Button("Restore Calendar Event") {
                 Task { await store.restoreDeletedCalendarEvent() }
             }
         } message: { task in

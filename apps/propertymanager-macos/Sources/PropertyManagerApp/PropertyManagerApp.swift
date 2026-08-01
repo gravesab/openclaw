@@ -942,10 +942,21 @@ final class MaintenanceStore: ObservableObject {
             }
             if !pendingCalendarCompletionIDs.isEmpty {
                 calendarSyncMessage = "Calendar event removed — completion confirmation required"
-                isCalendarDeletionAlertPresented = true
             }
         } catch {
             calendarSyncMessage = "Calendar deletion check: \(error.localizedDescription)"
+        }
+    }
+
+    /// Operator-controlled review. Background detection never blocks app use;
+    /// the decision prompt appears only after this explicit action.
+    @MainActor
+    func reviewDeletedCalendarEvents() async {
+        await detectDeletedCalendarEvents()
+        if pendingCalendarCompletionTask != nil {
+            isCalendarDeletionAlertPresented = true
+        } else {
+            calendarSyncMessage = "No deleted managed calendar event needs review [\(calendarSyncEnv.label)]"
         }
     }
 
@@ -2414,7 +2425,7 @@ struct ContentView: View {
                 showAssetsPanel: store.showAssetsPanel,
                 toggleAssetsAction: { store.showAssetsPanel.toggle() },
                 calendarPushAction: { Task { await store.pushSelectedTaskToCalendarForTesting() } },
-                calendarDeletionCheckAction: { Task { await store.detectDeletedCalendarEvents() } },
+                calendarDeletionCheckAction: { Task { await store.reviewDeletedCalendarEvents() } },
                 deleteDevCalendarEventsAction: { Task { await store.deleteDevCalendarEvents() } },
                 calendarSyncMessage: store.calendarSyncMessage,
                 isSyncingCalendar: store.isSyncingCalendar

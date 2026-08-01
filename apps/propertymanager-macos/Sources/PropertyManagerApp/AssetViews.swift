@@ -18,26 +18,42 @@ struct MacAssetsPanel: View {
             }
             .padding()
 
-            List(selection: $selectedAssetId) {
-                ForEach(store.assets) { asset in
-                    VStack(alignment: .leading) {
-                        Text(asset.name).font(.headline)
-                        if asset.meterNeedsActivation {
-                            Text("Meter proposed — activate")
-                                .font(.caption)
-                                .foregroundStyle(.orange)
-                        } else if let meter = asset.meter {
-                            if meter.hasMeter {
-                                Text("\(format(meter.currentValue)) \(meter.unit)")
-                                    .foregroundStyle(.secondary)
-                            } else {
-                                Text("No operating meter")
+            if store.assets.isEmpty {
+                VStack(spacing: 12) {
+                    Image(systemName: "shippingbox")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text(store.assetLoadError ?? "No active assets were returned by DEV PostgreSQL.")
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.secondary)
+                    Button("Try Again") {
+                        Task { await store.refreshAssets() }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .padding()
+            } else {
+                List(selection: $selectedAssetId) {
+                    ForEach(store.assets) { asset in
+                        VStack(alignment: .leading) {
+                            Text(asset.name).font(.headline)
+                            if asset.meterNeedsActivation {
+                                Text("Meter proposed — activate")
                                     .font(.caption)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.orange)
+                            } else if let meter = asset.meter {
+                                if meter.hasMeter {
+                                    Text("\(format(meter.currentValue)) \(meter.unit)")
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Text("No operating meter")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
+                        .tag(asset.id as UUID?)
                     }
-                    .tag(asset.id as UUID?)
                 }
             }
 

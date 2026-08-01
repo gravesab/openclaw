@@ -152,7 +152,69 @@ private enum MacAssetList {
         if let wrapped = try? decoder.decode(Wrapped.self, from: data) {
             return wrapped.items
         }
-        return try decoder.decode([MacRanchAsset].self, from: data)
+        // A malformed optional nested task/meter summary must not make the
+        // entire Assets screen blank. Decode each row independently and fall
+        // back to its core asset fields while preserving valid meter data.
+        let object = try JSONSerialization.jsonObject(with: data)
+        let rows: [Any]
+        if let array = object as? [Any] {
+            rows = array
+        } else if let dictionary = object as? [String: Any],
+                  let items = dictionary["items"] as? [Any] {
+            rows = items
+        } else {
+            throw PropertyAPIError.serverMessage("Asset list response was not an array.")
+        }
+
+        return try rows.map { row in
+            let rowData = try JSONSerialization.data(withJSONObject: row)
+            if let asset = try? decoder.decode(MacRanchAsset.self, from: rowData) {
+                return asset
+            }
+            let core = try decoder.decode(MacCoreAsset.self, from: rowData)
+            return MacRanchAsset(
+                id: core.id,
+                externalId: core.externalId,
+                name: core.name,
+                category: core.category,
+                meter: core.meter,
+                proposedMeter: core.proposedMeter,
+                meterActivatedAt: core.meterActivatedAt,
+                tasks: nil,
+                pmSummary: core.pmSummary
+            )
+        }
+    }
+}
+
+private struct MacCoreAsset: Decodable {
+    let id: UUID
+    let externalId: String
+    let name: String
+    let category: String?
+    let meter: MacMeterInfo?
+    let proposedMeter: MacProposedMeter?
+    let meterActivatedAt: Date?
+    let pmSummary: MacPMSummary?
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, category, meter
+        case externalId = "external_id"
+        case proposedMeter = "proposed_meter"
+        case meterActivatedAt = "meter_activated_at"
+        case pmSummary = "pm_summary"
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try MacFlexibleUUID.decode(c, key: .id)
+        externalId = try c.decodeIfPresent(String.self, forKey: .externalId) ?? ""
+        name = try c.decode(String.self, forKey: .name)
+        category = try c.decodeIfPresent(String.self, forKey: .category)
+        meter = try? c.decodeIfPresent(MacMeterInfo.self, forKey: .meter)
+        proposedMeter = try? c.decodeIfPresent(MacProposedMeter.self, forKey: .proposedMeter)
+        meterActivatedAt = MacFlexibleDate.decode(c, key: .meterActivatedAt)
+        pmSummary = try? c.decodeIfPresent(MacPMSummary.self, forKey: .pmSummary)
     }
 }
 
@@ -228,6 +290,28 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         case proposedMeter = "proposed_meter"
         case meterActivatedAt = "meter_activated_at"
         case pmSummary = "pm_summary"
+    }
+
+    init(
+        id: UUID,
+        externalId: String,
+        name: String,
+        category: String?,
+        meter: MacMeterInfo?,
+        proposedMeter: MacProposedMeter?,
+        meterActivatedAt: Date?,
+        tasks: [MacAssetTaskSummary]?,
+        pmSummary: MacPMSummary?
+    ) {
+        self.id = id
+        self.externalId = externalId
+        self.name = name
+        self.category = category
+        self.meter = meter
+        self.proposedMeter = proposedMeter
+        self.meterActivatedAt = meterActivatedAt
+        self.tasks = tasks
+        self.pmSummary = pmSummary
     }
 
     init(from decoder: Decoder) throws {

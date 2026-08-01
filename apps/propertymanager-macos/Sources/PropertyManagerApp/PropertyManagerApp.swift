@@ -363,6 +363,7 @@ final class MaintenanceStore: ObservableObject {
     @Published var lastPullAt: Date?
     @Published var lastPublishAt: Date?
     @Published var assets: [MacRanchAsset] = []
+    @Published var assetLoadError: String?
     @Published var showAssetsPanel: Bool = false
     @Published var calendarSyncMessage: String = ""
     @Published var isSyncingCalendar: Bool = false
@@ -792,8 +793,11 @@ final class MaintenanceStore: ObservableObject {
     func refreshAssets() async {
         do {
             assets = try await apiClient.fetchAssets()
+            assetLoadError = nil
         } catch {
-            statusMessage = "Couldn’t load assets: \(error.localizedDescription)"
+            let message = "Couldn’t load assets: \(error.localizedDescription)"
+            assetLoadError = message
+            statusMessage = message
         }
     }
 

@@ -69,6 +69,24 @@ final class CalendarSyncService {
     /// Days in each direction searched when bulk-deleting DEV events.
     static let devCleanupWindowDays = 90
 
+    private static func eventIdentifierLedgerKey(env: SyncEnv) -> String {
+        "propertyManager.calendarEventIdentifiers.\(env.rawValue)"
+    }
+
+    private static func eventIdentifierLedger(env: SyncEnv) -> [String: String] {
+        UserDefaults.standard.dictionary(forKey: eventIdentifierLedgerKey(env: env)) as? [String: String] ?? [:]
+    }
+
+    private static func saveEventIdentifierLedger(_ ledger: [String: String], env: SyncEnv) {
+        UserDefaults.standard.set(ledger, forKey: eventIdentifierLedgerKey(env: env))
+    }
+
+    func forgetManagedEventIdentifier(taskID: UUID, env: SyncEnv) {
+        var ledger = Self.eventIdentifierLedger(env: env)
+        ledger.removeValue(forKey: taskID.uuidString)
+        Self.saveEventIdentifierLedger(ledger, env: env)
+    }
+
     private init() {}
 
     // MARK: - Marker helpers
@@ -223,14 +241,24 @@ final class CalendarSyncService {
         bounds.year = 2101
         guard let searchEnd = cal.date(from: bounds) else { throw CalendarSyncError.dateArithmetic }
         let pred = ekStore.predicateForEvents(withStart: searchStart, end: searchEnd, calendars: [openClaw])
-        let targetTaskIDs = Set(tasks.map(\.id))
         let managedEvents = ekStore.events(matching: pred)
-        for ev in managedEvents where Self.shouldReplaceManagedEvent(
-            notes: ev.notes,
-            env: env,
-            targetTaskIDs: targetTaskIDs
-        ) {
-            try ekStore.remove(ev, span: .thisEvent, commit: false)
+        let managedByTask = Dictionary(grouping: managedEvents.compactMap { event -> (UUID, EKEvent)? in
+            Self.taskID(from: event.notes, env: env).map { ($0, event) }
+        }, by: { $0.0 }).mapValues { $0.map(\.1) }
+        var identifierLedger = Self.eventIdentifierLedger(env: env)
+        let scheduledIDs = Set(scheduledTasks.map(\.id))
+
+        // A supplied task that is no longer calendar-eligible removes only its
+        // own managed event and identifier.
+        for task in tasks where !scheduledIDs.contains(task.id) {
+            for event in managedByTask[task.id] ?? [] {
+                try ekStore.remove(event, span: .thisEvent, commit: false)
+            }
+            if let identifier = identifierLedger[task.id.uuidString],
+               let event = ekStore.event(withIdentifier: identifier) {
+                try ekStore.remove(event, span: .thisEvent, commit: false)
+            }
+            identifierLedger.removeValue(forKey: task.id.uuidString)
         }
 
         var dayCursors: [Date: Date] = [:]
@@ -244,7 +272,24 @@ final class CalendarSyncService {
             let duration = max(1, task.estimatedMinutes)
             let eventEnd = cursor.addingTimeInterval(Double(duration) * 60)
 
-            let ev = EKEvent(eventStore: ekStore)
+            let storedIdentifier = identifierLedger[task.id.uuidString]
+            let exactEvent = storedIdentifier.flatMap { ekStore.event(withIdentifier: $0) }
+            let discoveredEvents = managedByTask[task.id] ?? []
+            let ev: EKEvent
+            if let exactEvent {
+                ev = exactEvent
+            } else if let discovered = discoveredEvents.first {
+                ev = discovered
+            } else if storedIdentifier != nil {
+                // The event was previously written but the fresh EventKit view
+                // has not caught up. Never create another event in this state.
+                throw CalendarSyncError.eventPendingVisibility(task.id)
+            } else {
+                ev = EKEvent(eventStore: ekStore)
+            }
+            for duplicate in discoveredEvents where duplicate.eventIdentifier != ev.eventIdentifier {
+                try ekStore.remove(duplicate, span: .thisEvent, commit: false)
+            }
             let group = TaskTitle.displayAssetName(area: task.area, assetId: task.assetId, assets: assets)
             let taskTitle = TaskTitle.canonicalItem(assetName: group, title: task.item)
             ev.title = env == .dev ? "[DEV] \(taskTitle)" : taskTitle
@@ -262,10 +307,14 @@ final class CalendarSyncService {
             ev.notes = lines.joined(separator: "\n")
 
             try ekStore.save(ev, span: .thisEvent, commit: false)
+            if let identifier = ev.eventIdentifier {
+                identifierLedger[task.id.uuidString] = identifier
+            }
             dayCursors[dueDay] = eventEnd
         }
 
         try ekStore.commit()
+        Self.saveEventIdentifierLedger(identifierLedger, env: env)
         return scheduledTasks.count
     }
 
@@ -391,6 +440,7 @@ final class CalendarSyncService {
             try ekStore.remove(ev, span: .thisEvent, commit: false)
         }
         if !devEvents.isEmpty { try ekStore.commit() }
+        Self.saveEventIdentifierLedger([:], env: .dev)
         return devEvents.count
     }
 
@@ -456,6 +506,7 @@ enum CalendarSyncError: LocalizedError {
     case permissionDenied
     case fullAccessRequired
     case eventKitWriteUnavailable
+    case eventPendingVisibility(UUID)
     case calendarNotFound(String, available: [String], authRaw: Int)
     case dateArithmetic
     case appleScriptFailed(String)
@@ -468,6 +519,8 @@ enum CalendarSyncError: LocalizedError {
             return "Full Access required (write-only cannot list iCloud calendars). System Settings → Privacy & Security → Calendars → PropertyManagerApp → Full Access, then Push again."
         case .eventKitWriteUnavailable:
             return "Calendar write paused safely: EventKit cannot currently see the iCloud calendars. No AppleScript write fallback was used and no events were changed."
+        case .eventPendingVisibility:
+            return "Calendar update queued safely while EventKit synchronizes the existing event. No duplicate event was created."
         case .calendarNotFound(let title, let available, let authRaw):
             // Lead with actionable cause so a truncated sidebar still shows the fix.
             if available.isEmpty {

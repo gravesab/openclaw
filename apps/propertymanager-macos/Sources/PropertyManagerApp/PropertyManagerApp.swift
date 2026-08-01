@@ -976,6 +976,10 @@ final class MaintenanceStore: ObservableObject {
             calendarPublicationLedger = ledger
             writeLocalCacheOnly()
             statusMessage = "Completed from Calendar · next due \(DateHelper.isoDate(updated.nextDue))"
+            CalendarSyncService.shared.forgetManagedEventIdentifier(
+                taskID: task.id,
+                env: calendarSyncEnv
+            )
             await publishCalendarTasks([updated])
         } catch {
             statusMessage = "Calendar completion failed: \(error.localizedDescription)"
@@ -990,6 +994,10 @@ final class MaintenanceStore: ObservableObject {
     func beginRestoringCalendarEvent(taskID: UUID) {
         isRestoringCalendarEvent = true
         calendarDeletionDetectionPausedUntil = Date().addingTimeInterval(60)
+        CalendarSyncService.shared.forgetManagedEventIdentifier(
+            taskID: taskID,
+            env: calendarSyncEnv
+        )
         isCalendarDeletionAlertPresented = false
         pendingCalendarCompletionIDs.removeAll { $0 == taskID }
         calendarSyncMessage = "Restoring calendar event…"

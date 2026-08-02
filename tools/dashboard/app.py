@@ -2789,6 +2789,7 @@ DOCUMENTATION_INVENTORY = DOCUMENTATION_ROOT / "document-inventory.json"
 
 DOCUMENTATION_FEATURED_PATHS = (
     "foundation/FOUNDATIONAL_DOCUMENTS.md",
+    "foundation/HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md",
     "foundation/PROJECT_OVERVIEW.md",
     "foundation/SOUL.md",
     "foundation/AI_GOVERNANCE_MANIFEST.md",

@@ -293,6 +293,119 @@ def get_external_storage_info():
     return get_remote_external_storage_info()
 
 
+def format_storage_bytes(value):
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return "unknown"
+
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    for unit in units:
+        if size < 1024 or unit == units[-1]:
+            precision = 0 if unit == "B" else 1
+            return f"{size:.{precision}f}{unit}"
+        size /= 1024
+    return "unknown"
+
+
+def get_remote_internal_storage_info():
+    remote_command = (
+        "root_source=$(findmnt -n -T / -o SOURCE) && "
+        "findmnt -n -T / -o TARGET,SOURCE,FSTYPE && "
+        "df -P -B1 -- / && "
+        "printf '__ROOT_CHAIN__\\n' && "
+        "lsblk -b -s -n -o NAME,SIZE,TYPE \"$root_source\""
+    )
+    try:
+        out = subprocess.check_output(
+            [
+                "ssh",
+                "-i",
+                INTELMINI_STORAGE_KEY,
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "ConnectTimeout=5",
+                f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
+                remote_command,
+            ],
+            text=True,
+            timeout=10,
+            stderr=subprocess.STDOUT,
+        ).strip()
+        lines = out.splitlines()
+        marker_index = lines.index("__ROOT_CHAIN__")
+        if marker_index < 3:
+            raise ValueError("remote internal storage probe returned incomplete data")
+
+        mount_fields = lines[0].split()
+        disk_fields = lines[marker_index - 1].split()
+        if len(mount_fields) < 3 or len(disk_fields) < 6:
+            raise ValueError("remote internal storage data is incomplete")
+
+        root_total_bytes = int(disk_fields[1])
+        root_used_bytes = int(disk_fields[2])
+        root_free_bytes = int(disk_fields[3])
+        pct_num = int(disk_fields[4].replace("%", ""))
+
+        physical_disks = []
+        for line in lines[marker_index + 1 :]:
+            fields = line.split()
+            if len(fields) == 3 and fields[2] == "disk":
+                physical_disks.append((fields[0], int(fields[1])))
+        if not physical_disks:
+            raise ValueError("root physical disk was not identified")
+        physical_name, physical_total_bytes = physical_disks[-1]
+        unallocated_bytes = max(physical_total_bytes - root_total_bytes, 0)
+
+        if pct_num >= 90:
+            color, status = "#ef4444", "Critical"
+        elif pct_num >= 80:
+            color, status = "#facc15", "Warning"
+        else:
+            color, status = "#22c55e", "Healthy"
+
+        return {
+            "label": "Intel Mini Internal Drive",
+            "path": "/",
+            "total": format_storage_bytes(root_total_bytes),
+            "used": format_storage_bytes(root_used_bytes),
+            "free": format_storage_bytes(root_free_bytes),
+            "pct": f"{pct_num}%",
+            "pct_num": pct_num,
+            "color": color,
+            "status": status,
+            "available": True,
+            "source": mount_fields[1],
+            "filesystem": mount_fields[2],
+            "remote_host": INTELMINI_STORAGE_HOST,
+            "physical_device": f"/dev/{physical_name}",
+            "physical_total": format_storage_bytes(physical_total_bytes),
+            "root_allocated": format_storage_bytes(root_total_bytes),
+            "outside_root_allocation": format_storage_bytes(unallocated_bytes),
+        }
+    except Exception:
+        return {
+            "label": "Intel Mini Internal Drive",
+            "path": "/",
+            "total": "unavailable",
+            "used": "unavailable",
+            "free": "unavailable",
+            "pct": "—",
+            "pct_num": None,
+            "color": "#64748b",
+            "status": "Intel Mini probe unavailable",
+            "available": False,
+            "source": "unknown",
+            "filesystem": "unknown",
+            "remote_host": INTELMINI_STORAGE_HOST,
+        }
+
+
 def get_disk_used_percent(path):
     try:
         out = subprocess.check_output(
@@ -375,7 +488,7 @@ def storage_chart_html(external_now=None):
             internal_values,
             marker="o",
             linewidth=2,
-            label="Internal Ubuntu Disk (/)",
+            label="Development VM Internal Disk (/)",
         )
     if any(value is not None for value in external_values):
         ax.plot(
@@ -416,7 +529,8 @@ def storage_chart_html(external_now=None):
 def storage_panel_html():
     external_disk = get_external_storage_info()
     disks = [
-        get_disk_info("/", "Internal Ubuntu Disk"),
+        get_disk_info("/", "Development VM Internal Disk"),
+        get_remote_internal_storage_info(),
         external_disk,
     ]
 
@@ -478,6 +592,15 @@ def storage_panel_html():
         <div><b>Free:</b> {d['free']}</div>
         <div><b>Total:</b> {d['total']}</div>
     </div>
+    {
+        '<div style="color:#e5e7eb;margin-top:10px;font-size:15px;">'
+        f"<b>Entire physical drive:</b> {html_module.escape(d['physical_total'])} &nbsp; "
+        f"<b>Allocated to root:</b> {html_module.escape(d['root_allocated'])} &nbsp; "
+        f"<b>Outside root allocation:</b> {html_module.escape(d['outside_root_allocation'])}"
+        '</div>'
+        if d.get('physical_total')
+        else ''
+    }
     {
         '<div style="color:#cbd5e1;margin-top:8px;font-size:14px;">'
         f"Read-only source: {html_module.escape(d.get('source', 'local'))} "

@@ -82,12 +82,15 @@ systemctl --user restart propertymanager-api.service
 
 1. Stop the Gunicorn unit: `systemctl --user stop propertymanager-api.service`
 2. Restore the previous user unit from backup (if kept), **or** temporarily:
+
    ```bash
    PROPERTYMANAGER_ALLOW_FLASK_DEV=1 \
      tools/property_manager/api/.venv/bin/python \
      tools/property_manager/api/propertymanager_api.py
    ```
+
    Direct Flask is emergency-only (no debug/reloader).
+
 3. Confirm `GET /health` returns HTTP 200.
 4. Preserve journal + gunicorn logs before another attempt.
 

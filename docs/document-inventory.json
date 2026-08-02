@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-07-29T14:57:16.136273+00:00",
-  "source_fingerprint": "86d5dd0bf4f41991c58f5eb7ef28f6d0d85872dd581609b244c33d24a68f1862",
-  "document_count": 662,
+  "generated_at": "2026-08-02T19:08:08.550569+00:00",
+  "source_fingerprint": "76f935600aae58577f8961d2f9583ed52b302638ff766178f95b78faa09ba500",
+  "document_count": 665,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -79,8 +79,8 @@
       "last_reviewed": "2026-07-26",
       "category": "Dashboard",
       "metadata_present": true,
-      "size_bytes": 21756,
-      "modified_epoch": 1785336980
+      "size_bytes": 22164,
+      "modified_epoch": 1785697660
     },
     {
       "path": "docs/architecture/phase-2f-runtime-ai-router.md",
@@ -133,6 +133,19 @@
       "metadata_present": false,
       "size_bytes": 541,
       "modified_epoch": 1785336980
+    },
+    {
+      "path": "docs/architecture/PYTHON_WEB_RUNTIME_INVENTORY.md",
+      "relative_path": "architecture/PYTHON_WEB_RUNTIME_INVENTORY.md",
+      "title": "OpenClaw Python Web Runtime Inventory",
+      "version": "1.0",
+      "status": "Architecture",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-07-26",
+      "category": "Runtime",
+      "metadata_present": true,
+      "size_bytes": 6927,
+      "modified_epoch": 1785697658
     },
     {
       "path": "docs/architecture/RANCHBOT_ARCHITECTURE.md",
@@ -2397,6 +2410,19 @@
       "modified_epoch": 1785336980
     },
     {
+      "path": "docs/foundation/PROPERTY_MANAGER_API_DEVELOPMENT_RUNBOOK.md",
+      "relative_path": "foundation/PROPERTY_MANAGER_API_DEVELOPMENT_RUNBOOK.md",
+      "title": "PropertyManager API — Development Runbook (Gunicorn WSGI)",
+      "version": "Unknown",
+      "status": "Unknown",
+      "owner": "Unknown",
+      "last_reviewed": "Unknown",
+      "category": "Foundation",
+      "metadata_present": false,
+      "size_bytes": 5587,
+      "modified_epoch": 1785697658
+    },
+    {
       "path": "docs/foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md",
       "relative_path": "foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md",
       "title": "PropertyManager Foundational Requirements",
@@ -3747,6 +3773,19 @@
       "metadata_present": true,
       "size_bytes": 2820,
       "modified_epoch": 1785336980
+    },
+    {
+      "path": "docs/operations/OPENCLAW_RECOVERY_READINESS.md",
+      "relative_path": "operations/OPENCLAW_RECOVERY_READINESS.md",
+      "title": "OpenClaw Recovery Readiness",
+      "version": "Unknown",
+      "status": "Unknown",
+      "owner": "Unknown",
+      "last_reviewed": "Unknown",
+      "category": "Operations",
+      "metadata_present": false,
+      "size_bytes": 2010,
+      "modified_epoch": 1785697658
     },
     {
       "path": "docs/perplexity.md",

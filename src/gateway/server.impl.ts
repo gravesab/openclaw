@@ -849,6 +849,9 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   log.info("starting HTTP server...");
+  let trustedRecordDevelopmentRuntime:
+    | import("../trusted-records/runtime.development.js").TrustedRecordDevelopmentRuntime
+    | null = null;
   const {
     releasePluginRouteRegistry,
     httpServer,
@@ -896,6 +899,13 @@ export async function startGatewayServer(
       logHooks,
       logPlugins,
       getReadiness,
+      getTrustedRecordDevelopmentRuntime: () =>
+        trustedRecordDevelopmentRuntime && opts.trustedRecordsDevelopment
+          ? {
+              runtime: trustedRecordDevelopmentRuntime,
+              actorId: opts.trustedRecordsDevelopment.actorId,
+            }
+          : undefined,
     }),
   );
   const { createGatewayNodeSessionRuntime } = await import("./server-node-session-runtime.js");
@@ -932,9 +942,6 @@ export async function startGatewayServer(
   };
 
   let closePreludeStarted = false;
-  let trustedRecordDevelopmentRuntime:
-    | import("../trusted-records/runtime.development.js").TrustedRecordDevelopmentRuntime
-    | null = null;
   let postReadyMaintenanceTimer: ReturnType<typeof setTimeout> | null = null;
   const clearPostReadyMaintenanceTimer = () => {
     if (!postReadyMaintenanceTimer) {

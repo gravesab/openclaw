@@ -4,6 +4,7 @@ import { isTruthyEnvValue } from "../infra/env.js";
 
 export type GatewayTrustedRecordDevelopmentOptions = {
   dataDir: string;
+  actorId: string;
 };
 
 export function resolveGatewayTrustedRecordDevelopmentOptions(
@@ -14,5 +15,6 @@ export function resolveGatewayTrustedRecordDevelopmentOptions(
   }
   return {
     dataDir: path.join(resolveStateDir(env), "trusted-records"),
+    actorId: env.OPENCLAW_TRUSTED_RECORDS_DEV_ACTOR_ID?.trim() || "development-owner",
   };
 }

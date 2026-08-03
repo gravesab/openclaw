@@ -34,6 +34,7 @@ Track operating meters (runtime hours, mileage, cycles) for ranch equipment and 
 - **Five-minute learning.** Asset pages show current reading and remaining until next service.
 - **Manufacturer manual is PM source of truth.** Meter intervals are stored at manual import and drive meter-based schedules.
 - **Audit-first meter history.** Every reading is reconstructable; corrections append new rows.
+- **One-way trusted-record projection.** OpenClaw may retain idempotent canonical projections for cross-domain use, but Property Manager remains authoritative and all operational writes return through this REST API. See [Canonical Trusted Records](/foundation/CANONICAL_TRUSTED_RECORDS#property-manager-projection).
 
 ---
 

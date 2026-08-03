@@ -117,6 +117,7 @@ All PropertyManager work follows a **two-environment, two-gate** model aligned w
 - **All clients** (Mac, iPhone/iPad, Dashboard QR page, Telegram, RanchBrain CLI) interact **only through the PropertyManager REST API**. No client reads or writes Postgres directly.
 - Mac and iOS may maintain a local JSON cache for offline display; cache is a **derived copy**, not authoritative.
 - CSV export remains legacy/briefing-only and must not be treated as a write path.
+- OpenClaw trusted records are a derived projection. They do not replace PostgreSQL as the Property Manager system of record, and operational mutations continue through the Property Manager REST API. See [Canonical Trusted Records](/foundation/CANONICAL_TRUSTED_RECORDS#property-manager-projection).
 
 See the client topology diagram in [PropertyManager Asset Architecture](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#client-topology).
 

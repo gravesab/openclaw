@@ -17,6 +17,7 @@ import {
   isContainerEnvironment,
   resolveGatewayBindHost,
 } from "../../gateway/net.js";
+import { resolveGatewayTrustedRecordDevelopmentOptions } from "../../gateway/server-trusted-records.js";
 import type { GatewayWsLogStyle } from "../../gateway/ws-logging.js";
 import { setGatewayWsLogStyle } from "../../gateway/ws-logging.js";
 import { setVerbose } from "../../globals.js";
@@ -783,6 +784,7 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
           ...(opts.tailscaleResetOnExit ? { resetOnExit: true } : {}),
         }
       : undefined;
+  const trustedRecordsDevelopment = resolveGatewayTrustedRecordDevelopmentOptions(process.env);
 
   gatewayLog.info("starting...");
   startupTrace.mark("cli.gateway-loop");
@@ -801,6 +803,7 @@ async function runGatewayCommand(opts: GatewayRunOpts) {
           auth: authOverride,
           tailscale: tailscaleOverride,
           startupStartedAt,
+          ...(trustedRecordsDevelopment ? { trustedRecordsDevelopment } : {}),
           ...(startupConfigSnapshotReadForThisStart
             ? { startupConfigSnapshotRead: startupConfigSnapshotReadForThisStart }
             : {}),

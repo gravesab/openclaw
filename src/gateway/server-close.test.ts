@@ -95,6 +95,7 @@ function createGatewayCloseTestDeps(
     heartbeatRunner: { stop: vi.fn() } as never,
     updateCheckStop: null,
     stopTaskRegistryMaintenance: null,
+    closeTrustedRecordRuntime: null,
     nodePresenceTimers: new Map(),
     broadcast: vi.fn(),
     tickInterval: setInterval(() => undefined, 60_000),
@@ -158,6 +159,17 @@ describe("createGatewayCloseHandler", () => {
     expect(deps.cron.stop).toHaveBeenCalledTimes(1);
     expect(deps.heartbeatRunner.stop).toHaveBeenCalledTimes(1);
     expect(deps.chatRunState.clear).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes the trusted-record development runtime", async () => {
+    const closeTrustedRecordRuntime = vi.fn();
+    const close = createGatewayCloseHandler(
+      createGatewayCloseTestDeps({ closeTrustedRecordRuntime }),
+    );
+
+    await close({ reason: "test" });
+
+    expect(closeTrustedRecordRuntime).toHaveBeenCalledTimes(1);
   });
 
   it("emits gateway shutdown and pre-restart hooks", async () => {

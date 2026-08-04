@@ -14,6 +14,7 @@ import stat
 import sys
 import tempfile
 import unittest
+from collections.abc import Mapping
 from pathlib import Path
 from unittest import mock
 
@@ -45,6 +46,324 @@ APPROVED_TABLES = (
 )
 
 
+def column(name, data_type, nullable, default=None, precision=None, scale=None):
+    return {
+        "name": name,
+        "type": data_type,
+        "nullable": nullable,
+        "default": default,
+        "precision": precision,
+        "scale": scale,
+        "generated": None,
+    }
+
+
+def primary(name, *columns):
+    return {
+        "name": name,
+        "kind": "primary_key",
+        "columns": list(columns),
+        "definition": f"PRIMARY KEY ({', '.join(columns)})",
+        "references": None,
+        "on_update": None,
+        "on_delete": None,
+    }
+
+
+def unique(name, *columns):
+    return {
+        "name": name,
+        "kind": "unique",
+        "columns": list(columns),
+        "definition": f"UNIQUE ({', '.join(columns)})",
+        "references": None,
+        "on_update": None,
+        "on_delete": None,
+    }
+
+
+def foreign(name, columns, table, referenced, on_delete):
+    return {
+        "name": name,
+        "kind": "foreign_key",
+        "columns": list(columns),
+        "definition": (
+            f"FOREIGN KEY ({', '.join(columns)}) REFERENCES "
+            f"propertymanager.{table} ({', '.join(referenced)})"
+        ),
+        "references": {"table": table, "columns": list(referenced)},
+        "on_update": "NO ACTION",
+        "on_delete": on_delete,
+    }
+
+
+def check(name, columns, definition):
+    return {
+        "name": name,
+        "kind": "check",
+        "columns": list(columns),
+        "definition": definition,
+        "references": None,
+        "on_update": None,
+        "on_delete": None,
+    }
+
+
+def index(name, unique_value, *keys, predicate=None):
+    return {
+        "name": name,
+        "unique": unique_value,
+        "method": "btree",
+        "keys": [{"expression": expression, "order": order} for expression, order in keys],
+        "predicate": predicate,
+    }
+
+
+# Hand-maintained oracle derived directly from 001_initial_schema.sql through
+# 006_phase1_meter_audit.sql. It must never be populated from the manifest.
+EXPECTED_SCHEMA_ORACLE = {
+    "normalization_version": 1,
+    "comparison": {
+        "tables": "exact lexical-name set",
+        "columns": "exact ordinal list",
+        "constraints": "exact lexical-name list using normalized logical definitions",
+        "indexes": "exact lexical-name list using normalized expressions, order, uniqueness, and predicates",
+        "canonical_data": "exact key-sorted rows for declared canonical data",
+    },
+    "allowed_extras": {
+        "tables": [], "columns": [], "constraints": [], "indexes": [], "canonical_data": [],
+    },
+    "tables": {
+        "asset_meter": {
+            "columns": [
+                column("asset_id", "uuid", False),
+                column("meter_type", "text", False, "'none'"),
+                column("current_value", "numeric", False, "0", 14, 3),
+                column("unit", "text", False, "''"),
+                column("latest_reading_at", "timestamp with time zone", True),
+                column("updated_at", "timestamp with time zone", False, "now()"),
+                column("meter_epoch", "integer", False, "1"),
+                column("row_version", "integer", False, "1"),
+            ],
+            "constraints": [
+                foreign("asset_meter_asset_id_fkey", ("asset_id",), "assets", ("id",), "CASCADE"),
+                primary("asset_meter_pkey", "asset_id"),
+                check("asset_meter_type_check", ("meter_type",), "CHECK (meter_type IN ('runtime_hours', 'mileage', 'cycles', 'none'))"),
+            ],
+            "indexes": [index("asset_meter_pkey", True, ("asset_id", "ASC"))],
+        },
+        "asset_meter_reading": {
+            "columns": [
+                column("id", "uuid", False),
+                column("asset_id", "uuid", False),
+                column("value", "numeric", False, None, 14, 3),
+                column("reading_at", "timestamp with time zone", False, "now()"),
+                column("entry_method", "text", False, "'manual'"),
+                column("note", "text", True),
+                column("correction_reason", "text", True),
+                column("usage_since_previous", "numeric", True, None, 14, 3),
+                column("created_at", "timestamp with time zone", False, "now()"),
+                column("previous_reading_id", "uuid", True),
+                column("meter_type_at_entry", "text", True),
+                column("unit_at_entry", "text", True),
+                column("status", "text", False, "'accepted'"),
+                column("operator_identity", "text", True),
+                column("integration_identity", "text", True),
+                column("idempotency_key", "text", True),
+                column("meter_epoch", "integer", False, "1"),
+                column("corrects_reading_id", "uuid", True),
+            ],
+            "constraints": [
+                foreign("asset_meter_reading_asset_id_fkey", ("asset_id",), "assets", ("id",), "CASCADE"),
+                check("asset_meter_reading_correction_reason_check", ("correction_reason",), "CHECK (correction_reason IS NULL OR correction_reason IN ('replacement', 'rollover', 'correction'))"),
+                foreign("asset_meter_reading_corrects_reading_id_fkey", ("corrects_reading_id",), "asset_meter_reading", ("id",), "SET NULL"),
+                check("asset_meter_reading_entry_method_check", ("entry_method",), "CHECK (entry_method IN ('manual', 'voice', 'qr', 'api', 'telegram', 'completion'))"),
+                primary("asset_meter_reading_pkey", "id"),
+                foreign("asset_meter_reading_previous_reading_id_fkey", ("previous_reading_id",), "asset_meter_reading", ("id",), "SET NULL"),
+                check("asset_meter_reading_status_check", ("status",), "CHECK (status IN ('accepted', 'rejected', 'corrected'))"),
+            ],
+            "indexes": [
+                index("asset_meter_reading_asset_epoch_reading_at_idx", False, ("asset_id", "ASC"), ("meter_epoch", "ASC"), ("reading_at", "ASC"), ("created_at", "ASC")),
+                index("asset_meter_reading_asset_id_reading_at_idx", False, ("asset_id", "ASC"), ("reading_at", "DESC")),
+                index("asset_meter_reading_idempotency_idx", True, ("asset_id", "ASC"), ("idempotency_key", "ASC"), predicate="idempotency_key IS NOT NULL AND status = 'accepted'"),
+                index("asset_meter_reading_pkey", True, ("id", "ASC")),
+                index("asset_meter_reading_status_idx", False, ("asset_id", "ASC"), ("status", "ASC"), predicate="status = 'accepted'"),
+            ],
+        },
+        "asset_task_mapping_proposals": {
+            "columns": [
+                column("id", "uuid", False),
+                column("ranchbrain_task_ref", "text", False),
+                column("task_id", "uuid", True),
+                column("proposed_asset_id", "uuid", False),
+                column("match_rationale", "text", False, "''"),
+                column("confidence", "numeric", False, "0", 5, 4),
+                column("status", "text", False, "'pending'"),
+                column("reviewed_by", "text", True),
+                column("reviewed_at", "timestamp with time zone", True),
+                column("created_at", "timestamp with time zone", False, "now()"),
+            ],
+            "constraints": [
+                primary("asset_task_mapping_proposals_pkey", "id"),
+                foreign("asset_task_mapping_proposals_proposed_asset_id_fkey", ("proposed_asset_id",), "assets", ("id",), "CASCADE"),
+                check("asset_task_mapping_proposals_status_check", ("status",), "CHECK (status IN ('pending', 'approved', 'rejected'))"),
+                foreign("asset_task_mapping_proposals_task_id_fkey", ("task_id",), "maintenance_tasks", ("id",), "SET NULL"),
+            ],
+            "indexes": [
+                index("asset_task_mapping_proposals_pkey", True, ("id", "ASC")),
+                index("asset_task_mapping_proposals_status_idx", False, ("status", "ASC"), ("confidence", "DESC")),
+                index("asset_task_mapping_proposals_task_asset_pending_idx", True, ("ranchbrain_task_ref", "ASC"), ("proposed_asset_id", "ASC"), predicate="status = 'pending'"),
+            ],
+        },
+        "assets": {
+            "columns": [
+                column("id", "uuid", False), column("external_id", "text", False),
+                column("ranchbrain_guid", "uuid", True), column("name", "text", False),
+                column("manufacturer", "text", False, "''"), column("model", "text", False, "''"),
+                column("category", "text", False, "''"), column("location", "text", False, "''"),
+                column("aliases", "jsonb", False, "'[]'::jsonb"), column("qr_token", "text", False),
+                column("is_active", "boolean", False, "true"),
+                column("created_at", "timestamp with time zone", False, "now()"),
+                column("updated_at", "timestamp with time zone", False, "now()"),
+                column("meter_proposed_type", "text", True), column("meter_proposed_unit", "text", True),
+                column("meter_activated_at", "timestamp with time zone", True),
+            ],
+            "constraints": [
+                unique("assets_external_id_key", "external_id"), primary("assets_pkey", "id"),
+                unique("assets_qr_token_key", "qr_token"),
+            ],
+            "indexes": [
+                index("assets_external_id_idx", False, ("external_id", "ASC")),
+                index("assets_external_id_key", True, ("external_id", "ASC")),
+                index("assets_name_lower_idx", False, ("lower(name)", "ASC")),
+                index("assets_pkey", True, ("id", "ASC")),
+                index("assets_qr_token_idx", False, ("qr_token", "ASC")),
+                index("assets_qr_token_key", True, ("qr_token", "ASC")),
+            ],
+        },
+        "maintenance_categories": {
+            "columns": [
+                column("id", "uuid", False), column("name", "text", False),
+                column("icon", "text", False), column("color_name", "text", False),
+                column("is_built_in", "boolean", False, "false"), column("sort_order", "integer", False, "0"),
+                column("created_at", "timestamp with time zone", False, "now()"),
+                column("updated_at", "timestamp with time zone", False, "now()"),
+            ],
+            "constraints": [unique("maintenance_categories_name_key", "name"), primary("maintenance_categories_pkey", "id")],
+            "indexes": [
+                index("maintenance_categories_name_key", True, ("name", "ASC")),
+                index("maintenance_categories_pkey", True, ("id", "ASC")),
+            ],
+        },
+        "maintenance_completions": {
+            "columns": [
+                column("id", "uuid", False), column("task_id", "uuid", False),
+                column("completed_at", "timestamp with time zone", False), column("note", "text", True),
+                column("created_at", "timestamp with time zone", False, "now()"),
+                column("meter_value_at_completion", "numeric", True, None, 14, 3),
+                column("meter_reading_id", "uuid", True),
+            ],
+            "constraints": [
+                foreign("maintenance_completions_meter_reading_id_fkey", ("meter_reading_id",), "asset_meter_reading", ("id",), "SET NULL"),
+                primary("maintenance_completions_pkey", "id"),
+                foreign("maintenance_completions_task_id_fkey", ("task_id",), "maintenance_tasks", ("id",), "CASCADE"),
+            ],
+            "indexes": [index("maintenance_completions_pkey", True, ("id", "ASC"))],
+        },
+        "maintenance_task_parts": {
+            "columns": [
+                column("id", "uuid", False), column("task_id", "uuid", False),
+                column("name", "text", False, "''"), column("oem_part_number", "text", False, "''"),
+                column("part_number", "text", False, "''"), column("buy_url", "text", False, "''"),
+                column("cost", "numeric", False, "0", 10, 2), column("sort_order", "integer", False, "0"),
+                column("created_at", "timestamp with time zone", False, "now()"),
+                column("updated_at", "timestamp with time zone", False, "now()"),
+                column("quantity", "numeric", False, "1", 12, 3),
+                column("vendor", "text", False, "''"), column("notes", "text", False, "''"),
+            ],
+            "constraints": [
+                primary("maintenance_task_parts_pkey", "id"),
+                foreign("maintenance_task_parts_task_id_fkey", ("task_id",), "maintenance_tasks", ("id",), "CASCADE"),
+            ],
+            "indexes": [
+                index("maintenance_task_parts_pkey", True, ("id", "ASC")),
+                index("maintenance_task_parts_task_id_idx", False, ("task_id", "ASC"), ("sort_order", "ASC")),
+            ],
+        },
+        "maintenance_task_photos": {
+            "columns": [
+                column("id", "uuid", False), column("task_id", "uuid", False),
+                column("file_name", "text", False), column("storage_path", "text", False),
+                column("created_at", "timestamp with time zone", False, "now()"),
+            ],
+            "constraints": [
+                primary("maintenance_task_photos_pkey", "id"),
+                foreign("maintenance_task_photos_task_id_fkey", ("task_id",), "maintenance_tasks", ("id",), "CASCADE"),
+            ],
+            "indexes": [
+                index("maintenance_task_photos_pkey", True, ("id", "ASC")),
+                index("maintenance_task_photos_task_id_idx", False, ("task_id", "ASC"), ("created_at", "ASC")),
+            ],
+        },
+        "maintenance_tasks": {
+            "columns": [
+                column("id", "uuid", False), column("area", "text", False), column("item", "text", False),
+                column("category_name", "text", False, "'House'"), column("priority", "text", False, "'Medium'"),
+                column("frequency", "text", False, "'As Needed'"), column("task_description", "text", True),
+                column("response_instructions", "text", True), column("supplies_needed", "text", True),
+                column("notes", "text", True), column("result_notes", "text", True),
+                column("estimated_minutes", "integer", True), column("warning_days", "integer", False),
+                column("critical_days", "integer", False), column("last_done", "timestamp with time zone", False),
+                column("next_due", "timestamp with time zone", False),
+                column("send_telegram_update", "boolean", False, "true"),
+                column("include_in_daily_briefing", "boolean", False, "true"),
+                column("alert_if_overdue", "boolean", False, "true"), column("is_active", "boolean", False, "true"),
+                column("part_url", "text", True), column("vendor", "text", True), column("part_number", "text", True),
+                column("part_cost", "numeric", True, None, 10, 2), column("annual_cost", "numeric", True, None, 10, 2),
+                column("created_at", "timestamp with time zone", False, "now()"),
+                column("updated_at", "timestamp with time zone", False, "now()"),
+                column("kind", "text", False, "'Scheduled'"), column("manufacturer", "text", True),
+                column("source_manual_name", "text", True), column("completion_history", "jsonb", False, "'[]'::jsonb"),
+                column("tools_required", "jsonb", False, "'[]'::jsonb"), column("origin", "text", False, "'owner'"),
+                column("asset_id", "uuid", True), column("schedule_kind", "text", False, "'calendar'"),
+                column("meter_interval_value", "numeric", True, None, 14, 3), column("meter_interval_unit", "text", True),
+                column("last_done_meter_value", "numeric", True, None, 14, 3),
+                column("next_due_meter_value", "numeric", True, None, 14, 3),
+            ],
+            "constraints": [
+                unique("maintenance_tasks_area_item_unique", "area", "item"),
+                foreign("maintenance_tasks_asset_id_fkey", ("asset_id",), "assets", ("id",), "SET NULL"),
+                check("maintenance_tasks_kind_check", ("kind",), "CHECK (kind IN ('Scheduled', 'Work Request'))"),
+                check("maintenance_tasks_origin_check", ("origin",), "CHECK (origin IN ('manufacturer', 'owner'))"),
+                primary("maintenance_tasks_pkey", "id"),
+                check("maintenance_tasks_schedule_kind_check", ("schedule_kind",), "CHECK (schedule_kind IN ('calendar', 'meter', 'both'))"),
+            ],
+            "indexes": [
+                index("maintenance_tasks_area_item_unique", True, ("area", "ASC"), ("item", "ASC")),
+                index("maintenance_tasks_asset_id_idx", False, ("asset_id", "ASC"), predicate="is_active = true"),
+                index("maintenance_tasks_pkey", True, ("id", "ASC")),
+            ],
+        },
+    },
+    "canonical_data": {
+        "maintenance_categories": {
+            "key": ["id"],
+            "columns": ["id", "name", "icon", "color_name", "is_built_in", "sort_order"],
+            "rows": [
+                ["00000000-0000-0000-0000-000000000001", "Pool", "drop.fill", "blue", True, 10],
+                ["00000000-0000-0000-0000-000000000002", "Hot Tub", "bubbles.and.sparkles.fill", "cyan", True, 20],
+                ["00000000-0000-0000-0000-000000000003", "Grounds", "leaf.fill", "green", True, 30],
+                ["00000000-0000-0000-0000-000000000004", "Equipment", "wrench.and.screwdriver.fill", "orange", True, 40],
+                ["00000000-0000-0000-0000-000000000005", "House", "house.fill", "purple", True, 50],
+                ["00000000-0000-0000-0000-000000000006", "Safety", "shield.fill", "red", True, 60],
+                ["00000000-0000-0000-0000-000000000007", "Tractor", "gearshape.2.fill", "brown", True, 70],
+                ["00000000-0000-0000-0000-000000000008", "Property", "map.fill", "brown", True, 80],
+            ],
+        }
+    },
+}
+
+
 class FixtureMetadataSource:
     def __init__(self, metadata):
         self.metadata = metadata
@@ -53,6 +372,22 @@ class FixtureMetadataSource:
     def inspect_read_only(self):
         self.calls += 1
         return copy.deepcopy(self.metadata)
+
+
+class RaisingMapping(Mapping):
+    def __iter__(self):
+        raise RuntimeError("must not iterate untrusted mapping")
+
+    def __len__(self):
+        raise RuntimeError("must not size untrusted mapping")
+
+    def __getitem__(self, _key):
+        raise RuntimeError("must not access untrusted mapping")
+
+
+class RaisingList(list):
+    def __iter__(self):
+        raise RuntimeError("must not iterate untrusted collection")
 
 
 class AuthorityFixture(unittest.TestCase):
@@ -103,6 +438,51 @@ class AuthorityFixture(unittest.TestCase):
 
 
 class ManifestFingerprintTests(AuthorityFixture):
+    def test_complete_independent_001_through_006_oracle(self):
+        self.assertEqual(self.manifest.schema_contract, EXPECTED_SCHEMA_ORACLE)
+        tables = EXPECTED_SCHEMA_ORACLE["tables"]
+        self.assertEqual(tuple(tables), APPROVED_TABLES)
+        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 124)
+        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 32)
+        self.assertEqual(sum(len(table["indexes"]) for table in tables.values()), 25)
+        self.assertEqual(
+            len(EXPECTED_SCHEMA_ORACLE["canonical_data"]["maintenance_categories"]["rows"]),
+            8,
+        )
+
+    def test_each_independent_oracle_leaf_is_enforced(self):
+        def leaves(value, path=()):
+            if isinstance(value, dict):
+                for key in sorted(value):
+                    yield from leaves(value[key], path + (key,))
+            elif isinstance(value, list):
+                for position, item in enumerate(value):
+                    yield from leaves(item, path + (position,))
+            else:
+                yield path, value
+
+        def changed(value):
+            if value is None:
+                return "unauthorized"
+            if type(value) is bool:
+                return not value
+            if type(value) is int:
+                return value + 1
+            return value + "_unauthorized"
+
+        for path, original in leaves(EXPECTED_SCHEMA_ORACLE):
+            with self.subTest(path=path):
+                metadata = self.metadata()
+                metadata["schema"] = copy.deepcopy(EXPECTED_SCHEMA_ORACLE)
+                target = metadata["schema"]
+                for component in path[:-1]:
+                    target = target[component]
+                target[path[-1]] = changed(original)
+                self.assertNotEqual(
+                    self.snapshot(metadata).status,
+                    authority.AuditStatus.SNAPSHOT_CONSISTENT,
+                )
+
     def test_manifest_has_independently_pinned_contract_and_migrations(self):
         raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
         encoded = json.dumps(raw["schema_contract"], sort_keys=True, separators=(",", ":")).encode()
@@ -199,6 +579,59 @@ class ManifestFingerprintTests(AuthorityFixture):
             with self.subTest(collection=collection), self.assertRaises(authority.AuthorityConfigurationError):
                 authority._load_manifest_at(path)
 
+    def test_malformed_manifest_levels_fail_closed(self):
+        cases = []
+        reserved = json.loads(self.manifest_path.read_text())
+        reserved["reserved_versions"].append("invalid")
+        cases.append(reserved)
+        table = json.loads(self.manifest_path.read_text())
+        table["schema_contract"]["tables"]["assets"] = []
+        cases.append(table)
+        column_case = json.loads(self.manifest_path.read_text())
+        column_case["schema_contract"]["tables"]["assets"]["columns"][0]["name"] = []
+        cases.append(column_case)
+        constraint_case = json.loads(self.manifest_path.read_text())
+        constraint_case["schema_contract"]["tables"]["assets"]["constraints"][0]["columns"] = "external_id"
+        cases.append(constraint_case)
+        index_case = json.loads(self.manifest_path.read_text())
+        index_case["schema_contract"]["tables"]["assets"]["indexes"][0]["keys"] = {}
+        cases.append(index_case)
+        seed_case = json.loads(self.manifest_path.read_text())
+        seed_case["schema_contract"]["canonical_data"]["maintenance_categories"]["rows"] = {}
+        cases.append(seed_case)
+        for position, raw in enumerate(cases):
+            with self.subTest(position=position):
+                path = self.root / f"malformed-{position}.json"
+                path.write_text(json.dumps(raw), encoding="utf-8")
+                with self.assertRaises(authority.AuthorityConfigurationError):
+                    authority._load_manifest_at(path)
+
+    def test_manifest_requires_exact_keys_at_every_level(self):
+        mutations = []
+        selectors = (
+            lambda raw: raw,
+            lambda raw: raw["canonical_migrations"][0],
+            lambda raw: raw["reserved_versions"][0],
+            lambda raw: raw["schema_contract"],
+            lambda raw: raw["schema_contract"]["tables"]["assets"],
+            lambda raw: raw["schema_contract"]["tables"]["assets"]["columns"][0],
+            lambda raw: raw["schema_contract"]["tables"]["assets"]["constraints"][0],
+            lambda raw: raw["schema_contract"]["tables"]["assets"]["indexes"][0],
+            lambda raw: raw["schema_contract"]["canonical_data"]["maintenance_categories"],
+        )
+        for selector in selectors:
+            raw = json.loads(self.manifest_path.read_text())
+            selector(raw)["unexpected"] = True
+            mutations.append(raw)
+        missing = json.loads(self.manifest_path.read_text())
+        del missing["schema_contract"]["tables"]["assets"]["columns"][0]["type"]
+        mutations.append(missing)
+        for position, raw in enumerate(mutations):
+            path = self.root / f"exact-keys-{position}.json"
+            path.write_text(json.dumps(raw), encoding="utf-8")
+            with self.subTest(position=position), self.assertRaises(authority.AuthorityConfigurationError):
+                authority._load_manifest_at(path)
+
 
 class FilesystemAuthorityTests(AuthorityFixture):
     def assert_invalid(self, result):
@@ -210,6 +643,59 @@ class FilesystemAuthorityTests(AuthorityFixture):
     def test_private_fixture_helper_and_canonical_production_audit(self):
         self.assertEqual(self.file_audit().status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
         self.assertEqual(authority.audit_canonical_migration_files().status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
+
+    def test_manifest_size_limit_accepts_boundary_and_rejects_next_byte(self):
+        original = self.manifest_path.read_bytes().rstrip()
+        exact = original + b" " * (authority.MAX_MANIFEST_BYTES - len(original))
+        self.assertEqual(len(exact), authority.MAX_MANIFEST_BYTES)
+        self.manifest_path.write_bytes(exact)
+        authority._load_manifest_at(self.manifest_path)
+        self.manifest_path.write_bytes(exact + b" ")
+        with self.assertRaises(authority.AuthorityConfigurationError):
+            authority._load_manifest_at(self.manifest_path)
+
+    def test_migration_size_limit_accepts_boundary_and_rejects_next_byte(self):
+        path = self.db / "boundary.bin"
+        path.write_bytes(b"x" * authority.MAX_MIGRATION_BYTES)
+        self.assertEqual(
+            len(authority._read_regular_file(path, max_bytes=authority.MAX_MIGRATION_BYTES)),
+            authority.MAX_MIGRATION_BYTES,
+        )
+        path.write_bytes(b"x" * (authority.MAX_MIGRATION_BYTES + 1))
+        with self.assertRaises(authority.BoundedInputError):
+            authority._read_regular_file(path, max_bytes=authority.MAX_MIGRATION_BYTES)
+
+    def test_cumulative_migration_limit_fails_closed(self):
+        raw = json.loads(self.manifest_path.read_text())
+        for entry in raw["canonical_migrations"][:5]:
+            data = entry["version"].encode()[:1] * authority.MAX_MIGRATION_BYTES
+            (self.db / entry["filename"]).write_bytes(data)
+            entry["sha256"] = hashlib.sha256(data).hexdigest()
+        self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+        result = self.file_audit()
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn("migration_size_invalid", {item.code for item in result.diagnostics})
+
+    def test_traversal_depth_accepts_boundary_and_rejects_next_level(self):
+        current = self.db
+        for position in range(authority.MAX_TRAVERSAL_DEPTH):
+            current = current / f"depth-{position}"
+            current.mkdir()
+        self.assertEqual(self.file_audit().status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
+        (current / "too-deep").mkdir()
+        result = self.file_audit()
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn("authority_bounds_exceeded", {item.code for item in result.diagnostics})
+
+    def test_entry_count_accepts_boundary_and_rejects_next_entry(self):
+        baseline = len(list(os.scandir(self.db)))
+        for position in range(authority.MAX_DISCOVERED_ENTRIES - baseline):
+            (self.db / f"ordinary-{position}.txt").touch()
+        self.assertEqual(self.file_audit().status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
+        (self.db / "one-too-many.txt").touch()
+        result = self.file_audit()
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn("authority_bounds_exceeded", {item.code for item in result.diagnostics})
 
     def test_cli_refuses_authority_path_overrides(self):
         for option in ("--manifest", "--migration-dir"):
@@ -269,7 +755,11 @@ class FilesystemAuthorityTests(AuthorityFixture):
         self.assert_invalid(self.file_audit())
 
     def test_nested_case_varied_and_alternate_numeric_forms_are_rejected(self):
-        names = ("001_UPPER.SQL", "1_initial.sql", "01_initial.sql", "0001_initial.sql")
+        names = (
+            "001_UPPER.SQL", "001_initial_schema.SQL", "1_initial.sql", "01_initial.sql",
+            "0001_initial.sql", "001_initial.sql.bak", "001_initial.sql~",
+            ".#001_initial.sql", "#001_initial.sql#", "001-initial.sql.swp",
+        )
         for name in names:
             with self.subTest(name=name):
                 path = self.db / name
@@ -289,7 +779,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
         with mock.patch.object(authority.os, "scandir", side_effect=PermissionError("/secret/path token=abc")):
             result = self.file_audit()
         self.assert_invalid(result)
-        with mock.patch.object(authority, "_read_regular_file", side_effect=PermissionError("/secret/file")):
+        with mock.patch.object(authority, "_read_regular_at", side_effect=PermissionError("/secret/file")):
             result = self.file_audit()
         self.assert_invalid(result)
         target = self.db / "001_initial_schema.sql"
@@ -308,6 +798,67 @@ class FilesystemAuthorityTests(AuthorityFixture):
             target.write_bytes(target.read_bytes() + b"\n")
         with self.assertRaises(OSError):
             authority._read_regular_file(target, _post_read=alter)
+
+    def test_hard_linked_manifest_and_migration_are_rejected(self):
+        manifest_link = self.root / "manifest-link.json"
+        os.link(self.manifest_path, manifest_link)
+        self.assertEqual(self.file_audit().status, authority.AuditStatus.AUTHORITY_UNAVAILABLE)
+        manifest_link.unlink()
+        migration = self.db / "001_initial_schema.sql"
+        migration_link = self.root / "migration-link.sql"
+        os.link(migration, migration_link)
+        self.assertEqual(self.file_audit().status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+
+    def test_parent_directory_replacement_race_fails_closed(self):
+        target = self.db / "001_initial_schema.sql"
+        moved = self.root / "db-original"
+
+        def replace_parent():
+            self.db.rename(moved)
+            self.db.mkdir()
+
+        try:
+            with self.assertRaises(OSError):
+                authority._read_regular_file(target, _post_open=replace_parent)
+        finally:
+            if self.db.exists():
+                self.db.rmdir()
+            if moved.exists():
+                moved.rename(self.db)
+
+    def test_discovery_open_replacement_race_fails_closed(self):
+        target = self.db / "001_initial_schema.sql"
+        original = self.db / "001_original.sql"
+
+        def replace_file():
+            target.rename(original)
+            target.write_bytes(b"replacement")
+
+        try:
+            with self.assertRaises(OSError):
+                authority._read_regular_file(target, _post_open=replace_file)
+        finally:
+            if target.exists():
+                target.unlink()
+            if original.exists():
+                original.rename(target)
+
+    def test_public_audit_contains_recursion_and_memory_failures(self):
+        for failure in (RecursionError(), MemoryError()):
+            with self.subTest(failure=type(failure).__name__), mock.patch.object(
+                authority, "_scan_migration_tree", side_effect=failure
+            ):
+                result = self.file_audit()
+                self.assertFalse(result.ok)
+                self.assertIn(
+                    result.status,
+                    {authority.AuditStatus.MIGRATION_FILES_INVALID, authority.AuditStatus.AUTHORITY_UNAVAILABLE},
+                )
+
+    def test_missing_descriptor_relative_platform_support_fails_closed(self):
+        with mock.patch.object(authority.os, "supports_dir_fd", set()):
+            result = self.file_audit()
+        self.assertEqual(result.status, authority.AuditStatus.AUTHORITY_UNAVAILABLE)
 
 
 class MetadataAndLedgerTests(AuthorityFixture):
@@ -362,6 +913,140 @@ class MetadataAndLedgerTests(AuthorityFixture):
         self.assertFalse(result.ok)
         self.assertNotEqual(result.status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
 
+    def test_deep_metadata_and_recursion_fail_closed(self):
+        metadata = self.metadata()
+        nested = []
+        cursor = nested
+        for _ in range(authority.MAX_JSON_DEPTH + 1):
+            child = []
+            cursor.append(child)
+            cursor = child
+        metadata["extra"] = nested
+        self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
+        with mock.patch.object(authority, "_validate_plain_json", side_effect=RecursionError()):
+            self.assertEqual(self.snapshot(self.metadata()).status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
+
+    def test_custom_mapping_is_rejected_without_iteration(self):
+        result = self.snapshot(RaisingMapping())
+        self.assertEqual(result.status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
+        source = mock.Mock()
+        source.inspect_read_only.return_value = RaisingMapping()
+        verified = authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest)
+        with mock.patch.object(authority, "load_manifest", return_value=self.manifest), mock.patch.object(
+            authority, "audit_canonical_migration_files", return_value=verified
+        ):
+            result = authority.audit_schema_metadata(source, self.identity)
+        self.assertEqual(result.status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
+
+    def test_custom_collection_is_rejected_without_iteration(self):
+        metadata = self.metadata()
+        metadata["schema"]["tables"]["assets"]["columns"] = RaisingList()
+        self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
+
+    def test_missing_required_snapshot_keys_fail_closed(self):
+        cases = []
+        for key in tuple(self.metadata()):
+            metadata = self.metadata()
+            del metadata[key]
+            cases.append(metadata)
+        for key in tuple(self.metadata()["identity"]):
+            metadata = self.metadata()
+            del metadata["identity"][key]
+            cases.append(metadata)
+        for key in tuple(self.metadata()["ledger"]):
+            metadata = self.metadata()
+            del metadata["ledger"][key]
+            cases.append(metadata)
+        for key in tuple(self.metadata()["schema"]):
+            metadata = self.metadata()
+            del metadata["schema"][key]
+            cases.append(metadata)
+        for key in tuple(self.metadata()["schema"]["tables"]["assets"]):
+            metadata = self.metadata()
+            del metadata["schema"]["tables"]["assets"][key]
+            cases.append(metadata)
+        for position, metadata in enumerate(cases):
+            with self.subTest(position=position):
+                self.assertNotEqual(self.snapshot(metadata).status, authority.AuditStatus.SNAPSHOT_CONSISTENT)
+
+    def test_unhashable_and_wrong_schema_values_fail_closed(self):
+        mutations = []
+        for collection in ("columns", "constraints", "indexes"):
+            metadata = self.metadata()
+            metadata["schema"]["tables"]["assets"][collection][0]["name"] = []
+            mutations.append(metadata)
+        metadata = self.metadata(ledger_state="present")
+        metadata["ledger"]["entries"][0]["version"] = []
+        mutations.append(metadata)
+        table = self.metadata()
+        table["schema"]["tables"] = []
+        mutations.append(table)
+        seed = self.metadata()
+        seed["schema"]["canonical_data"] = []
+        mutations.append(seed)
+        for position, metadata in enumerate(mutations):
+            with self.subTest(position=position):
+                result = self.snapshot(metadata)
+                self.assertFalse(result.ok)
+
+    def test_unknown_keys_and_schema_object_classes_fail_closed(self):
+        cases = []
+        top = self.metadata()
+        top["unexpected"] = True
+        cases.append(top)
+        for name in ("views", "triggers", "functions", "sequences", "policies", "extensions"):
+            metadata = self.metadata()
+            metadata["schema"][name] = {}
+            cases.append(metadata)
+        table = self.metadata()
+        table["schema"]["tables"]["assets"]["triggers"] = []
+        cases.append(table)
+        for collection in ("columns", "constraints", "indexes"):
+            metadata = self.metadata()
+            metadata["schema"]["tables"]["assets"][collection][0]["unexpected"] = True
+            cases.append(metadata)
+        ledger = self.metadata()
+        ledger["ledger"]["unexpected"] = True
+        cases.append(ledger)
+        identity = self.metadata()
+        identity["identity"]["proven"] = True
+        cases.append(identity)
+        for position, metadata in enumerate(cases):
+            with self.subTest(position=position):
+                self.assertNotEqual(self.snapshot(metadata).status, authority.AuditStatus.SNAPSHOT_CONSISTENT)
+
+    def test_allowed_extras_cannot_bypass_exact_schema(self):
+        metadata = self.metadata()
+        metadata["schema"]["allowed_extras"]["tables"] = ["unauthorized"]
+        metadata["schema"]["tables"]["unauthorized"] = {
+            "columns": [], "constraints": [], "indexes": [],
+        }
+        self.assertNotEqual(self.snapshot(metadata).status, authority.AuditStatus.SNAPSHOT_CONSISTENT)
+
+    def test_identity_rejects_padding_sentinels_and_unicode_controls(self):
+        bad_values = (
+            "", " isolated_fixture", "isolated_fixture ", "unknown", "UnSpEcIfIeD",
+            "unverified", "default", "none", "null", "n/a", "na", "test",
+            "database", "environment", "line\nfeed", "ascii\x01control",
+            "c1\x85control", "line\u2028separator", "paragraph\u2029separator",
+            "format\u200bcharacter",
+        )
+        for value in bad_values:
+            with self.subTest(value=repr(value)):
+                metadata = self.metadata()
+                metadata["identity"]["database_name"] = value
+                expected = authority.ExpectedIdentity(value, self.identity.environment)
+                result = authority._audit_supplied_metadata(metadata, expected, self.manifest)
+                self.assertEqual(result.status, authority.AuditStatus.DATABASE_IDENTITY_UNPROVEN)
+
+    def test_identity_mismatch_and_self_certification_remain_unproven(self):
+        metadata = self.metadata()
+        metadata["identity"]["environment"] = "different"
+        self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.DATABASE_IDENTITY_UNPROVEN)
+        metadata = self.metadata()
+        metadata["identity"]["identity_proven"] = True
+        self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.DATABASE_IDENTITY_UNPROVEN)
+
     def test_present_ledger_requires_exact_order_filename_and_checksum(self):
         valid = self.metadata(ledger_state="present")
         self.assertEqual(self.snapshot(valid).status, authority.AuditStatus.SNAPSHOT_CONSISTENT)
@@ -387,6 +1072,14 @@ class MetadataAndLedgerTests(AuthorityFixture):
         later["ledger"]["entries"].append({"order": 7, "version": "009", "filename": "009.sql", "sha256": "0" * 64})
         self.assertEqual(self.snapshot(later).status, authority.AuditStatus.SNAPSHOT_LATER)
 
+    def test_malformed_ledger_entries_never_escape(self):
+        values = (None, "006", [], {}, {"order": 1}, {"order": [], "version": "001", "filename": "x", "sha256": "0" * 64})
+        for value in values:
+            metadata = self.metadata(ledger_state="present")
+            metadata["ledger"]["entries"] = value if isinstance(value, list) else [value]
+            with self.subTest(value=repr(value)):
+                self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.LEDGER_INCONSISTENT)
+
     def test_ledger_state_is_explicit(self):
         for ledger in (None, {}, {"state": "unknown", "entries": []}, {"state": "absent", "entries": [{}]}):
             metadata = self.metadata()
@@ -406,6 +1099,14 @@ class MetadataAndLedgerTests(AuthorityFixture):
 
 
 class RedactionAndStatusTests(unittest.TestCase):
+    def test_hostile_containers_and_string_conversion_are_contained(self):
+        self.assertEqual(authority.redact_value(RaisingMapping()), "[REDACTED_UNAVAILABLE]")
+        self.assertEqual(authority.redact_value(RaisingList()), "[REDACTED_UNAVAILABLE]")
+
+        hostile = mock.Mock()
+        hostile.__str__ = mock.Mock(side_effect=RuntimeError("password=exposed"))
+        self.assertEqual(authority.sanitize_line(hostile), "[UNAVAILABLE]")
+
     def test_recursive_redaction_and_single_line_safety(self):
         payload = {
             "list": [{"api-key": "abc"}, "Authorization: Bearer token123"],
@@ -420,6 +1121,26 @@ class RedactionAndStatusTests(unittest.TestCase):
             self.assertNotIn(secret, encoded)
         self.assertNotIn("\n", result["path"])
         self.assertIn("[REDACTED_URL]", result["url"])
+
+    def test_redacts_single_component_paths_quoted_secrets_and_unicode(self):
+        text = (
+            '/secret secret="two words" password=one token=two '
+            "api_key=three passphrase='four words' c1\x85next\u2028line\u2029paragraph\u200bformat"
+        )
+        sanitized = authority.sanitize_line(text)
+        for unsafe in ("/secret", "two words", "one", "two", "three", "four words", "\x85", "\u2028", "\u2029", "\u200b"):
+            self.assertNotIn(unsafe, sanitized)
+        self.assertNotIn("\n", sanitized)
+        self.assertGreaterEqual(sanitized.count("[REDACTED]"), 5)
+
+    def test_exception_and_nested_multiple_secrets_are_sanitized(self):
+        value = {
+            "errors": [RuntimeError("/only secret=value password='two words'")],
+            "nested": ({"credential": "raw"}, {"authorization": "Bearer raw-token"}),
+        }
+        encoded = json.dumps(authority.redact_value(value), sort_keys=True)
+        for unsafe in ("/only", "value", "two words", "raw-token"):
+            self.assertNotIn(unsafe, encoded)
 
     def test_reports_are_deterministic_versioned_and_status_cannot_conflict(self):
         result = authority.AuditResult(
@@ -437,6 +1158,22 @@ class RedactionAndStatusTests(unittest.TestCase):
             authority.AuditResult("migration_files_verified", (), (), "009")
         with self.assertRaises(TypeError):
             authority.AuditResult(authority.AuditStatus.MIGRATION_FILES_INVALID, (), (), "009", ok=True)
+
+    def test_unsafe_or_contradictory_result_fields_are_rejected(self):
+        with self.assertRaises(TypeError):
+            authority.AuditResult(
+                authority.AuditStatus.SNAPSHOT_CONSISTENT, (), (), "009",
+                identity_assurance="not_applicable",
+            )
+        with self.assertRaises(TypeError):
+            authority.AuditResult(
+                authority.AuditStatus.MIGRATION_FILES_VERIFIED, (), (), "009",
+                identity_assurance="unsafe\nforged",
+            )
+        with self.assertRaises(TypeError):
+            authority.AuditResult(
+                authority.AuditStatus.MIGRATION_FILES_INVALID, ("bad\nversion",), (), "009",
+            )
 
 
 class IntegrationSafetyTests(unittest.TestCase):
@@ -462,6 +1199,22 @@ class IntegrationSafetyTests(unittest.TestCase):
         self.assertTrue(imports.isdisjoint({"subprocess", "socket", "urllib", "requests", "docker", "psycopg2", "sqlalchemy"}))
         self.assertNotIn("CREATE TABLE", source.upper())
         self.assertNotIn("ALTER TABLE", source.upper())
+        os_calls = {
+            node.attr
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Attribute)
+            and isinstance(node.value, ast.Name)
+            and node.value.id == "os"
+        }
+        self.assertTrue(
+            os_calls.isdisjoint(
+                {"remove", "unlink", "rename", "replace", "mkdir", "makedirs", "rmdir", "removedirs", "write"}
+            )
+        )
+        self.assertNotIn("O_WRONLY", source)
+        self.assertNotIn("O_RDWR", source)
+        self.assertNotIn("O_CREAT", source)
+        self.assertNotIn("O_TRUNC", source)
 
     def test_actual_api_and_wsgi_imports_do_not_invoke_verifier(self):
         dangerous = mock.Mock(side_effect=AssertionError("verifier invoked during startup"))

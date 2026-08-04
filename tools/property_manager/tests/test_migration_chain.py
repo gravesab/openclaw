@@ -10,6 +10,8 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_DIR = REPO_ROOT / "tools" / "property_manager" / "db"
@@ -90,18 +92,34 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             ]
         )
         cls.container_id = result.stdout.decode().strip()
-        cls._prove_container_identity()
-        cls._wait_until_ready()
+        try:
+            cls._prove_container_identity()
+            cls._wait_until_ready()
+        except BaseException as setup_error:
+            try:
+                cls._remove_verified_container()
+            except BaseException as cleanup_error:
+                setup_error.add_note(f"disposable container cleanup also failed: {cleanup_error!r}")
+            raise
 
     @classmethod
     def tearDownClass(cls) -> None:
         if not getattr(cls, "container_id", ""):
             return
-        try:
-            cls._prove_container_identity()
-        except (AssertionError, subprocess.CalledProcessError):
+        cls._remove_verified_container()
+
+    @classmethod
+    def _remove_verified_container(cls) -> None:
+        """Remove only the exact disposable container whose identity is proven."""
+        if not cls.container_id:
             return
-        _run(["docker", "rm", "--force", cls.container_id], check=False)
+        cls._prove_container_identity()
+        container_id = cls.container_id
+        result = _run(["docker", "rm", "--force", container_id], check=False)
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).decode(errors="replace").strip()
+            raise RuntimeError(f"failed to remove verified test container {container_id}: {detail}")
+        cls.container_id = ""
 
     @classmethod
     def _prove_container_identity(cls) -> None:
@@ -275,6 +293,163 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             }
             <= constraints
         )
+
+
+class MigrationContainerCleanupTests(unittest.TestCase):
+    returned_id = "a" * 64
+    token = "b" * 12
+
+    def setUp(self) -> None:
+        self.test_class = PropertyManagerMigrationChainTests
+        self.test_class.container_id = ""
+
+    def tearDown(self) -> None:
+        self.test_class.container_id = ""
+
+    def _run_result(
+        self,
+        args: list[str],
+        *,
+        input_bytes: bytes | None = None,
+        check: bool = True,
+    ) -> subprocess.CompletedProcess[bytes]:
+        del input_bytes, check
+        if args[:3] == ["docker", "image", "inspect"]:
+            return subprocess.CompletedProcess(args, 0, b"[]", b"")
+        if args[:2] == ["docker", "run"]:
+            return subprocess.CompletedProcess(args, 0, f"{self.returned_id}\n".encode(), b"")
+        if args[:3] == ["docker", "rm", "--force"]:
+            return subprocess.CompletedProcess(args, 0, f"{self.returned_id}\n".encode(), b"")
+        raise AssertionError(f"unexpected command: {args}")
+
+    def _setup_patches(self):
+        return (
+            mock.patch.object(shutil, "which", return_value="/usr/bin/docker"),
+            mock.patch.object(uuid, "uuid4", return_value=SimpleNamespace(hex=self.token * 3)),
+            mock.patch(f"{__name__}._run", side_effect=self._run_result),
+        )
+
+    def test_readiness_failure_triggers_verified_cleanup_by_returned_id(self) -> None:
+        which_patch, uuid_patch, run_patch = self._setup_patches()
+        with (
+            which_patch,
+            uuid_patch,
+            run_patch as run_mock,
+            mock.patch.object(self.test_class, "_prove_container_identity") as prove,
+            mock.patch.object(
+                self.test_class,
+                "_wait_until_ready",
+                side_effect=RuntimeError("readiness failed"),
+            ),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "readiness failed"):
+                self.test_class.setUpClass()
+
+        self.assertEqual(prove.call_count, 2)
+        removal = [
+            call.args[0]
+            for call in run_mock.call_args_list
+            if call.args[0][:3] == ["docker", "rm", "--force"]
+        ]
+        self.assertEqual(removal, [["docker", "rm", "--force", self.returned_id]])
+        self.assertEqual(self.test_class.container_id, "")
+
+    def test_identity_failure_never_removes_unverified_container(self) -> None:
+        which_patch, uuid_patch, run_patch = self._setup_patches()
+        with (
+            which_patch,
+            uuid_patch,
+            run_patch as run_mock,
+            mock.patch.object(
+                self.test_class,
+                "_prove_container_identity",
+                side_effect=AssertionError("identity mismatch"),
+            ),
+        ):
+            with self.assertRaisesRegex(AssertionError, "identity mismatch") as raised:
+                self.test_class.setUpClass()
+
+        self.assertFalse(
+            any(call.args[0][:3] == ["docker", "rm", "--force"] for call in run_mock.call_args_list)
+        )
+        self.assertTrue(
+            any("cleanup also failed" in note for note in getattr(raised.exception, "__notes__", []))
+        )
+
+    def test_unrelated_container_metadata_cannot_be_selected(self) -> None:
+        self.test_class.token = self.token
+        self.test_class.container_name = f"openclaw-pm-migration-test-{self.token}"
+        self.test_class.container_id = self.returned_id
+        unrelated = {
+            "Id": "c" * 64,
+            "Name": "/unrelated-container",
+            "Config": {
+                "Labels": {
+                    "ai.openclaw.test": "something-else",
+                    "ai.openclaw.test-token": "different-token",
+                }
+            },
+        }
+
+        def inspect_only(args, **_kwargs):
+            if args[:2] == ["docker", "inspect"]:
+                return subprocess.CompletedProcess(args, 0, json.dumps(unrelated).encode(), b"")
+            raise AssertionError(f"removal must not be attempted: {args}")
+
+        with mock.patch(f"{__name__}._run", side_effect=inspect_only) as run_mock:
+            with self.assertRaisesRegex(AssertionError, "ID changed"):
+                self.test_class._remove_verified_container()
+
+        self.assertEqual(run_mock.call_count, 1)
+        self.assertEqual(run_mock.call_args.args[0][-1], self.returned_id)
+
+    def test_cleanup_failure_does_not_conceal_original_setup_failure(self) -> None:
+        which_patch, uuid_patch, run_patch = self._setup_patches()
+        with (
+            which_patch,
+            uuid_patch,
+            run_patch,
+            mock.patch.object(self.test_class, "_prove_container_identity"),
+            mock.patch.object(
+                self.test_class,
+                "_wait_until_ready",
+                side_effect=ValueError("original setup failure"),
+            ),
+            mock.patch.object(
+                self.test_class,
+                "_remove_verified_container",
+                side_effect=RuntimeError("cleanup failure"),
+            ),
+        ):
+            with self.assertRaisesRegex(ValueError, "original setup failure") as raised:
+                self.test_class.setUpClass()
+
+        self.assertTrue(
+            any("cleanup failure" in note for note in getattr(raised.exception, "__notes__", []))
+        )
+
+    def test_successful_setup_and_teardown_remove_exact_container(self) -> None:
+        which_patch, uuid_patch, run_patch = self._setup_patches()
+        with (
+            which_patch,
+            uuid_patch,
+            run_patch as run_mock,
+            mock.patch.object(self.test_class, "_prove_container_identity") as prove,
+            mock.patch.object(self.test_class, "_wait_until_ready") as wait,
+        ):
+            self.test_class.setUpClass()
+            self.assertEqual(self.test_class.container_id, self.returned_id)
+            self.test_class.tearDownClass()
+
+        self.assertEqual(wait.call_count, 1)
+        self.assertEqual(prove.call_count, 2)
+        removal = [
+            call.args[0]
+            for call in run_mock.call_args_list
+            if call.args[0][:3] == ["docker", "rm", "--force"]
+        ]
+        self.assertEqual(removal, [["docker", "rm", "--force", self.returned_id]])
+        self.assertEqual(self.test_class.container_id, "")
 
 
 if __name__ == "__main__":

@@ -30,6 +30,8 @@ MAX_DISCOVERED_ENTRIES = 512
 MAX_JSON_DEPTH = 64
 MAX_JSON_NODES = 20_000
 MAX_TEXT_CHARS = 16_384
+MAX_REPORT_TEXT_CHARS = 4_096
+MAX_REPORT_DIAGNOSTICS = 64
 
 EXACT_MIGRATION = re.compile(r"^(?P<version>[0-9]{3})_[a-z0-9_]+\.sql$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -46,6 +48,7 @@ QUERY_SECRET = re.compile(
     r"[^&#\s]+"
 )
 ABSOLUTE_PATH = re.compile(r"(?<![A-Za-z0-9])/(?!/)[^\s,;]+")
+WINDOWS_UNC_PATH = re.compile(r"(?<!\\)\\\\[^\s,;]+")
 WINDOWS_PATH = re.compile(r"(?i)(?<![A-Za-z0-9])[a-z]:\\[^\s,;]+")
 SENSITIVE_KEYS = re.compile(
     r"(?i)(password|passwd|pwd|username|user|secret|token|credential|api[_-]?key|passphrase|authorization)"
@@ -194,7 +197,11 @@ class AuditResult:
             or re.fullmatch(r"[0-9]{3}", self.next_canonical_version) is None
         ):
             raise TypeError("invalid next canonical version")
-        if type(self.diagnostics) is not tuple or any(type(item) is not Diagnostic for item in self.diagnostics):
+        if (
+            type(self.diagnostics) is not tuple
+            or len(self.diagnostics) > MAX_REPORT_DIAGNOSTICS
+            or any(type(item) is not Diagnostic for item in self.diagnostics)
+        ):
             raise TypeError("invalid diagnostics")
         if self.identity_assurance not in {"not_applicable", "unproven"}:
             raise TypeError("invalid identity assurance")
@@ -246,17 +253,21 @@ def _strip_unsafe_unicode(value: str) -> str:
 
 def sanitize_line(value: Any) -> str:
     try:
-        text = _strip_unsafe_unicode(str(value))
+        raw = str(value)
     except (BaseException,) as exc:
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
         return "[UNAVAILABLE]"
+    truncated = len(raw) > MAX_REPORT_TEXT_CHARS
+    text = _strip_unsafe_unicode(raw[:MAX_REPORT_TEXT_CHARS])
     text = URL.sub("[REDACTED_URL]", text)
     text = BEARER.sub(r"\1[REDACTED]", text)
     text = QUERY_SECRET.sub(r"\1[REDACTED]", text)
     text = SECRET.sub(r"\1\2[REDACTED]", text)
+    text = WINDOWS_UNC_PATH.sub("[REDACTED_PATH]", text)
     text = WINDOWS_PATH.sub("[REDACTED_PATH]", text)
-    return ABSOLUTE_PATH.sub("[REDACTED_PATH]", text)
+    text = ABSOLUTE_PATH.sub("[REDACTED_PATH]", text)
+    return text + ("[TRUNCATED]" if truncated else "")
 
 
 def redact_value(
@@ -374,6 +385,21 @@ def _identity_valid(value: Any) -> bool:
     )
 
 
+def _expected_identity_values(value: Any) -> tuple[str, str] | None:
+    if type(value) is not ExpectedIdentity:
+        return None
+    try:
+        database_name = value.database_name
+        environment = value.environment
+    except (BaseException,) as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        return None
+    if not _identity_valid(database_name) or not _identity_valid(environment):
+        return None
+    return database_name, environment
+
+
 def _no_symlink_components(path: Path) -> bool:
     current = Path(path.anchor) if path.is_absolute() else Path.cwd()
     parts = path.parts[1:] if path.is_absolute() else path.parts
@@ -387,8 +413,16 @@ def _no_symlink_components(path: Path) -> bool:
         return False
 
 
-def _directory_identity(info: os.stat_result) -> tuple[int, int, int]:
-    return info.st_dev, info.st_ino, stat.S_IFMT(info.st_mode)
+def _directory_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+    return (
+        info.st_dev,
+        info.st_ino,
+        info.st_mode,
+        info.st_nlink,
+        info.st_size,
+        info.st_mtime_ns,
+        info.st_ctime_ns,
+    )
 
 
 def _file_identity(info: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
@@ -510,12 +544,16 @@ def _migration_like(name: str) -> bool:
     return bool(stripped and stripped[0].isascii() and stripped[0].isdigit() and ".sql" in stripped.casefold())
 
 
-def _scan_migration_tree(root_fd: int) -> tuple[list[str], list[str]]:
+def _scan_migration_tree(
+    root_fd: int,
+) -> tuple[list[str], list[str], tuple[tuple[str, str, tuple[int, int, int, int, int, int, int]], ...]]:
     direct: list[str] = []
     invalid: list[str] = []
+    inventory: list[tuple[str, str, tuple[int, int, int, int, int, int, int]]] = []
     discovered = 0
+    root_before = os.fstat(root_fd)
 
-    def walk(directory_fd: int, depth: int) -> None:
+    def walk(directory_fd: int, depth: int, prefix: str) -> None:
         nonlocal discovered
         entries = []
         with os.scandir(directory_fd) as iterator:
@@ -530,6 +568,16 @@ def _scan_migration_tree(root_fd: int) -> tuple[list[str], list[str]]:
             except OSError:
                 invalid.append("authority_entry_unavailable")
                 continue
+            relative_name = f"{prefix}/{entry.name}" if prefix else entry.name
+            if stat.S_ISREG(info.st_mode):
+                object_type = "regular"
+            elif stat.S_ISDIR(info.st_mode):
+                object_type = "directory"
+            elif stat.S_ISLNK(info.st_mode):
+                object_type = "symlink"
+            else:
+                object_type = "other"
+            inventory.append((relative_name, object_type, _file_identity(info)))
             looks_like = _migration_like(entry.name)
             if looks_like:
                 if depth != 0 or EXACT_MIGRATION.fullmatch(entry.name) is None or not stat.S_ISREG(info.st_mode):
@@ -548,14 +596,18 @@ def _scan_migration_tree(root_fd: int) -> tuple[list[str], list[str]]:
                     opened = os.fstat(child)
                     if _directory_identity(info) != _directory_identity(opened):
                         raise UnsafeAuthorityObjectError("nested authority directory changed")
-                    walk(child, depth + 1)
+                    walk(child, depth + 1, relative_name)
+                    if _directory_identity(info) != _directory_identity(os.fstat(child)):
+                        raise UnsafeAuthorityObjectError("nested authority directory changed during discovery")
                 finally:
                     os.close(child)
-            elif stat.S_ISLNK(info.st_mode) and looks_like:
-                invalid.append("unexpected_migration_object")
+            elif stat.S_ISLNK(info.st_mode):
+                invalid.append("unexpected_symlink_object")
 
-    walk(root_fd, 0)
-    return direct, invalid
+    walk(root_fd, 0, "")
+    if _directory_identity(root_before) != _directory_identity(os.fstat(root_fd)):
+        raise UnsafeAuthorityObjectError("authority directory changed during discovery")
+    return direct, invalid, tuple(inventory)
 
 
 def _validate_named_objects(value: Any, field: str) -> list[dict[str, Any]]:
@@ -747,9 +799,15 @@ def _result(
     return AuditResult(status, canonical, reserved, next_version, tuple(diagnostics), identity_assurance)
 
 
-def _audit_migration_files_at(directory: Path, manifest_path: Path) -> AuditResult:
+def _audit_migration_authority_at(
+    directory: Path,
+    manifest_path: Path,
+    *,
+    _post_inventory: Any = None,
+) -> tuple[AuditResult, AuthorityManifest | None]:
     manifest: AuthorityManifest | None = None
     directory_fd: int | None = None
+    phase = "opening"
     try:
         if not isinstance(directory, Path) or not isinstance(manifest_path, Path):
             raise UnsafeAuthorityObjectError("authority paths are invalid")
@@ -758,49 +816,101 @@ def _audit_migration_files_at(directory: Path, manifest_path: Path) -> AuditResu
         if manifest_path.parent != directory:
             raise UnsafeAuthorityObjectError("manifest is outside authority directory")
         directory_fd = _open_directory(directory)
+        phase = "inventory"
+        found, invalid, initial_inventory = _scan_migration_tree(directory_fd)
+        phase = "manifest"
         manifest = _parse_manifest(
             _read_regular_at(directory_fd, manifest_path.name, max_bytes=MAX_MANIFEST_BYTES)
         )
-        found, invalid = _scan_migration_tree(directory_fd)
+        phase = "verification"
+        if _post_inventory is not None:
+            _post_inventory()
         expected = {spec.filename: spec for spec in manifest.canonical}
         actual = set(found)
-        diagnostics = [Diagnostic(code, "migration authority contains an invalid object") for code in invalid]
+        diagnostics = [
+            Diagnostic(code, "migration authority contains an invalid object")
+            for code in invalid[: MAX_REPORT_DIAGNOSTICS - 1]
+        ]
+        if len(invalid) >= MAX_REPORT_DIAGNOSTICS:
+            diagnostics.append(Diagnostic("authority_invalid_objects_truncated", "additional invalid objects omitted"))
         if actual != set(expected):
             diagnostics.append(Diagnostic("migration_set_mismatch", "canonical migration set is not exact"))
         total_bytes = 0
-        for name in sorted(actual & set(expected)):
+        initial_sizes = {
+            name: identity[4]
+            for name, object_type, identity in initial_inventory
+            if object_type == "regular" and "/" not in name
+        }
+        candidates = manifest.canonical if not diagnostics else ()
+        for spec in candidates:
+            name = spec.filename
+            remaining = MAX_TOTAL_MIGRATION_BYTES - total_bytes
+            initial_size = initial_sizes.get(name)
+            if type(initial_size) is not int or initial_size < 0 or initial_size > MAX_MIGRATION_BYTES or initial_size > remaining:
+                diagnostics.append(Diagnostic("migration_size_invalid", "canonical migration input exceeds bounds"))
+                break
             try:
-                data = _read_regular_at(directory_fd, name, max_bytes=MAX_MIGRATION_BYTES)
+                data = _read_regular_at(directory_fd, name, max_bytes=min(MAX_MIGRATION_BYTES, remaining))
                 total_bytes += len(data)
-                if total_bytes > MAX_TOTAL_MIGRATION_BYTES:
-                    raise BoundedInputError("cumulative migration bytes exceed limit")
-                if hashlib.sha256(data).hexdigest() != expected[name].sha256:
+                if hashlib.sha256(data).hexdigest() != spec.sha256:
                     diagnostics.append(Diagnostic("migration_checksum_mismatch", "canonical migration checksum differs"))
+                    break
             except BoundedInputError:
                 diagnostics.append(Diagnostic("migration_size_invalid", "canonical migration input exceeds bounds"))
+                break
             except (MemoryError, OSError, RecursionError, TypeError, ValueError):
                 diagnostics.append(Diagnostic("migration_read_failed", "canonical migration could not be read safely"))
+                break
+        final_found, final_invalid, final_inventory = _scan_migration_tree(directory_fd)
+        if (
+            initial_inventory != final_inventory
+            or found != final_found
+            or invalid != final_invalid
+        ):
+            diagnostics.append(Diagnostic("authority_inventory_changed", "migration authority changed during verification"))
         _verify_directory_path(directory, directory_fd)
         if diagnostics:
-            return _result(AuditStatus.MIGRATION_FILES_INVALID, manifest, diagnostics)
-        return _result(AuditStatus.MIGRATION_FILES_VERIFIED, manifest)
+            return _result(AuditStatus.MIGRATION_FILES_INVALID, manifest, diagnostics), manifest
+        return _result(AuditStatus.MIGRATION_FILES_VERIFIED, manifest), manifest
     except BoundedInputError:
-        status = AuditStatus.MIGRATION_FILES_INVALID if manifest else AuditStatus.AUTHORITY_UNAVAILABLE
-        return _result(status, manifest, (Diagnostic("authority_bounds_exceeded", "authority input exceeds bounds"),))
+        status = (
+            AuditStatus.MIGRATION_FILES_INVALID
+            if manifest is not None or phase == "inventory"
+            else AuditStatus.AUTHORITY_UNAVAILABLE
+        )
+        return _result(status, manifest, (Diagnostic("authority_bounds_exceeded", "authority input exceeds bounds"),)), manifest
     except (AuthorityConfigurationError, MemoryError, OSError, RecursionError, TypeError, ValueError, UnicodeError):
-        return _result(
-            AuditStatus.AUTHORITY_UNAVAILABLE,
+        return (
+            _result(
+                AuditStatus.AUTHORITY_UNAVAILABLE,
+                manifest,
+                (Diagnostic("authority_unavailable", "canonical authority could not be read safely"),),
+            ),
             manifest,
-            (Diagnostic("authority_unavailable", "canonical authority could not be read safely"),),
         )
     finally:
         if directory_fd is not None:
             os.close(directory_fd)
 
 
+def _audit_migration_files_at(
+    directory: Path,
+    manifest_path: Path,
+    *,
+    _post_inventory: Any = None,
+) -> AuditResult:
+    result, _manifest = _audit_migration_authority_at(
+        directory,
+        manifest_path,
+        _post_inventory=_post_inventory,
+    )
+    return result
+
+
 def audit_canonical_migration_files() -> AuditResult:
     try:
-        return _audit_migration_files_at(CANONICAL_MIGRATION_DIR, CANONICAL_MANIFEST)
+        result, _manifest = _audit_migration_authority_at(CANONICAL_MIGRATION_DIR, CANONICAL_MANIFEST)
+        return result
     except (BaseException,) as exc:
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise
@@ -911,8 +1021,15 @@ def _audit_supplied_metadata(
 ) -> AuditResult:
     assurance = "unproven"
     try:
-        if not _identity_valid(expected_identity.database_name) or not _identity_valid(expected_identity.environment):
-            return _result(AuditStatus.DATABASE_IDENTITY_UNPROVEN, manifest, identity_assurance=assurance)
+        expected_values = _expected_identity_values(expected_identity)
+        if expected_values is None:
+            return _result(
+                AuditStatus.DATABASE_IDENTITY_UNPROVEN,
+                manifest,
+                (Diagnostic("expected_identity_invalid", "expected database identity is invalid"),),
+                identity_assurance=assurance,
+            )
+        expected_database_name, expected_environment = expected_values
         _validate_plain_json(metadata)
         if type(metadata) is not dict or set(metadata) != SNAPSHOT_KEYS:
             return _result(AuditStatus.SNAPSHOT_AMBIGUOUS, manifest, identity_assurance=assurance)
@@ -922,7 +1039,7 @@ def _audit_supplied_metadata(
         database_name, environment = identity["database_name"], identity["environment"]
         if not _identity_valid(database_name) or not _identity_valid(environment):
             return _result(AuditStatus.DATABASE_IDENTITY_UNPROVEN, manifest, identity_assurance=assurance)
-        if database_name != expected_identity.database_name or environment != expected_identity.environment:
+        if database_name != expected_database_name or environment != expected_environment:
             return _result(AuditStatus.DATABASE_IDENTITY_UNPROVEN, manifest, identity_assurance=assurance)
         for field in ("concurrent_migration_activity", "unexplained_schema_objects"):
             if type(metadata[field]) is not bool or metadata[field]:
@@ -941,19 +1058,29 @@ def _audit_supplied_metadata(
         if schema_status:
             return _result(schema_status, manifest, identity_assurance=assurance)
         return _result(AuditStatus.SNAPSHOT_CONSISTENT, manifest, identity_assurance=assurance)
-    except (AuthorityConfigurationError, BoundedInputError, MemoryError, RecursionError, TypeError, ValueError, KeyError):
+    except (AuthorityConfigurationError, AttributeError, BoundedInputError, MemoryError, RecursionError, TypeError, ValueError, KeyError):
         return _result(AuditStatus.SNAPSHOT_AMBIGUOUS, manifest, identity_assurance=assurance)
 
 
 def audit_schema_metadata(source: SchemaMetadataSource, expected_identity: ExpectedIdentity) -> AuditResult:
     """Compare an untrusted supplied snapshot; never verify a real database."""
     try:
-        manifest = load_manifest()
-    except (AuthorityConfigurationError, MemoryError, RecursionError, TypeError, ValueError):
+        file_result, manifest = _audit_migration_authority_at(CANONICAL_MIGRATION_DIR, CANONICAL_MANIFEST)
+    except (BaseException,) as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
         return _result(AuditStatus.AUTHORITY_UNAVAILABLE, None)
-    file_result = audit_canonical_migration_files()
     if not file_result.ok:
         return file_result
+    if manifest is None:
+        return _result(AuditStatus.AUTHORITY_UNAVAILABLE, None)
+    if _expected_identity_values(expected_identity) is None:
+        return _result(
+            AuditStatus.DATABASE_IDENTITY_UNPROVEN,
+            manifest,
+            (Diagnostic("expected_identity_invalid", "expected database identity is invalid"),),
+            identity_assurance="unproven",
+        )
     try:
         metadata = source.inspect_read_only()
     except (BaseException,) as exc:
@@ -965,7 +1092,17 @@ def audit_schema_metadata(source: SchemaMetadataSource, expected_identity: Expec
             (Diagnostic("metadata_unavailable", "supplied metadata unavailable"),),
             identity_assurance="unproven",
         )
-    return _audit_supplied_metadata(metadata, expected_identity, manifest)
+    try:
+        return _audit_supplied_metadata(metadata, expected_identity, manifest)
+    except (BaseException,) as exc:
+        if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+            raise
+        return _result(
+            AuditStatus.SNAPSHOT_AMBIGUOUS,
+            manifest,
+            (Diagnostic("metadata_invalid", "supplied metadata is invalid"),),
+            identity_assurance="unproven",
+        )
 
 
 def _parser() -> argparse.ArgumentParser:

@@ -33,6 +33,24 @@ APPROVED_HASHES = {
     "006_phase1_meter_audit.sql": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0",
 }
 APPROVED_CONTRACT_HASH = "f3fac5c764d65f2f01d155461b3447e79b7128c7b1f93cda56600d27bfdc11d4"
+APPROVED_RESOURCE_LIMITS = {
+    "MAX_MANIFEST_BYTES": 1 * 1024 * 1024,
+    "MAX_MIGRATION_BYTES": 2 * 1024 * 1024,
+    "MAX_TOTAL_MIGRATION_BYTES": 8 * 1024 * 1024,
+    "MAX_TRAVERSAL_DEPTH": 8,
+    "MAX_DISCOVERED_ENTRIES": 512,
+    "MAX_JSON_DEPTH": 64,
+    "MAX_JSON_NODES": 20_000,
+    "MAX_TEXT_CHARS": 16_384,
+}
+APPROVED_REAPPLICATION = {
+    "001": False,
+    "002": False,
+    "003": False,
+    "004": False,
+    "005": True,
+    "006": True,
+}
 APPROVED_TABLES = (
     "asset_meter",
     "asset_meter_reading",
@@ -390,6 +408,20 @@ class RaisingList(list):
         raise RuntimeError("must not iterate untrusted collection")
 
 
+class HostileIdentity:
+    @property
+    def database_name(self):
+        raise RuntimeError("password=identity-secret /private/identity")
+
+    @property
+    def environment(self):
+        raise RuntimeError("must not access hostile identity")
+
+
+class MissingIdentityAttributes:
+    pass
+
+
 class AuthorityFixture(unittest.TestCase):
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="pm-authority-")
@@ -436,8 +468,33 @@ class AuthorityFixture(unittest.TestCase):
     def snapshot(self, metadata):
         return authority._audit_supplied_metadata(metadata, self.identity, self.manifest)
 
+    def public_snapshot(self, metadata, expected_identity=...):
+        source = FixtureMetadataSource(metadata)
+        verified = authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest)
+        with mock.patch.object(
+            authority,
+            "_audit_migration_authority_at",
+            return_value=(verified, self.manifest),
+        ):
+            result = authority.audit_schema_metadata(
+                source,
+                self.identity if expected_identity is ... else expected_identity,
+            )
+        return result, source
+
 
 class ManifestFingerprintTests(AuthorityFixture):
+    def test_security_limits_and_migration_policy_are_independently_pinned(self):
+        for name, expected in APPROVED_RESOURCE_LIMITS.items():
+            self.assertEqual(getattr(authority, name), expected, name)
+        self.assertEqual(
+            {spec.version: spec.reapplication_permitted for spec in self.manifest.canonical},
+            APPROVED_REAPPLICATION,
+        )
+        self.assertEqual(self.manifest.reserved_versions, ("007", "008"))
+        self.assertEqual(self.manifest.next_canonical_version, "009")
+        self.assertNotIn("009", {spec.version for spec in self.manifest.canonical})
+
     def test_complete_independent_001_through_006_oracle(self):
         self.assertEqual(self.manifest.schema_contract, EXPECTED_SCHEMA_ORACLE)
         tables = EXPECTED_SCHEMA_ORACLE["tables"]
@@ -665,16 +722,60 @@ class FilesystemAuthorityTests(AuthorityFixture):
         with self.assertRaises(authority.BoundedInputError):
             authority._read_regular_file(path, max_bytes=authority.MAX_MIGRATION_BYTES)
 
-    def test_cumulative_migration_limit_fails_closed(self):
+    def test_cumulative_migration_limit_accepts_exact_boundary(self):
         raw = json.loads(self.manifest_path.read_text())
-        for entry in raw["canonical_migrations"][:5]:
-            data = entry["version"].encode()[:1] * authority.MAX_MIGRATION_BYTES
+        for position, entry in enumerate(raw["canonical_migrations"]):
+            data = b"x" * authority.MAX_MIGRATION_BYTES if position < 4 else b""
             (self.db / entry["filename"]).write_bytes(data)
             entry["sha256"] = hashlib.sha256(data).hexdigest()
         self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
-        result = self.file_audit()
+        self.assertEqual(self.file_audit().status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
+
+    def test_cumulative_migration_limit_rejects_first_excess_without_later_reads(self):
+        raw = json.loads(self.manifest_path.read_text())
+        for position, entry in enumerate(raw["canonical_migrations"]):
+            data = b"x" * authority.MAX_MIGRATION_BYTES if position < 4 else b"x"
+            (self.db / entry["filename"]).write_bytes(data)
+            entry["sha256"] = hashlib.sha256(data).hexdigest()
+        self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+        calls = []
+        original = authority._read_regular_at
+
+        def record(directory_fd, name, **kwargs):
+            calls.append(name)
+            return original(directory_fd, name, **kwargs)
+
+        with mock.patch.object(authority, "_read_regular_at", side_effect=record):
+            result = self.file_audit()
         self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
         self.assertIn("migration_size_invalid", {item.code for item in result.diagnostics})
+        self.assertNotIn(raw["canonical_migrations"][4]["filename"], calls)
+        self.assertNotIn(raw["canonical_migrations"][5]["filename"], calls)
+
+    def test_cumulative_accounting_rejects_replacement_before_read(self):
+        raw = json.loads(self.manifest_path.read_text())
+        for position, entry in enumerate(raw["canonical_migrations"]):
+            if position < 4:
+                data = b"x" * (authority.MAX_MIGRATION_BYTES - 1)
+            elif position == 4:
+                data = b"x"
+            else:
+                data = b""
+            (self.db / entry["filename"]).write_bytes(data)
+            entry["sha256"] = hashlib.sha256(data).hexdigest()
+        self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+        target = self.db / raw["canonical_migrations"][4]["filename"]
+
+        result = authority._audit_migration_files_at(
+            self.db,
+            self.manifest_path,
+            _post_inventory=lambda: target.write_bytes(b"12345"),
+        )
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn(
+            "migration_size_invalid",
+            {item.code for item in result.diagnostics},
+        )
 
     def test_traversal_depth_accepts_boundary_and_rejects_next_level(self):
         current = self.db
@@ -843,6 +944,74 @@ class FilesystemAuthorityTests(AuthorityFixture):
             if original.exists():
                 original.rename(target)
 
+    def test_post_discovery_entry_addition_removal_replacement_and_type_change_fail_closed(self):
+        def run_mutation(initializer, mutator):
+            path = self.db / "ordinary-race-object"
+            initializer(path)
+            try:
+                result = authority._audit_migration_files_at(
+                    self.db,
+                    self.manifest_path,
+                    _post_inventory=lambda: mutator(path),
+                )
+                self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+                self.assertIn("authority_inventory_changed", {item.code for item in result.diagnostics})
+                self.assertNotIn(str(self.root), result.machine_report())
+            finally:
+                if path.is_symlink() or path.is_file():
+                    path.unlink()
+                elif path.is_dir():
+                    path.rmdir()
+
+        cases = (
+            (lambda _path: None, lambda path: path.write_text("added")),
+            (lambda path: path.write_text("remove"), lambda path: path.unlink()),
+            (
+                lambda path: path.write_text("original"),
+                lambda path: (path.unlink(), path.write_text("replacement")),
+            ),
+            (
+                lambda path: path.write_text("file"),
+                lambda path: (path.unlink(), path.mkdir()),
+            ),
+        )
+        for position, (initializer, mutator) in enumerate(cases):
+            with self.subTest(position=position):
+                run_mutation(initializer, mutator)
+
+    def test_migration_like_file_added_after_discovery_fails_closed(self):
+        path = self.db / "009_after_discovery.SQL.bak"
+        result = authority._audit_migration_files_at(
+            self.db,
+            self.manifest_path,
+            _post_inventory=lambda: path.write_text("SELECT 1;"),
+        )
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn("authority_inventory_changed", {item.code for item in result.diagnostics})
+
+    def test_nested_symlink_directory_cannot_conceal_migration(self):
+        external = self.root / "external"
+        external.mkdir()
+        (external / "009_concealed.sql").write_text("SELECT 1;")
+        (self.db / "concealed").symlink_to(external, target_is_directory=True)
+        result = self.file_audit()
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn("unexpected_symlink_object", {item.code for item in result.diagnostics})
+
+    def test_manifest_replacement_after_discovery_fails_continuity(self):
+        original = self.manifest_path.read_bytes()
+
+        def replace_manifest():
+            self.manifest_path.write_bytes(original + b" ")
+
+        result = authority._audit_migration_files_at(
+            self.db,
+            self.manifest_path,
+            _post_inventory=replace_manifest,
+        )
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn("authority_inventory_changed", {item.code for item in result.diagnostics})
+
     def test_public_audit_contains_recursion_and_memory_failures(self):
         for failure in (RecursionError(), MemoryError()):
             with self.subTest(failure=type(failure).__name__), mock.patch.object(
@@ -862,6 +1031,93 @@ class FilesystemAuthorityTests(AuthorityFixture):
 
 
 class MetadataAndLedgerTests(AuthorityFixture):
+    def test_malformed_expected_identity_never_escapes_public_entry_point(self):
+        malformed = (
+            None,
+            1,
+            "database",
+            [],
+            {},
+            HostileIdentity(),
+            MissingIdentityAttributes(),
+            authority.ExpectedIdentity("", "unit-test"),
+            authority.ExpectedIdentity(" isolated_fixture", "unit-test"),
+            authority.ExpectedIdentity("unknown", "unit-test"),
+            authority.ExpectedIdentity("isolated_fixture", "unit-test\nforged"),
+            authority.ExpectedIdentity([], "unit-test"),
+        )
+        for value in malformed:
+            with self.subTest(value=type(value).__name__):
+                result, source = self.public_snapshot(self.metadata(), value)
+                self.assertEqual(result.status, authority.AuditStatus.DATABASE_IDENTITY_UNPROVEN)
+                self.assertEqual(result.identity_assurance, "unproven")
+                self.assertEqual(source.calls, 0)
+                self.assertNotIn("secret", result.machine_report())
+
+    def test_public_snapshot_uses_exact_manifest_verified_once(self):
+        source = FixtureMetadataSource(self.metadata())
+        verified = authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest)
+        observed = []
+
+        def classify(metadata, expected_identity, manifest):
+            observed.append(manifest)
+            return authority._result(
+                authority.AuditStatus.SNAPSHOT_CONSISTENT,
+                manifest,
+                identity_assurance="unproven",
+            )
+
+        with mock.patch.object(
+            authority,
+            "_audit_migration_authority_at",
+            return_value=(verified, self.manifest),
+        ) as authority_audit, mock.patch.object(
+            authority,
+            "load_manifest",
+            side_effect=AssertionError("second manifest load attempted"),
+        ), mock.patch.object(
+            authority,
+            "audit_canonical_migration_files",
+            side_effect=AssertionError("second authority audit attempted"),
+        ), mock.patch.object(authority, "_audit_supplied_metadata", side_effect=classify):
+            result = authority.audit_schema_metadata(source, self.identity)
+        self.assertEqual(result.status, authority.AuditStatus.SNAPSHOT_CONSISTENT)
+        authority_audit.assert_called_once_with(authority.CANONICAL_MIGRATION_DIR, authority.CANONICAL_MANIFEST)
+        self.assertEqual(source.calls, 1)
+        self.assertEqual(observed, [self.manifest])
+        self.assertIs(observed[0], self.manifest)
+
+    def test_public_snapshot_contains_continuity_and_classifier_failures(self):
+        source = FixtureMetadataSource(self.metadata())
+        continuity_failure = authority._result(
+            authority.AuditStatus.MIGRATION_FILES_INVALID,
+            self.manifest,
+            (authority.Diagnostic("authority_inventory_changed", "migration authority changed"),),
+        )
+        with mock.patch.object(
+            authority,
+            "_audit_migration_authority_at",
+            return_value=(continuity_failure, self.manifest),
+        ):
+            result = authority.audit_schema_metadata(source, self.identity)
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertEqual(source.calls, 0)
+
+        verified = authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest)
+        with mock.patch.object(
+            authority,
+            "_audit_migration_authority_at",
+            return_value=(verified, self.manifest),
+        ), mock.patch.object(
+            authority,
+            "_audit_supplied_metadata",
+            side_effect=RuntimeError("password=secret /private/classifier"),
+        ):
+            result = authority.audit_schema_metadata(FixtureMetadataSource(self.metadata()), self.identity)
+        self.assertEqual(result.status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
+        self.assertNotIn("secret", result.machine_report())
+        self.assertNotIn("private", result.human_report())
+
     def test_only_consistent_snapshot_succeeds_and_identity_stays_unproven(self):
         result = self.snapshot(self.metadata())
         self.assertEqual(result.status, authority.AuditStatus.SNAPSHOT_CONSISTENT)
@@ -932,8 +1188,10 @@ class MetadataAndLedgerTests(AuthorityFixture):
         source = mock.Mock()
         source.inspect_read_only.return_value = RaisingMapping()
         verified = authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest)
-        with mock.patch.object(authority, "load_manifest", return_value=self.manifest), mock.patch.object(
-            authority, "audit_canonical_migration_files", return_value=verified
+        with mock.patch.object(
+            authority,
+            "_audit_migration_authority_at",
+            return_value=(verified, self.manifest),
         ):
             result = authority.audit_schema_metadata(source, self.identity)
         self.assertEqual(result.status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
@@ -1089,8 +1347,10 @@ class MetadataAndLedgerTests(AuthorityFixture):
     def test_metadata_source_exception_is_generic_and_untrusted(self):
         source = mock.Mock()
         source.inspect_read_only.side_effect = RuntimeError("postgres://user:secret@host/db /private/file")
-        with mock.patch.object(authority, "load_manifest", return_value=self.manifest), mock.patch.object(
-            authority, "audit_canonical_migration_files", return_value=authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest)
+        with mock.patch.object(
+            authority,
+            "_audit_migration_authority_at",
+            return_value=(authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest), self.manifest),
         ):
             result = authority.audit_schema_metadata(source, self.identity)
         self.assertEqual(result.status, authority.AuditStatus.AUTHORITY_UNAVAILABLE)
@@ -1099,6 +1359,87 @@ class MetadataAndLedgerTests(AuthorityFixture):
 
 
 class RedactionAndStatusTests(unittest.TestCase):
+    def test_unc_extended_unc_device_and_multiple_paths_are_redacted(self):
+        text = (
+            r"\\server\share\secret.txt \\?\UNC\server\share\extended.txt "
+            r"\\.\PhysicalDrive0 \\?\C:\device\secret.txt C:\private\file.txt "
+            "/secret /another/path password=one token=two"
+        )
+        sanitized = authority.sanitize_line(text)
+        for unsafe in (
+            "server",
+            "share",
+            "PhysicalDrive0",
+            "device",
+            "C:\\private",
+            "/secret",
+            "/another/path",
+            "one",
+            "two",
+        ):
+            self.assertNotIn(unsafe, sanitized)
+        self.assertGreaterEqual(sanitized.count("[REDACTED_PATH]"), 6)
+        self.assertNotIn("\n", sanitized)
+
+    def test_exception_unc_path_and_oversized_diagnostic_are_bounded(self):
+        message = (
+            r"\\server\share\exception.txt password='two words' "
+            + "x" * (authority.MAX_REPORT_TEXT_CHARS + 100)
+            + "\nforged"
+        )
+        result = authority.AuditResult(
+            authority.AuditStatus.MIGRATION_FILES_INVALID,
+            ("001",),
+            ("007",),
+            "009",
+            (authority.Diagnostic("bounded", message),),
+        )
+        machine = result.machine_report()
+        human = result.human_report()
+        self.assertEqual(machine, result.machine_report())
+        self.assertEqual(human, result.human_report())
+        self.assertIn("[TRUNCATED]", machine)
+        self.assertNotIn("server", machine)
+        self.assertNotIn("two words", machine)
+        self.assertNotIn("\nforged", human)
+        self.assertLess(len(machine), authority.MAX_REPORT_TEXT_CHARS + 1_000)
+        exception_output = authority.redact_value(
+            RuntimeError(r"\\server\share\exception.txt secret=value")
+        )
+        self.assertNotIn("server", exception_output)
+        self.assertNotIn("value", exception_output)
+
+    def test_recursive_or_excessive_diagnostic_structures_are_rejected(self):
+        recursive = []
+        recursive.append(recursive)
+        with self.assertRaises(TypeError):
+            authority.AuditResult(
+                authority.AuditStatus.MIGRATION_FILES_INVALID,
+                (),
+                (),
+                "009",
+                (recursive,),
+            )
+        with self.assertRaises(TypeError):
+            authority.AuditResult(
+                authority.AuditStatus.MIGRATION_FILES_INVALID,
+                (),
+                (),
+                "009",
+                ((authority.Diagnostic("nested", "value"),),),
+            )
+        with self.assertRaises(TypeError):
+            authority.AuditResult(
+                authority.AuditStatus.MIGRATION_FILES_INVALID,
+                (),
+                (),
+                "009",
+                tuple(
+                    authority.Diagnostic("bounded", str(position))
+                    for position in range(authority.MAX_REPORT_DIAGNOSTICS + 1)
+                ),
+            )
+
     def test_hostile_containers_and_string_conversion_are_contained(self):
         self.assertEqual(authority.redact_value(RaisingMapping()), "[REDACTED_UNAVAILABLE]")
         self.assertEqual(authority.redact_value(RaisingList()), "[REDACTED_UNAVAILABLE]")

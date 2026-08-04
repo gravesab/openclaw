@@ -33,6 +33,7 @@ APPROVED_HASHES = {
     "006_phase1_meter_audit.sql": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0",
 }
 APPROVED_CONTRACT_HASH = "f3fac5c764d65f2f01d155461b3447e79b7128c7b1f93cda56600d27bfdc11d4"
+APPROVED_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 APPROVED_RESOURCE_LIMITS = {
     "MAX_MANIFEST_BYTES": 1 * 1024 * 1024,
     "MAX_MIGRATION_BYTES": 2 * 1024 * 1024,
@@ -722,14 +723,117 @@ class FilesystemAuthorityTests(AuthorityFixture):
         with self.assertRaises(authority.BoundedInputError):
             authority._read_regular_file(path, max_bytes=authority.MAX_MIGRATION_BYTES)
 
-    def test_cumulative_migration_limit_accepts_exact_boundary(self):
+    def configure_exact_cumulative_boundary(self):
+        self.assertEqual(
+            hashlib.sha256(b"").hexdigest(),
+            APPROVED_EMPTY_SHA256,
+        )
         raw = json.loads(self.manifest_path.read_text())
         for position, entry in enumerate(raw["canonical_migrations"]):
             data = b"x" * authority.MAX_MIGRATION_BYTES if position < 4 else b""
             (self.db / entry["filename"]).write_bytes(data)
-            entry["sha256"] = hashlib.sha256(data).hexdigest()
+            entry["sha256"] = (
+                hashlib.sha256(data).hexdigest()
+                if data
+                else APPROVED_EMPTY_SHA256
+            )
         self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
-        self.assertEqual(self.file_audit().status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
+        return raw
+
+    def test_cumulative_migration_limit_accepts_exact_boundary(self):
+        raw = self.configure_exact_cumulative_boundary()
+        calls = []
+        original = authority._read_regular_at
+
+        def record(directory_fd, name, **kwargs):
+            calls.append(name)
+            return original(directory_fd, name, **kwargs)
+
+        with mock.patch.object(authority, "_read_regular_at", side_effect=record):
+            result = self.file_audit()
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
+        successors = [entry["filename"] for entry in raw["canonical_migrations"][4:]]
+        self.assertTrue(all(name not in calls for name in successors))
+
+    def test_exhausted_budget_rejects_nonempty_replacement_without_opening(self):
+        raw = self.configure_exact_cumulative_boundary()
+        target = self.db / raw["canonical_migrations"][4]["filename"]
+        calls = []
+        original = authority._read_regular_at
+
+        def record(directory_fd, name, **kwargs):
+            calls.append(name)
+            return original(directory_fd, name, **kwargs)
+
+        with mock.patch.object(authority, "_read_regular_at", side_effect=record):
+            result = authority._audit_migration_files_at(
+                self.db,
+                self.manifest_path,
+                _post_inventory=lambda: target.write_bytes(b"replacement"),
+            )
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn("authority_inventory_changed", {item.code for item in result.diagnostics})
+        self.assertNotIn(target.name, calls)
+
+    def test_exhausted_budget_rejects_incorrect_empty_checksum_without_opening(self):
+        raw = self.configure_exact_cumulative_boundary()
+        target = self.db / raw["canonical_migrations"][4]["filename"]
+        raw["canonical_migrations"][4]["sha256"] = "0" * 64
+        self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
+        calls = []
+        original = authority._read_regular_at
+
+        def record(directory_fd, name, **kwargs):
+            calls.append(name)
+            return original(directory_fd, name, **kwargs)
+
+        with mock.patch.object(authority, "_read_regular_at", side_effect=record):
+            result = self.file_audit()
+        self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+        self.assertIn("migration_checksum_mismatch", {item.code for item in result.diagnostics})
+        self.assertNotIn(target.name, calls)
+
+    def test_exhausted_budget_zero_successor_mutations_fail_without_opening(self):
+        cases = ("remove", "replace", "hard-link", "type-change")
+        for case in cases:
+            with self.subTest(case=case):
+                raw = self.configure_exact_cumulative_boundary()
+                target = self.db / raw["canonical_migrations"][4]["filename"]
+                external_link = self.root / "zero-successor-hard-link"
+                calls = []
+                original = authority._read_regular_at
+
+                def record(directory_fd, name, **kwargs):
+                    calls.append(name)
+                    return original(directory_fd, name, **kwargs)
+
+                def mutate():
+                    if case == "remove":
+                        target.unlink()
+                    elif case == "replace":
+                        target.unlink()
+                        target.write_bytes(b"")
+                    elif case == "hard-link":
+                        os.link(target, external_link)
+                    else:
+                        target.unlink()
+                        target.mkdir()
+
+                try:
+                    with mock.patch.object(authority, "_read_regular_at", side_effect=record):
+                        result = authority._audit_migration_files_at(
+                            self.db,
+                            self.manifest_path,
+                            _post_inventory=mutate,
+                        )
+                    self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
+                    self.assertIn("authority_inventory_changed", {item.code for item in result.diagnostics})
+                    self.assertNotIn(target.name, calls)
+                finally:
+                    if external_link.exists():
+                        external_link.unlink()
+                    if target.is_dir():
+                        target.rmdir()
 
     def test_cumulative_migration_limit_rejects_first_excess_without_later_reads(self):
         raw = json.loads(self.manifest_path.read_text())

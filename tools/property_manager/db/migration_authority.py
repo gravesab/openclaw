@@ -32,6 +32,7 @@ MAX_JSON_NODES = 20_000
 MAX_TEXT_CHARS = 16_384
 MAX_REPORT_TEXT_CHARS = 4_096
 MAX_REPORT_DIAGNOSTICS = 64
+EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 EXACT_MIGRATION = re.compile(r"^(?P<version>[0-9]{3})_[a-z0-9_]+\.sql$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
@@ -836,8 +837,8 @@ def _audit_migration_authority_at(
         if actual != set(expected):
             diagnostics.append(Diagnostic("migration_set_mismatch", "canonical migration set is not exact"))
         total_bytes = 0
-        initial_sizes = {
-            name: identity[4]
+        initial_files = {
+            name: identity
             for name, object_type, identity in initial_inventory
             if object_type == "regular" and "/" not in name
         }
@@ -845,10 +846,24 @@ def _audit_migration_authority_at(
         for spec in candidates:
             name = spec.filename
             remaining = MAX_TOTAL_MIGRATION_BYTES - total_bytes
-            initial_size = initial_sizes.get(name)
+            initial_identity = initial_files.get(name)
+            initial_size = initial_identity[4] if initial_identity is not None else None
             if type(initial_size) is not int or initial_size < 0 or initial_size > MAX_MIGRATION_BYTES or initial_size > remaining:
                 diagnostics.append(Diagnostic("migration_size_invalid", "canonical migration input exceeds bounds"))
                 break
+            if remaining == 0:
+                if (
+                    initial_identity is None
+                    or initial_size != 0
+                    or initial_identity[3] != 1
+                    or not stat.S_ISREG(initial_identity[2])
+                ):
+                    diagnostics.append(Diagnostic("migration_size_invalid", "canonical migration input exceeds bounds"))
+                    break
+                if spec.sha256 != EMPTY_SHA256:
+                    diagnostics.append(Diagnostic("migration_checksum_mismatch", "canonical migration checksum differs"))
+                    break
+                continue
             try:
                 data = _read_regular_at(directory_fd, name, max_bytes=min(MAX_MIGRATION_BYTES, remaining))
                 total_bytes += len(data)

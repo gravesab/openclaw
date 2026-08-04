@@ -1,0 +1,117 @@
+{
+  "format_version": 1,
+  "authority": "propertymanager",
+  "canonical_migrations": [
+    {
+      "version": "001",
+      "order": 1,
+      "filename": "001_initial_schema.sql",
+      "sha256": "11b4427e5115cb159b1b48e0a2886ef1e9e04575f7455c26e2e4ba068021d84f",
+      "reapplication_permitted": false
+    },
+    {
+      "version": "002",
+      "order": 2,
+      "filename": "002_rich_task_model.sql",
+      "sha256": "a60c5e604bc42d5331c2b77819e3976588d76b99ae25880eb8c85114f59d8ec2",
+      "reapplication_permitted": false
+    },
+    {
+      "version": "003",
+      "order": 3,
+      "filename": "003_part_quantity.sql",
+      "sha256": "49365ba4d30ff4543ad3a48a9aa3a0b430aebb300c3d67e568c6a679bb218147",
+      "reapplication_permitted": false
+    },
+    {
+      "version": "004",
+      "order": 4,
+      "filename": "004_task_origin.sql",
+      "sha256": "1e9a03e9cc383928c992638685df922a3bc6a28a4a54a8a8f18b98be0da6c40c",
+      "reapplication_permitted": false
+    },
+    {
+      "version": "005",
+      "order": 5,
+      "filename": "005_assets_and_meters.sql",
+      "sha256": "f90a39cdc6234d72a431d4caba23720d98aa7b4dff1a83f15845ecb936ff0147",
+      "reapplication_permitted": true
+    },
+    {
+      "version": "006",
+      "order": 6,
+      "filename": "006_phase1_meter_audit.sql",
+      "sha256": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0",
+      "reapplication_permitted": true
+    }
+  ],
+  "reserved_versions": [
+    {
+      "version": "007",
+      "status": "noncanonical_forbidden",
+      "reason": "Reserved because a noncanonical migration was published in branch history; never restore, rename, reuse, or adopt."
+    },
+    {
+      "version": "008",
+      "status": "noncanonical_forbidden",
+      "reason": "Reserved because mutable noncanonical migrations were published in branch history; never restore, rename, reuse, or adopt."
+    }
+  ],
+  "next_canonical_version": "009",
+  "schema_contract": {
+    "required_tables": [
+      "asset_meter",
+      "asset_meter_reading",
+      "asset_task_mapping_proposals",
+      "assets",
+      "maintenance_categories",
+      "maintenance_completions",
+      "maintenance_task_parts",
+      "maintenance_task_photos",
+      "maintenance_tasks"
+    ],
+    "required_columns": {
+      "asset_meter": ["meter_epoch", "row_version"],
+      "asset_meter_reading": [
+        "previous_reading_id",
+        "meter_type_at_entry",
+        "unit_at_entry",
+        "status",
+        "operator_identity",
+        "integration_identity",
+        "idempotency_key",
+        "meter_epoch",
+        "corrects_reading_id"
+      ],
+      "assets": ["meter_proposed_type", "meter_proposed_unit", "meter_activated_at"],
+      "maintenance_completions": ["meter_value_at_completion", "meter_reading_id"],
+      "maintenance_task_parts": ["quantity", "vendor", "notes"],
+      "maintenance_tasks": [
+        "kind",
+        "manufacturer",
+        "source_manual_name",
+        "completion_history",
+        "tools_required",
+        "origin",
+        "asset_id",
+        "schedule_kind",
+        "meter_interval_value",
+        "meter_interval_unit",
+        "last_done_meter_value",
+        "next_due_meter_value"
+      ]
+    },
+    "required_constraints": [
+      "asset_meter_type_check",
+      "asset_meter_reading_entry_method_check",
+      "asset_meter_reading_correction_reason_check",
+      "asset_meter_reading_status_check",
+      "asset_task_mapping_proposals_status_check",
+      "maintenance_categories_name_key",
+      "maintenance_tasks_area_item_unique",
+      "maintenance_tasks_kind_check",
+      "maintenance_tasks_origin_check",
+      "maintenance_tasks_schedule_kind_check"
+    ]
+  }
+}

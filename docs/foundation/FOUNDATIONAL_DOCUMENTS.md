@@ -64,6 +64,11 @@ CANONICAL_CONFIRMATION_POLICY_V1.md
 Defines confirmation classifications, the canonical operation matrix,
 server-generated challenges, and single-use confirmation records.
 
+ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md
+
+Defines the atomic transaction boundary for authoritative mutation, audit,
+confirmation consumption, idempotency, concurrency, and post-commit delivery.
+
 ---
 
 ## Web Runtime Standards
@@ -223,6 +228,7 @@ The maintained documentation library is located under `docs/`.
 
 ## Architecture Documents
 
+- `docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md`
 - `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`
 - `docs/architecture/RANCHBOT_ARCHITECTURE.md`

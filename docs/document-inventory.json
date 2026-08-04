@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-04T23:20:30.396538+00:00",
-  "source_fingerprint": "ad968b015e557dbcdee7083d97cd5ea0b88aff67e0abdec197b24ba448dad7ff",
-  "document_count": 667,
+  "generated_at": "2026-08-04T23:35:59.687898+00:00",
+  "source_fingerprint": "30291622b58af6feab02c5b6b4630afef083af704782a9749123a66429c00edb",
+  "document_count": 668,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -68,6 +68,19 @@
       "metadata_present": true,
       "size_bytes": 3690,
       "modified_epoch": 1785792214
+    },
+    {
+      "path": "docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md",
+      "relative_path": "architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md",
+      "title": "Atomic Authoritative Write and Audit Transaction Design v1",
+      "version": "1.0",
+      "status": "Architecture Baseline",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-08-04",
+      "category": "Architecture",
+      "metadata_present": true,
+      "size_bytes": 38709,
+      "modified_epoch": 1785886553
     },
     {
       "path": "docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md",
@@ -2393,8 +2406,8 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 5213,
-      "modified_epoch": 1785885611
+      "size_bytes": 5514,
+      "modified_epoch": 1785886544
     },
     {
       "path": "docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md",

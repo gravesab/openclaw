@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-03T21:24:15.843625+00:00",
-  "source_fingerprint": "76f935600aae58577f8961d2f9583ed52b302638ff766178f95b78faa09ba500",
-  "document_count": 665,
+  "generated_at": "2026-08-04T23:07:35.966647+00:00",
+  "source_fingerprint": "12ade273aedf63cd74f7758e77de3ac2b808611a4a12b57ce85d49841403e2d2",
+  "document_count": 666,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -159,6 +159,19 @@
       "metadata_present": true,
       "size_bytes": 30847,
       "modified_epoch": 1785792214
+    },
+    {
+      "path": "docs/architecture/SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md",
+      "relative_path": "architecture/SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md",
+      "title": "OpenClaw Server-Enforced Mutation and Proposal Contract v1",
+      "version": "1.0",
+      "status": "Architecture Baseline",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-08-04",
+      "category": "Architecture",
+      "metadata_present": true,
+      "size_bytes": 33874,
+      "modified_epoch": 1785884571
     },
     {
       "path": "docs/architecture/TOOLS.md",
@@ -2367,8 +2380,8 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 4707,
-      "modified_epoch": 1785792214
+      "size_bytes": 4981,
+      "modified_epoch": 1785884506
     },
     {
       "path": "docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md",

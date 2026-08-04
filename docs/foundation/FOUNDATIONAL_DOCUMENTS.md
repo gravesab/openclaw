@@ -54,6 +54,11 @@ RANCHBOT_ARCHITECTURE.md
 
 Defines system architecture, service relationships, routing, and component responsibilities.
 
+SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md
+
+Defines the server-enforced boundary for proposals, authoritative mutations,
+confirmation, concurrency, idempotency, and atomic audit evidence.
+
 ---
 
 ## Web Runtime Standards
@@ -215,6 +220,7 @@ The maintained documentation library is located under `docs/`.
 
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`
 - `docs/architecture/RANCHBOT_ARCHITECTURE.md`
+- `docs/architecture/SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md`
 - `docs/architecture/DASHBOARD_REPORT.md`
 - `docs/architecture/PYTHON_WEB_RUNTIME_INVENTORY.md`
 - `docs/architecture/PROJECT_CONTEXT.md`

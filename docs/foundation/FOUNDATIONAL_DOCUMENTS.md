@@ -59,6 +59,11 @@ SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md
 Defines the server-enforced boundary for proposals, authoritative mutations,
 confirmation, concurrency, idempotency, and atomic audit evidence.
 
+CANONICAL_CONFIRMATION_POLICY_V1.md
+
+Defines confirmation classifications, the canonical operation matrix,
+server-generated challenges, and single-use confirmation records.
+
 ---
 
 ## Web Runtime Standards
@@ -218,6 +223,7 @@ The maintained documentation library is located under `docs/`.
 
 ## Architecture Documents
 
+- `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`
 - `docs/architecture/RANCHBOT_ARCHITECTURE.md`
 - `docs/architecture/SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md`

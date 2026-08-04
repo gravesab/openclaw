@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-04T23:07:35.966647+00:00",
-  "source_fingerprint": "12ade273aedf63cd74f7758e77de3ac2b808611a4a12b57ce85d49841403e2d2",
-  "document_count": 666,
+  "generated_at": "2026-08-04T23:20:30.396538+00:00",
+  "source_fingerprint": "ad968b015e557dbcdee7083d97cd5ea0b88aff67e0abdec197b24ba448dad7ff",
+  "document_count": 667,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -68,6 +68,19 @@
       "metadata_present": true,
       "size_bytes": 3690,
       "modified_epoch": 1785792214
+    },
+    {
+      "path": "docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md",
+      "relative_path": "architecture/CANONICAL_CONFIRMATION_POLICY_V1.md",
+      "title": "Canonical Confirmation Policy v1 and Single-Use Confirmation Record",
+      "version": "1.0",
+      "status": "Architecture Baseline",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-08-04",
+      "category": "Architecture",
+      "metadata_present": true,
+      "size_bytes": 38546,
+      "modified_epoch": 1785885629
     },
     {
       "path": "docs/architecture/DASHBOARD_REPORT.md",
@@ -2380,8 +2393,8 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 4981,
-      "modified_epoch": 1785884506
+      "size_bytes": 5213,
+      "modified_epoch": 1785885611
     },
     {
       "path": "docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md",

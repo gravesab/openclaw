@@ -99,6 +99,11 @@ AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md
 Defines authority-anchor algorithms, canonical serialization, signatures,
 digests, encodings, domain separation, compatibility, and downgrade prevention.
 
+AUTHORITY_ANCHOR_IMMUTABLE_NON_SECRET_COMPATIBILITY_VECTOR_SPECIFICATION_V1.md
+
+Defines immutable non-secret vectors, provenance, canonical expected results,
+failure decisions, cross-platform conformance, and vector-set change control.
+
 ---
 
 ## Web Runtime Standards
@@ -264,6 +269,7 @@ The maintained documentation library is located under `docs/`.
 - `docs/architecture/AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md`
 - `docs/architecture/AUTHORITY_ANCHOR_CEREMONY_CUSTODY_ROTATION_AND_RECOVERY_PROFILE_V1.md`
 - `docs/architecture/AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md`
+- `docs/architecture/AUTHORITY_ANCHOR_IMMUTABLE_NON_SECRET_COMPATIBILITY_VECTOR_SPECIFICATION_V1.md`
 - `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
 - `docs/architecture/EXTERNAL_AUTHORITY_ANCHOR_AND_TRUST_ROOT_SPECIFICATION_V1.md`
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`

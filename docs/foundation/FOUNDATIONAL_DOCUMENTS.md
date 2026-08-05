@@ -104,6 +104,11 @@ AUTHORITY_ANCHOR_IMMUTABLE_NON_SECRET_COMPATIBILITY_VECTOR_SPECIFICATION_V1.md
 Defines immutable non-secret vectors, provenance, canonical expected results,
 failure decisions, cross-platform conformance, and vector-set change control.
 
+AUTHORITY_ANCHOR_IMPLEMENTATION_ASSURANCE_AND_APPROVED_CRYPTOGRAPHIC_LIBRARY_PROFILE_V1.md
+
+Defines implementation assurance, evidence, approval units, supply-chain and
+platform controls, validation, lifecycle, and fail-closed library governance.
+
 ---
 
 ## Web Runtime Standards

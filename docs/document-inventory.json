@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-05T18:08:27.246717+00:00",
-  "source_fingerprint": "43e86282fd8d443774014e612da1da09c460db37837f74e2bd602e91fbcc8879",
-  "document_count": 675,
+  "generated_at": "2026-08-05T18:22:59.469773+00:00",
+  "source_fingerprint": "382aadedeefcda49f679b4263da829299ebaf28dd610621f0b81bf23b0f8eb14",
+  "document_count": 676,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -159,6 +159,19 @@
       "metadata_present": true,
       "size_bytes": 48588,
       "modified_epoch": 1785953299
+    },
+    {
+      "path": "docs/architecture/AUTHORITY_ANCHOR_IMPLEMENTATION_ASSURANCE_AND_APPROVED_CRYPTOGRAPHIC_LIBRARY_PROFILE_V1.md",
+      "relative_path": "architecture/AUTHORITY_ANCHOR_IMPLEMENTATION_ASSURANCE_AND_APPROVED_CRYPTOGRAPHIC_LIBRARY_PROFILE_V1.md",
+      "title": "Authority Anchor Implementation Assurance and Approved Cryptographic Library Profile v1",
+      "version": "1.0",
+      "status": "Architecture Baseline",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-08-05",
+      "category": "Architecture",
+      "metadata_present": true,
+      "size_bytes": 50780,
+      "modified_epoch": 1785954161
     },
     {
       "path": "docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md",
@@ -2497,8 +2510,8 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 7621,
-      "modified_epoch": 1785953241
+      "size_bytes": 7869,
+      "modified_epoch": 1785954111
     },
     {
       "path": "docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md",

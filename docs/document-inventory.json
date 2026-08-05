@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-05T16:46:45.052494+00:00",
-  "source_fingerprint": "896e29fe81c70cfee0018dad5e4bb47da8055830cfd5e5b0ccc488feeeebe227",
-  "document_count": 671,
+  "generated_at": "2026-08-05T17:07:28.432364+00:00",
+  "source_fingerprint": "205210c2be08f5b4fbe91839894d041fd491dbe3366901dc5681eb3c97800c8e",
+  "document_count": 672,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -146,6 +146,19 @@
       "metadata_present": true,
       "size_bytes": 22164,
       "modified_epoch": 1785792215
+    },
+    {
+      "path": "docs/architecture/EXTERNAL_AUTHORITY_ANCHOR_AND_TRUST_ROOT_SPECIFICATION_V1.md",
+      "relative_path": "architecture/EXTERNAL_AUTHORITY_ANCHOR_AND_TRUST_ROOT_SPECIFICATION_V1.md",
+      "title": "External Authority Anchor and Trust-Root Specification v1",
+      "version": "1.0",
+      "status": "Architecture Baseline",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-08-05",
+      "category": "Architecture",
+      "metadata_present": true,
+      "size_bytes": 52412,
+      "modified_epoch": 1785949640
     },
     {
       "path": "docs/architecture/phase-2f-runtime-ai-router.md",
@@ -2445,8 +2458,8 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 6324,
-      "modified_epoch": 1785948395
+      "size_bytes": 6634,
+      "modified_epoch": 1785949542
     },
     {
       "path": "docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md",

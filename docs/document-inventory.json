@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-05T17:19:53.476472+00:00",
-  "source_fingerprint": "24b687963f579edd1885472bc78f7f4344eb5a3501d582b74b26795ffd407ebb",
-  "document_count": 673,
+  "generated_at": "2026-08-05T17:42:01.434600+00:00",
+  "source_fingerprint": "e7c6fc263576292814180d88921ab4cebe45bb0a8eaede766eb73608a1acbdfe",
+  "document_count": 674,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -133,6 +133,19 @@
       "metadata_present": true,
       "size_bytes": 42224,
       "modified_epoch": 1785950393
+    },
+    {
+      "path": "docs/architecture/AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md",
+      "relative_path": "architecture/AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md",
+      "title": "Authority Anchor Cryptographic and Canonicalization Parameter Profile v1",
+      "version": "1.0",
+      "status": "Architecture Baseline",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-08-05",
+      "category": "Architecture",
+      "metadata_present": true,
+      "size_bytes": 40594,
+      "modified_epoch": 1785951713
     },
     {
       "path": "docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md",
@@ -2471,8 +2484,8 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 6953,
-      "modified_epoch": 1785950386
+      "size_bytes": 7283,
+      "modified_epoch": 1785951646
     },
     {
       "path": "docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md",

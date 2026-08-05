@@ -94,6 +94,11 @@ AUTHORITY_ANCHOR_CEREMONY_CUSTODY_ROTATION_AND_RECOVERY_PROFILE_V1.md
 Defines authority-anchor ceremony planning, custody, rotation, revocation,
 recovery, evidence, environment separation, and fail-closed abort requirements.
 
+AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md
+
+Defines authority-anchor algorithms, canonical serialization, signatures,
+digests, encodings, domain separation, compatibility, and downgrade prevention.
+
 ---
 
 ## Web Runtime Standards
@@ -258,6 +263,7 @@ The maintained documentation library is located under `docs/`.
 - `docs/architecture/AUTHORITATIVE_MUTATION_PROTOCOL_V1.md`
 - `docs/architecture/AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md`
 - `docs/architecture/AUTHORITY_ANCHOR_CEREMONY_CUSTODY_ROTATION_AND_RECOVERY_PROFILE_V1.md`
+- `docs/architecture/AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md`
 - `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
 - `docs/architecture/EXTERNAL_AUTHORITY_ANCHOR_AND_TRUST_ROOT_SPECIFICATION_V1.md`
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`

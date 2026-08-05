@@ -74,6 +74,11 @@ AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md
 Defines mutation-specific threats, protected assets, trust boundaries,
 fail-closed security requirements, and implementation-independent tests.
 
+AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md
+
+Defines human and service identity, capabilities, delegation, revocation,
+environment separation, and accountable authority for mutations.
+
 ---
 
 ## Web Runtime Standards
@@ -234,6 +239,7 @@ The maintained documentation library is located under `docs/`.
 ## Architecture Documents
 
 - `docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md`
+- `docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md`
 - `docs/architecture/AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md`
 - `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`

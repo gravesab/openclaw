@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-04T23:50:55.315131+00:00",
-  "source_fingerprint": "de953021d711eeb1bcd5d07cf2ebb8e73396ff732e7c0f9870eee1c028cddb9c",
-  "document_count": 669,
+  "generated_at": "2026-08-05T16:34:12.727138+00:00",
+  "source_fingerprint": "3df1b6f3b6b127e193bac65b8d7e33d61cd474db9ede2efe97553818ab9a0051",
+  "document_count": 670,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -81,6 +81,19 @@
       "metadata_present": true,
       "size_bytes": 38709,
       "modified_epoch": 1785886553
+    },
+    {
+      "path": "docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md",
+      "relative_path": "architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md",
+      "title": "Authoritative Identity, Service Identity, and Delegation Policy v1",
+      "version": "1.0",
+      "status": "Architecture Baseline",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-08-05",
+      "category": "Architecture",
+      "metadata_present": true,
+      "size_bytes": 47989,
+      "modified_epoch": 1785947644
     },
     {
       "path": "docs/architecture/AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md",
@@ -2419,8 +2432,8 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 5766,
-      "modified_epoch": 1785887438
+      "size_bytes": 6065,
+      "modified_epoch": 1785947515
     },
     {
       "path": "docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md",

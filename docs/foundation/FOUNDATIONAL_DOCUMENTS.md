@@ -79,6 +79,11 @@ AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md
 Defines human and service identity, capabilities, delegation, revocation,
 environment separation, and accountable authority for mutations.
 
+AUTHORITATIVE_MUTATION_PROTOCOL_V1.md
+
+Defines the complete server-enforced proposal, authorization, confirmation,
+validation, concurrency, idempotency, transaction, result, and recovery lifecycle.
+
 ---
 
 ## Web Runtime Standards
@@ -240,6 +245,7 @@ The maintained documentation library is located under `docs/`.
 
 - `docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md`
 - `docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md`
+- `docs/architecture/AUTHORITATIVE_MUTATION_PROTOCOL_V1.md`
 - `docs/architecture/AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md`
 - `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`

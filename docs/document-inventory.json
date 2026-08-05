@@ -1,8 +1,8 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-05T16:34:12.727138+00:00",
-  "source_fingerprint": "3df1b6f3b6b127e193bac65b8d7e33d61cd474db9ede2efe97553818ab9a0051",
-  "document_count": 670,
+  "generated_at": "2026-08-05T16:46:45.052494+00:00",
+  "source_fingerprint": "896e29fe81c70cfee0018dad5e4bb47da8055830cfd5e5b0ccc488feeeebe227",
+  "document_count": 671,
   "documents": [
     {
       "path": "docs/.generated/README.md",
@@ -94,6 +94,19 @@
       "metadata_present": true,
       "size_bytes": 47989,
       "modified_epoch": 1785947644
+    },
+    {
+      "path": "docs/architecture/AUTHORITATIVE_MUTATION_PROTOCOL_V1.md",
+      "relative_path": "architecture/AUTHORITATIVE_MUTATION_PROTOCOL_V1.md",
+      "title": "Authoritative Mutation Protocol v1",
+      "version": "1.0",
+      "status": "Architecture Baseline",
+      "owner": "OpenClaw Architecture",
+      "last_reviewed": "2026-08-05",
+      "category": "Architecture",
+      "metadata_present": true,
+      "size_bytes": 56218,
+      "modified_epoch": 1785948404
     },
     {
       "path": "docs/architecture/AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md",
@@ -2432,8 +2445,8 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 6065,
-      "modified_epoch": 1785947515
+      "size_bytes": 6324,
+      "modified_epoch": 1785948395
     },
     {
       "path": "docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md",

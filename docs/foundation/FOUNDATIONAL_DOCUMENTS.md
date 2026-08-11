@@ -114,6 +114,11 @@ CANDIDATE_LIBRARY_EVIDENCE_AND_COMPARATIVE_ASSESSMENT_SPECIFICATION_V1.md
 Defines candidate evidence identity, provenance, comparison, uncertainty,
 decision separation, reassessment, and fail-closed assessment requirements.
 
+CANDIDATE_ASSESSMENT_EVIDENCE_RECORD_CANONICALIZATION_AND_INTEGRITY_PROFILE_V1.md
+
+Defines evidence-record schemas, canonical bytes, content identities, provenance,
+manifests, verification, redaction, and fail-closed integrity requirements.
+
 ---
 
 ## Web Runtime Standards

@@ -54,7 +54,7 @@ M4_SSH_HOST = os.environ.get("OPENCLAW_M4_SSH_HOST", "192.168.50.117")
 M4_SSH_USER = os.environ.get("OPENCLAW_M4_SSH_USER", "andrewgraves")
 M4_SSH_KEY = os.environ.get(
     "OPENCLAW_M4_SSH_KEY",
-    str(Path.home() / ".ssh/openclaw_dev_backup_ed25519"),
+    str(Path.home() / ".ssh/openclaw_m4_metrics_ed25519"),
 )
 INTELMINI_STORAGE_HOST = os.environ.get(
     "OPENCLAW_INTELMINI_STORAGE_HOST",

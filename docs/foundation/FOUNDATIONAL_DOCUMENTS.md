@@ -109,6 +109,11 @@ AUTHORITY_ANCHOR_IMPLEMENTATION_ASSURANCE_AND_APPROVED_CRYPTOGRAPHIC_LIBRARY_PRO
 Defines implementation assurance, evidence, approval units, supply-chain and
 platform controls, validation, lifecycle, and fail-closed library governance.
 
+CANDIDATE_LIBRARY_EVIDENCE_AND_COMPARATIVE_ASSESSMENT_SPECIFICATION_V1.md
+
+Defines candidate evidence identity, provenance, comparison, uncertainty,
+decision separation, reassessment, and fail-closed assessment requirements.
+
 ---
 
 ## Web Runtime Standards

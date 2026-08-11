@@ -97,7 +97,7 @@ overrides:
   "@hono/node-server": 2.0.5
   "@aws-sdk/client-bedrock-runtime": 3.1045.0
   axios: 1.18.0
-  fast-uri: 3.1.4
+  fast-uri: 3.1.5
   follow-redirects: 1.16.0
   defu: 6.1.5
   fast-xml-parser: 5.7.0
@@ -106,7 +106,8 @@ overrides:
   basic-ftp: 6.0.1
   file-type: 22.0.1
   form-data: 2.5.6
-  ip-address: 10.2.0
+  ip-address: 10.3.1
+  nanoid: 3.3.17
   minimatch: 10.2.5
   path-to-regexp: 8.4.0
   qs: 6.14.2
@@ -115,7 +116,7 @@ overrides:
   typebox: 1.1.38
   tar: 7.5.22
   undici: 8.9.0
-  "jsdom>undici": 7.28.0
+  "jsdom>undici": 7.29.0
   tough-cookie: 4.1.3
   yauzl: 3.2.1
   protobufjs: 7.6.5

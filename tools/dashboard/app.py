@@ -906,6 +906,7 @@ def build_system_health():
     checks.append(
         check_service(
             "OpenClaw Gateway",
+            "XDG_RUNTIME_DIR=/run/user/$(id -u) "
             "systemctl --user is-active openclaw-gateway.service",
             "User service",
         )
@@ -914,8 +915,8 @@ def build_system_health():
     checks.append(
         check_service(
             "OpenClaw Listener",
-            "systemctl --user is-active openclaw-listener.service",
-            "User service",
+            "systemctl is-active openclaw-listener.service",
+            "System service",
         )
     )
 

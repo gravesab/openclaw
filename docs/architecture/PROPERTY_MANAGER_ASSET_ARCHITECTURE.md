@@ -1,19 +1,19 @@
 ---
 title: "PropertyManager Asset Architecture"
-version: "1.3"
+version: "1.4"
 status: "Architecture — Phase 3 deployed (production)"
 owner: "OpenClaw Architecture"
-last_reviewed: "2026-07-29"
+last_reviewed: "2026-07-30"
 category: "Architecture"
 source_document: "PROPERTY_MANAGER_ASSET_ARCHITECTURE.md"
 ---
 
 # PropertyManager Asset Architecture
 
-Version: 1.3  
+Version: 1.4  
 Status: **Phase 3 deployed on production Intel Mini**  
 Authority: Requirements in [PropertyManager Foundational Requirements](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md)  
-Last Updated: 2026-07-29
+Last Updated: 2026-07-30
 
 ---
 
@@ -64,15 +64,39 @@ flowchart LR
   RB --> API
 ```
 
-| Client                           | Role                                                                                                     |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| Mac                              | Asset admin, manual import with meter intervals, meter entry, completion meter capture, mapping approval |
-| iPhone / iPad                    | Field meter entry, voice, QR deep link                                                                   |
-| Dashboard `/pm/asset/<qr_token>` | QR landing, meter display, authenticated update                                                          |
-| Telegram                         | Natural-language meter updates (via API)                                                                 |
-| RanchBrain CLI                   | Display current meter and PM remaining from API                                                          |
+| Client                           | Role                                                                                                                                            |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| Mac                              | Asset admin, manual import with meter intervals, meter entry, completion meter capture, mapping approval, optional Apple Calendar day-plan push |
+| iPhone / iPad                    | Field meter entry, voice, QR deep link                                                                                                          |
+| Dashboard `/pm/asset/<qr_token>` | QR landing, meter display, authenticated update                                                                                                 |
+| Telegram                         | Natural-language meter updates (via API)                                                                                                        |
+| RanchBrain CLI                   | Display current meter and PM remaining from API                                                                                                 |
 
 Local JSON cache on Mac/iOS: read-through / write-behind against API; **not** a second system of record.
+
+### Apple Calendar day plan
+
+Mac PropertyManagerApp may push today’s due/overdue calendar-scheduled tasks into the existing Calendar.app calendar titled **OpenClaw** as timed blocks (configurable day start, default 08:00; duration = `estimated_minutes`).
+
+```mermaid
+flowchart LR
+  PM[PropertyManager Mac UI]
+  API[REST API / Postgres SoR]
+  Cal[Calendar.app OpenClaw]
+
+  PM -->|"complete / reschedule"| API
+  PM -->|"one-way push day plan"| Cal
+```
+
+- **Plan/schedule view only.** Calendar.app is not a PropertyManager database.
+- **One-way:** Mac → OpenClaw. No Calendar → PropertyManager reverse sync.
+- Operator may **delete a calendar event** to clear the calendar view; that must not change tasks, `next_due`, or Mac/iOS caches.
+- When a task is **completed in PropertyManager** (Mac or iPhone), remove that task’s PM-managed OpenClaw event(s) (Mac EventKit cleanup by stable marker). Still one-way PM → Calendar.
+- Task create / edit / complete / reschedule only via PropertyManager Mac or iPhone → REST API.
+- Incomplete tasks roll forward on later pushes until completed in PropertyManager.
+- DEV-tagged events must be deleted before production cutover of this feature.
+
+Policy: [Foundational Requirements — Apple Calendar day plan](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md#apple-calendar-day-plan-mac--open-claw).
 
 ---
 
@@ -98,14 +122,14 @@ Canonical ranch asset registry. Join key to RanchBrain JSON is `external_id` (e.
 
 One row per asset (1:1). Active only after operator confirms proposed defaults at import.
 
-| Column              | Notes                                                           |
-| ------------------- | --------------------------------------------------------------- |
-| `meter_type`        | `runtime_hours`, `mileage`, `cycles`, or `none`                 |
-| `current_value`     | Latest **chronologically** accepted reading in current epoch    |
-| `unit`              | `hrs`, `mi`, or `cycles`                                        |
-| `latest_reading_at` | Timestamp of reading that set `current_value`                   |
-| `meter_epoch`       | Incremented on replacement or rollover; isolates reading chains |
-| `row_version`       | Optimistic concurrency for updates                              |
+| Column              | Notes                                                                                                                                                                                                      |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `meter_type`        | `runtime_hours`, `mileage`, `cycles`, or `none`                                                                                                                                                            |
+| `current_value`     | Cumulative total — latest **chronologically** accepted absolute reading in current epoch. Entry may be absolute face or positive **delta** (hours/miles since last); server stores the resulting absolute. |
+| `unit`              | `hrs`, `mi`, or `cycles`                                                                                                                                                                                   |
+| `latest_reading_at` | Timestamp of reading that set `current_value`                                                                                                                                                              |
+| `meter_epoch`       | Incremented on replacement or rollover; isolates reading chains                                                                                                                                            |
+| `row_version`       | Optimistic concurrency for updates                                                                                                                                                                         |
 
 **Proposed defaults at import** (operator must confirm before activation):
 
@@ -156,6 +180,13 @@ Append-only history. Corrections and rejections are new rows; accepted rows are 
 | `meter_interval_value`, `meter_interval_unit` | Repeat every N units after complete — from manufacturer manual; never converted to days       |
 | `last_done_meter_value`                       | Meter at last completion; set by recalc on complete                                           |
 | Calendar fields                               | `warning_days`, `next_due` — unchanged for calendar / hybrid                                  |
+
+**Task title / list grouping**
+
+- **Stored `item`:** canonical `Asset Name: Task Name`. Upsert/PATCH normalize strips duplicated `{group}:` prefixes (same idea as ManualImport’s don’t-double-prefix guard).
+- **Group key (UI):** linked asset `name` when `asset_id` is set; otherwise `area` (Pool / Spa / Hot Tub style tasks).
+- **Display:** section header = group name; row title = `item` with leading `{group}:` removed. iOS shows `Estimated time: N minutes` on list and detail.
+- One-time historical backfill: `tools/property_manager/db/normalize_task_titles.py` (`--dry-run` / `--apply`); do not mass-rewrite without operator approval.
 
 **Hybrid (`both`):** Use only when the manual (or operator) intentionally keeps calendar dates with a meter trigger ("whichever comes first"). Engine evaluates calendar due and meter due independently; task is due when **either** threshold is met. Do not silently upgrade `calendar` → `both` when only a meter trigger is added.
 
@@ -352,7 +383,11 @@ Lists: cursor pagination `?cursor=<opaque>&limit=50`.
 ### Meter readings
 
 - `GET /v1/assets/<id>/meter-readings?cursor=&limit=50`
-- `POST /v1/assets/<id>/meter-readings` — create; may return 409 preview for lower reading
+- `POST /v1/assets/<id>/meter-readings` — create absolute or delta reading; may return 409 preview for lower reading
+  - Body: **either** `{ "value": "<absolute>" }` **or** `{ "delta": "<hours_or_miles_since_last>" }` (not both, not neither)
+  - `delta` must be finite and **> 0** (blank ≠ 0). Server computes `absolute = current_value + delta`, then runs the normal accept path (audit trail, `usage_since_previous`, lower-reading preview if the resulting absolute would go down).
+  - Response includes `value` (absolute written), `current_value` (meter after accept), and `delta` when delta mode was used (`null` for absolute).
+  - PM remaining is unchanged: `remaining_meter = next_due_meter_value - current_value` (absolute trigger − cumulative total).
 - `POST /v1/assets/<id>/meter-readings/confirm` — lower-reading confirmation
 
 ### Mapping (RanchBrain)
@@ -363,7 +398,9 @@ Lists: cursor pagination `?cursor=<opaque>&limit=50`.
 
 ### Voice parse
 
-- `POST /v1/meter-readings/parse` — `{ "text": "..." }` → `{ asset_id, value, unit, confidence }`
+- `POST /v1/meter-readings/parse` — `{ "text": "..." }` → `{ asset_id, value, delta, entry_mode, unit, confidence }`
+  - Absolute phrases (e.g. "mower 42.5 hours") set `value` / `entry_mode=absolute`.
+  - Phrases like "add 2.5 hours on …" set `delta` / `entry_mode=delta` (`value` null). Client should POST that `delta` to meter-readings.
 
 ### Health
 

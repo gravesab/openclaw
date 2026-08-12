@@ -125,6 +125,37 @@ def fetch_asset_or_404(asset_id: str) -> dict | None:
     return enrich_asset(row)
 
 
+def asset_name_conflicts(name: str, *, excluding_asset_id: str | None = None) -> bool:
+    """Return whether an active asset already uses this human-visible name."""
+    normalized_name = name.strip()
+    params: list[str] = [normalized_name]
+    exclusion = ""
+    if excluding_asset_id is not None:
+        exclusion = " AND id <> %s"
+        params.append(excluding_asset_id)
+    row = pm_db.execute_one_json(
+        f"""
+        SELECT id
+        FROM propertymanager.assets
+        WHERE is_active = true
+          AND lower(btrim(name)) = lower(btrim(%s))
+          {exclusion}
+        LIMIT 1
+        """,
+        params,
+    )
+    return row is not None
+
+
+def duplicate_asset_name_response():
+    return error_response(
+        "ASSET_NAME_CONFLICT",
+        "An active asset with this name already exists",
+        field="name",
+        status=409,
+    )
+
+
 def enrich_asset(row: dict) -> dict:
     item = dict(row)
     asset_id = str(item["id"])
@@ -234,6 +265,8 @@ def create_asset():
     name = str(payload.get("name") or "").strip()
     if not external_id or not name:
         return validation_error("external_id and name are required")
+    if asset_name_conflicts(name):
+        return duplicate_asset_name_response()
 
     asset_id = str(payload.get("id") or uuid4())
     qr_token = str(payload.get("qr_token") or uuid4().hex)
@@ -300,6 +333,14 @@ def patch_asset(asset_id: str):
     )
     if exists is None:
         return error_response("NOT_FOUND", "Asset not found", status=404)
+
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return validation_error("name is required", field="name")
+        if asset_name_conflicts(name, excluding_asset_id=asset_id):
+            return duplicate_asset_name_response()
+        payload["name"] = name
 
     updates = []
     values = []

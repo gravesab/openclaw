@@ -849,9 +849,6 @@ export async function startGatewayServer(
       isTruthyEnvValue(process.env.OPENCLAW_SKIP_PROVIDERS),
   });
   log.info("starting HTTP server...");
-  let trustedRecordDevelopmentRuntime:
-    | import("../trusted-records/runtime.development.js").TrustedRecordDevelopmentRuntime
-    | null = null;
   const {
     releasePluginRouteRegistry,
     httpServer,

@@ -10,9 +10,9 @@ source_document: "PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md"
 
 # PropertyManager Foundational Requirements
 
-Version: 1.4  
-Status: **Phase 3 deployed on production Intel Mini** — post-deploy verification  
-Owner: OpenClaw Operator  
+Version: 1.4
+Status: **Phase 3 deployed on production Intel Mini** — post-deploy verification
+Owner: OpenClaw Operator
 Last Updated: 2026-07-30
 
 ---

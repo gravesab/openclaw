@@ -224,21 +224,31 @@ class ExecutionEngineTests(unittest.TestCase):
         "build_ollama_provider"
     )
     @patch(
+        "tools.ai_intelligence.omlx_provider."
+        "build_omlx_provider"
+    )
+    @patch(
         "tools.ai_intelligence.router."
         "build_router_from_environment"
     )
     def test_builds_environment_engine_without_execution(
         self,
         build_router: Any,
-        build_provider: Any,
+        build_omlx_provider: Any,
+        build_ollama_provider: Any,
         from_env: Any,
     ) -> None:
         router = FakeRouter()
-        provider = FakeProvider(
+        ollama_provider = FakeProvider(
             [response("ollama-primary")]
         )
+        omlx_provider = FakeProvider(
+            [response("omlx-primary")]
+        )
+        omlx_provider.name = "omlx"
         build_router.return_value = router
-        build_provider.return_value = provider
+        build_omlx_provider.return_value = omlx_provider
+        build_ollama_provider.return_value = ollama_provider
         from_env.return_value = object()
 
         engine = build_execution_engine_from_environment()
@@ -250,12 +260,14 @@ class ExecutionEngineTests(unittest.TestCase):
         )
         self.assertEqual(
             engine.provider_registry.providers,
-            (provider,),
+            (omlx_provider, ollama_provider),
         )
         self.assertEqual(router.route_calls, 0)
-        self.assertEqual(provider.requests, [])
+        self.assertEqual(omlx_provider.requests, [])
+        self.assertEqual(ollama_provider.requests, [])
         build_router.assert_called_once_with()
-        build_provider.assert_called_once_with()
+        build_omlx_provider.assert_called_once_with()
+        build_ollama_provider.assert_called_once_with()
         from_env.assert_called_once_with()
 
     def test_returns_primary_success(self) -> None:

@@ -180,6 +180,26 @@
       "swift": 3,
       "tool_calling": 4
     },
+    "omlx-qwen3.5-9b-4bit": {
+      "agent_orchestration": 5,
+      "code_generation": 7,
+      "cost": 10,
+      "debugging": 6,
+      "docker": 5,
+      "documentation": 7,
+      "home_assistant": 5,
+      "linux_admin": 5,
+      "local_deployment": 10,
+      "long_context": 7,
+      "low_hallucination": 7,
+      "postgresql": 5,
+      "privacy": 10,
+      "python": 7,
+      "repository_understanding": 6,
+      "speed": 8,
+      "swift": 5,
+      "tool_calling": 7
+    },
     "openai-frontier": {
       "agent_orchestration": 9,
       "code_generation": 9,

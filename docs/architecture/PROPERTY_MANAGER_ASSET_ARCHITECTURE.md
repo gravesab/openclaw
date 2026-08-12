@@ -10,9 +10,9 @@ source_document: "PROPERTY_MANAGER_ASSET_ARCHITECTURE.md"
 
 # PropertyManager Asset Architecture
 
-Version: 1.4  
-Status: **Phase 3 deployed on production Intel Mini**  
-Authority: Requirements in [PropertyManager Foundational Requirements](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md)  
+Version: 1.4
+Status: **Phase 3 deployed on production Intel Mini**
+Authority: Requirements in [PropertyManager Foundational Requirements](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md)
 Last Updated: 2026-07-30
 
 ---

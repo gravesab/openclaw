@@ -200,7 +200,7 @@ struct TaskEditView: View {
         isSaving = true
         defer { isSaving = false }
 
-        
+
         if task.showsRunHoursTrigger {
             if let trigger = Double(triggerHoursText.replacingOccurrences(of: ",", with: ".")) {
                 fields["next_due_meter_value"] = trigger

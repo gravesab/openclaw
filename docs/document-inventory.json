@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-12T15:34:45.812649+00:00",
-  "source_fingerprint": "9f2b7d4775b4a0e5a863cfaeaa5c3190c0fd1832163de06bfca4dbce736989ca",
+  "generated_at": "2026-08-12T15:35:13.574373+00:00",
+  "source_fingerprint": "09712d0df6294a9a504037526d9ac1e352758e52243a65039d629e1c995d231e",
   "document_count": 665,
   "documents": [
     {
@@ -118,8 +118,8 @@
       "last_reviewed": "2026-07-30",
       "category": "Architecture",
       "metadata_present": true,
-      "size_bytes": 29993,
-      "modified_epoch": 1786548830
+      "size_bytes": 29987,
+      "modified_epoch": 1786548913
     },
     {
       "path": "docs/architecture/PROPERTYMANAGER_ASSETS_AND_METERS.md",
@@ -2432,8 +2432,8 @@
       "last_reviewed": "2026-07-30",
       "category": "Governance",
       "metadata_present": true,
-      "size_bytes": 34267,
-      "modified_epoch": 1786548830
+      "size_bytes": 34261,
+      "modified_epoch": 1786548913
     },
     {
       "path": "docs/foundation/RESTORE_MANIFEST.md",

@@ -37,6 +37,7 @@ final class PropertyStore: ObservableObject {
     @Published var categories: [MaintenanceCategory] = []
     @Published var tasks: [MaintenanceTask] = []
     @Published var assets: [RanchAsset] = []
+    @Published var selectedTaskAssetId: UUID?
     @Published var deepLinkAssetId: UUID?
     @Published var filter: TaskFilter = .all
     @Published var originFilter: OriginFilter = .all
@@ -62,9 +63,20 @@ final class PropertyStore: ObservableObject {
         ["All"] + categories.map(\.name).sorted()
     }
 
+    var selectedTaskAsset: RanchAsset? {
+        guard let selectedTaskAssetId else { return nil }
+        return assets.first { $0.id == selectedTaskAssetId }
+    }
+
     var filteredTasks: [MaintenanceTask] {
         tasks
             .filter { task in
+                if !TaskAssetContext.includes(
+                    taskAssetId: task.assetId,
+                    selectedAssetId: selectedTaskAssetId
+                ) {
+                    return false
+                }
                 if selectedCategory != "All", task.categoryName != selectedCategory {
                     return false
                 }

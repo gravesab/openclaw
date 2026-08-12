@@ -22,6 +22,10 @@ schemes:
     build:
       targets:
         PropertyManager: all
+        PropertyManagerTests: [test]
+    test:
+      targets:
+        - PropertyManagerTests
 
 targets:
   PropertyManager:
@@ -80,3 +84,14 @@ targets:
           PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.propertymanager.dev
           APP_DISPLAY_NAME: DEV
           APP_URL_SCHEME: propertymanager-dev
+  PropertyManagerTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: PropertyManager
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.propertymanager.tests
+        GENERATE_INFOPLIST_FILE: YES

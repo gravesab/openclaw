@@ -13,6 +13,21 @@ struct TaskListView: View {
             if store.isLoading {
                 ProgressView("Loading tasks…")
             }
+            if let asset = store.selectedTaskAsset {
+                Section {
+                    HStack {
+                        Label(asset.name, systemImage: "line.3.horizontal.decrease.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Button("All Assets") {
+                            store.selectedTaskAssetId = nil
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                } header: {
+                    Text("Showing tasks for")
+                }
+            }
             ForEach(store.groupedTasks) { section in
                 Section(section.name) {
                     ForEach(section.tasks) { task in

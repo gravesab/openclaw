@@ -21,6 +21,9 @@ struct AssetListView: View {
                 NavigationLink(value: asset.id) {
                     AssetRowView(asset: asset)
                 }
+                .simultaneousGesture(TapGesture().onEnded {
+                    store.selectedTaskAssetId = asset.id
+                })
                 .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                     Button("Deactivate", role: .destructive) {
                         assetPendingDeactivate = asset

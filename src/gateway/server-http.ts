@@ -81,6 +81,9 @@ let sessionHistoryHttpModulePromise:
   | undefined;
 let sessionKillHttpModulePromise: Promise<typeof import("./session-kill-http.js")> | undefined;
 let toolsInvokeHttpModulePromise: Promise<typeof import("./tools-invoke-http.js")> | undefined;
+let trustedRecordsHttpModulePromise:
+  | Promise<typeof import("./trusted-records-http.js")>
+  | undefined;
 let pluginNodeCapabilityAuthModulePromise:
   | Promise<typeof import("./server/plugin-node-capability-auth.js")>
   | undefined;
@@ -137,6 +140,11 @@ function getSessionKillHttpModule() {
 function getToolsInvokeHttpModule() {
   toolsInvokeHttpModulePromise ??= import("./tools-invoke-http.js");
   return toolsInvokeHttpModulePromise;
+}
+
+function getTrustedRecordsHttpModule() {
+  trustedRecordsHttpModulePromise ??= import("./trusted-records-http.js");
+  return trustedRecordsHttpModulePromise;
 }
 
 function getPluginNodeCapabilityAuthModule() {
@@ -492,6 +500,12 @@ export function createGatewayHttpServer(opts: {
   getReadiness?: ReadinessChecker;
   getRuntimeConfig?: () => OpenClawConfig;
   tlsOptions?: TlsOptions;
+  getTrustedRecordDevelopmentRuntime?: () =>
+    | {
+        runtime: import("../trusted-records/runtime.development.js").TrustedRecordDevelopmentRuntime;
+        actorId: string;
+      }
+    | undefined;
 }): HttpServer {
   const {
     clients,
@@ -592,6 +606,24 @@ export function createGatewayHttpServer(opts: {
           run: () => handleHooksRequest(req, res),
         },
       ];
+      const trustedRecordDevelopment = opts.getTrustedRecordDevelopmentRuntime?.();
+      if (trustedRecordDevelopment && scopedRequestPath.startsWith("/api/dev/trusted-records/")) {
+        requestStages.push({
+          name: "trusted-records-development",
+          run: async () =>
+            (await getTrustedRecordsHttpModule()).handleTrustedRecordsDevelopmentHttpRequest(
+              req,
+              res,
+              {
+                ...trustedRecordDevelopment,
+                auth: resolvedAuth,
+                trustedProxies,
+                allowRealIpFallback,
+                rateLimiter,
+              },
+            ),
+        });
+      }
       if (openAiCompatEnabled && isOpenAiModelsPath(scopedRequestPath)) {
         requestStages.push({
           name: "models",

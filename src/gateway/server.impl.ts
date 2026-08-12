@@ -896,6 +896,13 @@ export async function startGatewayServer(
       logHooks,
       logPlugins,
       getReadiness,
+      getTrustedRecordDevelopmentRuntime: () =>
+        trustedRecordDevelopmentRuntime && opts.trustedRecordsDevelopment
+          ? {
+              runtime: trustedRecordDevelopmentRuntime,
+              actorId: opts.trustedRecordsDevelopment.actorId,
+            }
+          : undefined,
     }),
   );
   const { createGatewayNodeSessionRuntime } = await import("./server-node-session-runtime.js");

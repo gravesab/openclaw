@@ -12,6 +12,19 @@ describe("resolveGatewayTrustedRecordDevelopmentOptions", () => {
         OPENCLAW_TRUSTED_RECORDS_DEV: "1",
         OPENCLAW_STATE_DIR: "/tmp/openclaw-test-state",
       }),
-    ).toEqual({ dataDir: "/tmp/openclaw-test-state/trusted-records" });
+    ).toEqual({
+      dataDir: "/tmp/openclaw-test-state/trusted-records",
+      actorId: "development-owner",
+    });
+  });
+
+  it("uses a server-configured development actor", () => {
+    expect(
+      resolveGatewayTrustedRecordDevelopmentOptions({
+        OPENCLAW_TRUSTED_RECORDS_DEV: "1",
+        OPENCLAW_STATE_DIR: "/tmp/openclaw-test-state",
+        OPENCLAW_TRUSTED_RECORDS_DEV_ACTOR_ID: "property-manager-dev",
+      }),
+    ).toMatchObject({ actorId: "property-manager-dev" });
   });
 });

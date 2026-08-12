@@ -170,6 +170,16 @@ matrix. Pairs with PROPERTY_MANAGER_ASSET_ARCHITECTURE.md under architecture/.
 
 ---
 
+## Canonical Trusted Records
+
+CANONICAL_TRUSTED_RECORDS.md
+
+Defines the durable cross-domain record schema, authority boundary, immutable
+revision model, access-policy creation contract, external projection identity,
+and the one-way Property Manager projection rules.
+
+---
+
 ## Disaster Recovery
 
 RESTORE_MANIFEST.md

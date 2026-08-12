@@ -25,7 +25,8 @@ final class PropertyAPIClient {
     var operatorPIN: String?
     var operatorIdentity: String?
 
-    private let decoder: JSONDecoder = {
+    /// Shared by AssetAPIClient / task fetch extensions in other files.
+    let decoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
         return d
@@ -50,12 +51,21 @@ final class PropertyAPIClient {
     func applyAuth(to request: inout URLRequest) {
         if let apiKey, !apiKey.isEmpty {
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        } else if let operatorPIN, !operatorPIN.isEmpty {
+            request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        }
+        if let operatorPIN, !operatorPIN.isEmpty {
             request.setValue(operatorPIN, forHTTPHeaderField: "X-Operator-PIN")
         }
         if let operatorIdentity, !operatorIdentity.isEmpty {
             request.setValue(operatorIdentity, forHTTPHeaderField: "X-Operator-Identity")
         }
+    }
+
+    func authorizedRequest(url: URL, method: String = "GET") -> URLRequest {
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        applyAuth(to: &request)
+        return request
     }
 
     func validate(_ response: URLResponse, data: Data) throws {
@@ -68,20 +78,46 @@ final class PropertyAPIClient {
         }
     }
 
+    // MARK: - Health
+
+    func health() async throws -> APIHealth {
+        let url = try makeURL("/health")
+        let request = authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(APIHealth.self, from: data)
+    }
+
     // MARK: - Categories
 
     func fetchCategories() async throws -> [MaintenanceCategory] {
         let url = try makeURL("/categories")
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let request = authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response, data: data)
         return try decoder.decode([MaintenanceCategory].self, from: data)
+    }
+
+    func deleteCategory(id: UUID, reassignTo: String? = nil) async throws -> CategoryDeleteResult {
+        let url = try makeURL("/categories/\(id.uuidString)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "DELETE"
+        applyAuth(to: &request)
+        if let reassignTo, !reassignTo.isEmpty {
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["reassign_to": reassignTo])
+        }
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(CategoryDeleteResult.self, from: data)
     }
 
     // MARK: - Tasks
 
     func fetchTasks() async throws -> [MaintenanceTask] {
         let url = try makeURL("/tasks")
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let request = authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response, data: data)
         return try decoder.decode([MaintenanceTask].self, from: data)
     }
@@ -147,4 +183,35 @@ struct APIErrorBody: Codable {
     var code: String?
     var message: String?
     var field: String?
+}
+
+struct APIHealth: Codable {
+    var status: String?
+    var service: String?
+    var apiVersion: String?
+    var dbMode: String?
+    var schemaVersion: String?
+
+    enum CodingKeys: String, CodingKey {
+        case status, service
+        case apiVersion = "api_version"
+        case dbMode = "db_mode"
+        case schemaVersion = "schema_version"
+    }
+}
+
+struct CategoryDeleteResult: Codable {
+    var deleted: Bool?
+    var categoryId: String?
+    var categoryName: String?
+    var reassignedTo: String?
+    var tasksReassigned: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case deleted
+        case categoryId = "category_id"
+        case categoryName = "category_name"
+        case reassignedTo = "reassigned_to"
+        case tasksReassigned = "tasks_reassigned"
+    }
 }

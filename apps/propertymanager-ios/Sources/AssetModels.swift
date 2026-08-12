@@ -279,16 +279,19 @@ struct MeterReading: Identifiable, Codable, Hashable {
 struct MeterParseResult: Codable {
     var assetId: UUID
     var assetName: String?
-    var value: Double
+    var value: Double?
+    var delta: Double?
+    var entryMode: String?
     var unit: String?
     var meterType: String?
     var confidence: Double?
 
     enum CodingKeys: String, CodingKey {
-        case value, unit, confidence
+        case value, delta, unit, confidence
         case assetId = "asset_id"
         case assetName = "asset_name"
         case meterType = "meter_type"
+        case entryMode = "entry_mode"
     }
 
     init(from decoder: Decoder) throws {
@@ -297,8 +300,10 @@ struct MeterParseResult: Codable {
         assetName = try c.decodeIfPresent(String.self, forKey: .assetName)
         unit = try c.decodeIfPresent(String.self, forKey: .unit)
         meterType = try c.decodeIfPresent(String.self, forKey: .meterType)
+        entryMode = try c.decodeIfPresent(String.self, forKey: .entryMode)
         confidence = FlexibleDecimal.decode(c, key: .confidence)
-        value = FlexibleDecimal.decode(c, key: .value) ?? 0
+        value = FlexibleDecimal.decode(c, key: .value)
+        delta = FlexibleDecimal.decode(c, key: .delta)
     }
 }
 

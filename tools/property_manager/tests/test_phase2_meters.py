@@ -37,10 +37,11 @@ def test_v1_assets_list() -> None:
 
 def test_activate_meter_proposed() -> str:
     ext = f"TEST-PHASE2-{uuid.uuid4().hex[:8]}"
+    name = f"Phase2 Proposed Mower {ext}"
     status, asset = _req(
         "POST",
         "/v1/assets",
-        {"external_id": ext, "name": "Phase2 Proposed Mower", "category": "Equipment"},
+        {"external_id": ext, "name": name, "category": "Equipment"},
     )
     assert status == 201, asset
     asset_id = asset["id"]

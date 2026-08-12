@@ -11,10 +11,20 @@ from tools.ai_intelligence.execution_models import (
     ExecutionResult,
     ExecutionStatus,
 )
-from tools.ai_intelligence.gateway_bridge import serialize_result
+from tools.ai_intelligence.gateway_bridge import request_parameters, serialize_result
 
 
 class GatewayBridgeTests(unittest.TestCase):
+    def test_request_parameters_copies_object(self) -> None:
+        source = {"parameters": {"temperature": 0, "max_tokens": 64}}
+        parameters = request_parameters(source)
+        self.assertEqual(parameters, source["parameters"])
+        self.assertIsNot(parameters, source["parameters"])
+
+    def test_request_parameters_rejects_non_object(self) -> None:
+        with self.assertRaises(ValueError):
+            request_parameters({"parameters": []})
+
     def test_serialize_result_uses_gateway_field_names(self) -> None:
         timestamp = datetime(2026, 7, 24, tzinfo=timezone.utc)
         result = ExecutionResult(

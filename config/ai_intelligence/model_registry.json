@@ -83,6 +83,16 @@
       "notes": "Fast low-resource fallback; not preferred for complex engineering."
     },
     {
+      "id": "omlx-qwen3.5-9b-4bit",
+      "display_name": "Qwen 3.5 9B 4-bit (oMLX)",
+      "provider": "Local oMLX",
+      "deployment": "local",
+      "status": "evaluation",
+      "privacy_tier": "local",
+      "cost_tier": "owned-hardware",
+      "notes": "DEV-only oMLX model on the M4. Parser-owned structured proposal generation; no authoritative mutation capability."
+    },
+    {
       "id": "openai-frontier",
       "display_name": "OpenAI frontier model",
       "provider": "OpenAI",

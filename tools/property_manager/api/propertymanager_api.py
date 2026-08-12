@@ -670,6 +670,28 @@ def upsert_task():
         asset_id=asset_id,
     )
 
+    existing_dates = None
+    if payload.get("id"):
+        existing_dates = pm_db.execute_one_json(
+            """
+            SELECT last_done, next_due
+            FROM propertymanager.maintenance_tasks
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+    default_last_done = datetime.now(timezone.utc)
+    last_done = (
+        payload.get("last_done")
+        or (existing_dates or {}).get("last_done")
+        or default_last_done
+    )
+    next_due = (
+        payload.get("next_due")
+        or (existing_dates or {}).get("next_due")
+        or (default_last_done + timedelta(days=30))
+    )
+
     meter_interval_unit = str(payload.get("meter_interval_unit") or "").strip() or None
     warnings: list[str] = []
     if next_due_meter is not None:
@@ -767,8 +789,8 @@ def upsert_task():
             int(payload.get("estimated_minutes") or 30),
             int(payload.get("warning_days") or 30),
             int(payload.get("critical_days") or 45),
-            payload.get("last_done"),
-            payload.get("next_due"),
+            last_done,
+            next_due,
             bool(payload.get("send_telegram_update", True)),
             bool(payload.get("include_in_daily_briefing", True)),
             bool(payload.get("alert_if_overdue", True)),

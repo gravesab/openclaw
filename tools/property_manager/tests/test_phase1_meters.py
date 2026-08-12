@@ -85,18 +85,18 @@ def wait_health() -> None:
         try:
             with urllib.request.urlopen(API + "/health", timeout=2) as resp:
                 data = json.loads(resp.read().decode())
-                if data.get("schema_version") == "006":
+                if data.get("schema_version") == "009":
                     return
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             pass
         time.sleep(0.5)
-    raise RuntimeError("API health check failed or schema_version != 006")
+    raise RuntimeError("API health check failed or schema_version != 009")
 
 
 def test_health() -> None:
     status, data = _req("GET", "/health")
     assert status == 200, data
-    assert data.get("schema_version") == "006", data
+    assert data.get("schema_version") == "009", data
     assert data.get("api_version") == "v1", data
 
 

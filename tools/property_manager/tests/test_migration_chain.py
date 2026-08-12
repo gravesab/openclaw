@@ -22,8 +22,9 @@ MIGRATIONS = (
     "004_task_origin.sql",
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
+    "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "006"
+EXPECTED_VERSION = "009"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -186,10 +187,14 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "-At",
             ],
             input_bytes=sql.encode(),
+            check=False,
         )
+        if result.returncode != 0:
+            detail = (result.stderr or result.stdout).decode(errors="replace").strip()
+            raise AssertionError(f"isolated psql command failed: {detail}")
         return result.stdout.decode().strip()
 
-    def test_001_through_006_build_expected_schema(self) -> None:
+    def test_canonical_migrations_build_expected_schema(self) -> None:
         identity = self._psql(
             "SELECT current_database() || '|' || current_user || '|' || pg_is_in_recovery();"
         )
@@ -201,10 +206,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             migration = (MIGRATION_DIR / filename).read_bytes()
             self._psql(migration.decode())
             applied.append(filename[:3])
-        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006"])
+        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009"])
         self.assertEqual(applied[-1], EXPECTED_VERSION)
 
-        # The 005/006 rollout contract explicitly describes these migrations as
+        # The 005/006/009 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.
         for filename in MIGRATIONS[4:]:
             self._psql((MIGRATION_DIR / filename).read_text())
@@ -224,6 +229,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "assets",
                 "maintenance_categories",
                 "maintenance_completions",
+                "maintenance_proposals",
                 "maintenance_task_parts",
                 "maintenance_task_photos",
                 "maintenance_tasks",

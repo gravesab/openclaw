@@ -7,13 +7,14 @@
     {"version": "003", "order": 3, "filename": "003_part_quantity.sql", "sha256": "49365ba4d30ff4543ad3a48a9aa3a0b430aebb300c3d67e568c6a679bb218147", "reapplication_permitted": false},
     {"version": "004", "order": 4, "filename": "004_task_origin.sql", "sha256": "1e9a03e9cc383928c992638685df922a3bc6a28a4a54a8a8f18b98be0da6c40c", "reapplication_permitted": false},
     {"version": "005", "order": 5, "filename": "005_assets_and_meters.sql", "sha256": "f90a39cdc6234d72a431d4caba23720d98aa7b4dff1a83f15845ecb936ff0147", "reapplication_permitted": true},
-    {"version": "006", "order": 6, "filename": "006_phase1_meter_audit.sql", "sha256": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0", "reapplication_permitted": true}
+    {"version": "006", "order": 6, "filename": "006_phase1_meter_audit.sql", "sha256": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0", "reapplication_permitted": true},
+    {"version": "009", "order": 7, "filename": "009_maintenance_proposals.sql", "sha256": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a", "reapplication_permitted": true}
   ],
   "reserved_versions": [
     {"version": "007", "status": "noncanonical_forbidden", "reason": "Reserved because a noncanonical migration was published in branch history; never restore, rename, reuse, or adopt."},
     {"version": "008", "status": "noncanonical_forbidden", "reason": "Reserved because mutable noncanonical migrations were published in branch history; never restore, rename, reuse, or adopt."}
   ],
-  "next_canonical_version": "009",
+  "next_canonical_version": "010",
   "schema_contract": {
     "normalization_version": 1,
     "comparison": {
@@ -184,6 +185,43 @@
         ],
         "indexes": [
           {"name": "maintenance_completions_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null}
+        ]
+      },
+      "maintenance_proposals": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "proposal_version", "type": "integer", "nullable": false, "default": "1", "precision": null, "scale": null, "generated": null},
+          {"name": "operation_id", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "schema_version", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "source_evidence_ref", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "provider", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "model", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "model_output", "type": "jsonb", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "guardrail_actions", "type": "jsonb", "nullable": false, "default": "'[]'::jsonb", "precision": null, "scale": null, "generated": null},
+          {"name": "validation_status", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "status", "type": "text", "nullable": false, "default": "'pending'", "precision": null, "scale": null, "generated": null},
+          {"name": "created_by", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "integration_identity", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "idempotency_key", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "reviewed_by", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "reviewed_at", "type": "timestamp with time zone", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "rejection_reason", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "updated_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "maintenance_proposals_guardrail_actions_array_check", "kind": "check", "columns": ["guardrail_actions"], "definition": "CHECK (jsonb_typeof(guardrail_actions) = 'array')", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_proposals_model_output_object_check", "kind": "check", "columns": ["model_output"], "definition": "CHECK (jsonb_typeof(model_output) = 'object')", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_proposals_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_proposals_proposal_version_check", "kind": "check", "columns": ["proposal_version"], "definition": "CHECK (proposal_version > 0)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_proposals_review_check", "kind": "check", "columns": ["reviewed_at", "reviewed_by", "status"], "definition": "CHECK ((status = 'pending' AND reviewed_by IS NULL AND reviewed_at IS NULL) OR (status IN ('confirmed', 'rejected') AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL))", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_proposals_status_check", "kind": "check", "columns": ["status"], "definition": "CHECK (status IN ('pending', 'confirmed', 'rejected'))", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_proposals_validation_status_check", "kind": "check", "columns": ["validation_status"], "definition": "CHECK (validation_status = 'valid')", "references": null, "on_update": null, "on_delete": null}
+        ],
+        "indexes": [
+          {"name": "maintenance_proposals_idempotency_idx", "unique": true, "method": "btree", "keys": [{"expression": "integration_identity", "order": "ASC"}, {"expression": "idempotency_key", "order": "ASC"}], "predicate": null},
+          {"name": "maintenance_proposals_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null},
+          {"name": "maintenance_proposals_review_queue_idx", "unique": false, "method": "btree", "keys": [{"expression": "status", "order": "ASC"}, {"expression": "created_at", "order": "DESC"}], "predicate": null}
         ]
       },
       "maintenance_task_parts": {

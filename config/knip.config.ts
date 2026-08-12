@@ -50,6 +50,7 @@ const bundledPluginIgnoredRuntimeDependencies = [
   "linkedom",
   "openclaw",
   "pdfjs-dist",
+  "sharp",
 ] as const;
 
 const rootBundledPluginRuntimeDependencies = [

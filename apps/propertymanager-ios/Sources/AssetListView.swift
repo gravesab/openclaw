@@ -3,6 +3,8 @@ import SwiftUI
 struct AssetListView: View {
     @EnvironmentObject private var store: PropertyStore
     @State private var selectedAsset: RanchAsset?
+    @State private var assetPendingDeactivate: RanchAsset?
+    @State private var showDeactivateConfirm = false
 
     var meteredAssets: [RanchAsset] {
         store.assets.filter { $0.meter?.hasMeter == true }
@@ -17,11 +19,36 @@ struct AssetListView: View {
                 NavigationLink(value: asset.id) {
                     AssetRowView(asset: asset)
                 }
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button("Deactivate", role: .destructive) {
+                        assetPendingDeactivate = asset
+                        showDeactivateConfirm = true
+                    }
+                }
             }
         }
         .navigationTitle("Assets")
         .navigationDestination(for: UUID.self) { assetId in
             AssetDetailView(assetId: assetId)
+        }
+        .confirmationDialog(
+            assetPendingDeactivate.map { "Deactivate \($0.name)?" } ?? "Deactivate asset?",
+            isPresented: $showDeactivateConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Deactivate", role: .destructive) {
+                guard let asset = assetPendingDeactivate else { return }
+                Task {
+                    _ = await store.deactivateAsset(id: asset.id)
+                    await store.refreshAssets()
+                    assetPendingDeactivate = nil
+                }
+            }
+            Button("Cancel", role: .cancel) {
+                assetPendingDeactivate = nil
+            }
+        } message: {
+            Text("This hides the asset from lists. Meter history is kept and it can be reactivated later from the API or a future Reactivate UI.")
         }
         .refreshable {
             await store.refreshAssets()

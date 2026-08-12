@@ -132,13 +132,19 @@ Browser → Flask (0.0.0.0:5051)
 
 ### Storage Health
 
-- Live `df` for `/` and `/mnt/ai-storage`.
+- The development dashboard labels its local root filesystem as
+  **Development VM Internal Disk** so it cannot be mistaken for production.
+- A separate read-only Intel Mini probe reports the production root
+  filesystem usage, complete physical internal-drive capacity, root
+  allocation, and capacity outside the root allocation.
+- External AI storage remains a separate card with total, used, free, and
+  percentage values.
 - When `/mnt/ai-storage` is not local to the development host, the dashboard
   performs a read-only SSH probe of the Intel Mini using
   `OPENCLAW_INTELMINI_STORAGE_HOST`, `OPENCLAW_INTELMINI_STORAGE_USER`, and
   `OPENCLAW_INTELMINI_STORAGE_KEY`.
-- The remote command is limited to `findmnt` and `df`; it does not mount,
-  modify, restart, or write to the Intel Mini.
+- Remote storage commands are limited to `findmnt`, `df`, and `lsblk`; they do
+  not mount, modify, restart, resize, or write to the Intel Mini.
 - Missing or unmounted storage is shown as **Not mounted on this host**, not as
   `0%` usage or a parser failure.
 - Internal and external disk percentages have separate trend columns. Missing

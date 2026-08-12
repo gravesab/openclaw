@@ -48,6 +48,17 @@ Defines the mission, scope, and long-term direction of OpenClaw.
 
 ---
 
+## Human-Centered Personal Intelligence System
+
+HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md
+
+Defines the unified capture model, plain-language system status, trustworthy
+data states, Ranch Brain knowledge lifecycle, domain requirements, dashboard
+rules, privacy controls, and phased implementation direction for ChatGPT and
+OpenClaw.
+
+---
+
 ## Architecture
 
 RANCHBOT_ARCHITECTURE.md
@@ -269,6 +280,7 @@ The maintained documentation library is located under `docs/`.
 
 - `docs/foundation/FOUNDATIONAL_DOCUMENTS.md`
 - `docs/foundation/PROJECT_OVERVIEW.md`
+- `docs/foundation/HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md`
 - `docs/foundation/SOUL.md`
 - `docs/foundation/AI_GOVERNANCE_MANIFEST.md`
 - `docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md`

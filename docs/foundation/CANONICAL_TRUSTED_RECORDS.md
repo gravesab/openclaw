@@ -10,9 +10,9 @@ source_document: "CANONICAL_TRUSTED_RECORDS.md"
 
 # Canonical Trusted Records
 
-Version: 1.0  
-Status: Foundational  
-Owner: OpenClaw Architecture  
+Version: 1.0
+Status: Foundational
+Owner: OpenClaw Architecture
 Last Updated: 2026-08-03
 
 ## Purpose

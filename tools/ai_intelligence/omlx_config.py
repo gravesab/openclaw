@@ -60,11 +60,17 @@ class OMLXConfig:
         return cls(
             base_url=environ.get(
                 "OPENCLAW_OMLX_BASE_URL",
-                "http://10.0.2.2:8000/v1",
+                "http://127.0.0.1:8000/v1",
             ),
             api_key=environ.get("OPENCLAW_OMLX_API_KEY", ""),
             default_timeout_seconds=timeout,
         )
+
+
+def is_omlx_configured() -> bool:
+    """Return whether an oMLX credential is available in the environment."""
+
+    return bool(environ.get("OPENCLAW_OMLX_API_KEY", "").strip())
 
 
 def to_omlx_model_name(model_id: str) -> str:

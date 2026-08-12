@@ -8,6 +8,7 @@ from unittest.mock import patch
 from tools.ai_intelligence.omlx_config import (
     OMLXConfig,
     OMLXConfigurationError,
+    is_omlx_configured,
     is_omlx_model_id,
     to_omlx_model_name,
 )
@@ -39,6 +40,31 @@ class OMLXConfigTests(unittest.TestCase):
         config = OMLXConfig.from_env()
         self.assertEqual(config.api_key, "secret")
         self.assertEqual(config.default_timeout_seconds, 45)
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_defaults_to_loopback(self) -> None:
+        with self.assertRaises(OMLXConfigurationError):
+            OMLXConfig.from_env()
+
+        with patch.dict(
+            "os.environ",
+            {"OPENCLAW_OMLX_API_KEY": "secret"},
+            clear=True,
+        ):
+            self.assertEqual(
+                OMLXConfig.from_env().base_url,
+                "http://127.0.0.1:8000/v1",
+            )
+
+    @patch.dict("os.environ", {}, clear=True)
+    def test_reports_unconfigured_without_key(self) -> None:
+        self.assertFalse(is_omlx_configured())
+        with patch.dict(
+            "os.environ",
+            {"OPENCLAW_OMLX_API_KEY": " secret "},
+            clear=True,
+        ):
+            self.assertTrue(is_omlx_configured())
 
     def test_translates_model(self) -> None:
         self.assertEqual(

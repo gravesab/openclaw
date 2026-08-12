@@ -301,6 +301,9 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
     from tools.ai_intelligence.omlx_provider import (
         build_omlx_provider,
     )
+    from tools.ai_intelligence.omlx_config import (
+        is_omlx_configured,
+    )
     from tools.ai_intelligence.provider_registry import (
         ProviderRegistry,
     )
@@ -309,15 +312,14 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
     )
 
     database = AIIntelligenceDatabase(DatabaseConfig.from_env())
+    providers: list[AIProvider] = []
+    if is_omlx_configured():
+        providers.append(build_omlx_provider())
+    providers.append(build_ollama_provider())
 
     return ExecutionEngine(
         router=build_router_from_environment(),
-        provider_registry=ProviderRegistry(
-            (
-                build_omlx_provider(),
-                build_ollama_provider(),
-            )
-        ),
+        provider_registry=ProviderRegistry(providers),
         telemetry_recorder=DatabaseExecutionTelemetryRecorder(
             database
         ),

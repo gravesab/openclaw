@@ -942,6 +942,9 @@ export async function startGatewayServer(
   };
 
   let closePreludeStarted = false;
+  let trustedRecordDevelopmentRuntime:
+    | import("../trusted-records/runtime.development.js").TrustedRecordDevelopmentRuntime
+    | null = null;
   let postReadyMaintenanceTimer: ReturnType<typeof setTimeout> | null = null;
   const clearPostReadyMaintenanceTimer = () => {
     if (!postReadyMaintenanceTimer) {

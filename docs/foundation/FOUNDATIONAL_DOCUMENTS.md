@@ -48,11 +48,87 @@ Defines the mission, scope, and long-term direction of OpenClaw.
 
 ---
 
+## Human-Centered Personal Intelligence System
+
+HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md
+
+Defines the unified capture model, plain-language system status, trustworthy
+data states, Ranch Brain knowledge lifecycle, domain requirements, dashboard
+rules, privacy controls, and phased implementation direction for ChatGPT and
+OpenClaw.
+
+---
+
 ## Architecture
 
 RANCHBOT_ARCHITECTURE.md
 
 Defines system architecture, service relationships, routing, and component responsibilities.
+
+SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md
+
+Defines the server-enforced boundary for proposals, authoritative mutations,
+confirmation, concurrency, idempotency, and atomic audit evidence.
+
+CANONICAL_CONFIRMATION_POLICY_V1.md
+
+Defines confirmation classifications, the canonical operation matrix,
+server-generated challenges, and single-use confirmation records.
+
+ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md
+
+Defines the atomic transaction boundary for authoritative mutation, audit,
+confirmation consumption, idempotency, concurrency, and post-commit delivery.
+
+AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md
+
+Defines mutation-specific threats, protected assets, trust boundaries,
+fail-closed security requirements, and implementation-independent tests.
+
+AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md
+
+Defines human and service identity, capabilities, delegation, revocation,
+environment separation, and accountable authority for mutations.
+
+AUTHORITATIVE_MUTATION_PROTOCOL_V1.md
+
+Defines the complete server-enforced proposal, authorization, confirmation,
+validation, concurrency, idempotency, transaction, result, and recovery lifecycle.
+
+EXTERNAL_AUTHORITY_ANCHOR_AND_TRUST_ROOT_SPECIFICATION_V1.md
+
+Defines the external authority anchor, signed trust-root artifacts, verification,
+lifecycle, rotation, revocation, anti-rollback, audit, and recovery requirements.
+
+AUTHORITY_ANCHOR_CEREMONY_CUSTODY_ROTATION_AND_RECOVERY_PROFILE_V1.md
+
+Defines authority-anchor ceremony planning, custody, rotation, revocation,
+recovery, evidence, environment separation, and fail-closed abort requirements.
+
+AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md
+
+Defines authority-anchor algorithms, canonical serialization, signatures,
+digests, encodings, domain separation, compatibility, and downgrade prevention.
+
+AUTHORITY_ANCHOR_IMMUTABLE_NON_SECRET_COMPATIBILITY_VECTOR_SPECIFICATION_V1.md
+
+Defines immutable non-secret vectors, provenance, canonical expected results,
+failure decisions, cross-platform conformance, and vector-set change control.
+
+AUTHORITY_ANCHOR_IMPLEMENTATION_ASSURANCE_AND_APPROVED_CRYPTOGRAPHIC_LIBRARY_PROFILE_V1.md
+
+Defines implementation assurance, evidence, approval units, supply-chain and
+platform controls, validation, lifecycle, and fail-closed library governance.
+
+CANDIDATE_LIBRARY_EVIDENCE_AND_COMPARATIVE_ASSESSMENT_SPECIFICATION_V1.md
+
+Defines candidate evidence identity, provenance, comparison, uncertainty,
+decision separation, reassessment, and fail-closed assessment requirements.
+
+CANDIDATE_ASSESSMENT_EVIDENCE_RECORD_CANONICALIZATION_AND_INTEGRITY_PROFILE_V1.md
+
+Defines evidence-record schemas, canonical bytes, content identities, provenance,
+manifests, verification, redaction, and fail-closed integrity requirements.
 
 ---
 
@@ -204,6 +280,7 @@ The maintained documentation library is located under `docs/`.
 
 - `docs/foundation/FOUNDATIONAL_DOCUMENTS.md`
 - `docs/foundation/PROJECT_OVERVIEW.md`
+- `docs/foundation/HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md`
 - `docs/foundation/SOUL.md`
 - `docs/foundation/AI_GOVERNANCE_MANIFEST.md`
 - `docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md`
@@ -213,8 +290,18 @@ The maintained documentation library is located under `docs/`.
 
 ## Architecture Documents
 
+- `docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md`
+- `docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md`
+- `docs/architecture/AUTHORITATIVE_MUTATION_PROTOCOL_V1.md`
+- `docs/architecture/AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md`
+- `docs/architecture/AUTHORITY_ANCHOR_CEREMONY_CUSTODY_ROTATION_AND_RECOVERY_PROFILE_V1.md`
+- `docs/architecture/AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md`
+- `docs/architecture/AUTHORITY_ANCHOR_IMMUTABLE_NON_SECRET_COMPATIBILITY_VECTOR_SPECIFICATION_V1.md`
+- `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
+- `docs/architecture/EXTERNAL_AUTHORITY_ANCHOR_AND_TRUST_ROOT_SPECIFICATION_V1.md`
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`
 - `docs/architecture/RANCHBOT_ARCHITECTURE.md`
+- `docs/architecture/SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md`
 - `docs/architecture/DASHBOARD_REPORT.md`
 - `docs/architecture/PYTHON_WEB_RUNTIME_INVENTORY.md`
 - `docs/architecture/PROJECT_CONTEXT.md`

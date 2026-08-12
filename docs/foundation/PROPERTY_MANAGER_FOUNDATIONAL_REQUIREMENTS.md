@@ -1,19 +1,19 @@
 ---
 title: "PropertyManager Foundational Requirements"
-version: "1.1"
+version: "1.4"
 status: "Phase 3 deployed — post-deploy verification"
 owner: "OpenClaw Operator"
-last_reviewed: "2026-07-29"
+last_reviewed: "2026-07-30"
 category: "Governance"
 source_document: "PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md"
 ---
 
 # PropertyManager Foundational Requirements
 
-Version: 1.1  
-Status: **Phase 3 deployed on production Intel Mini** — post-deploy verification  
-Owner: OpenClaw Operator  
-Last Updated: 2026-07-29
+Version: 1.4
+Status: **Phase 3 deployed on production Intel Mini** — post-deploy verification
+Owner: OpenClaw Operator
+Last Updated: 2026-07-30
 
 ---
 
@@ -117,8 +117,47 @@ All PropertyManager work follows a **two-environment, two-gate** model aligned w
 - **All clients** (Mac, iPhone/iPad, Dashboard QR page, Telegram, RanchBrain CLI) interact **only through the PropertyManager REST API**. No client reads or writes Postgres directly.
 - Mac and iOS may maintain a local JSON cache for offline display; cache is a **derived copy**, not authoritative.
 - CSV export remains legacy/briefing-only and must not be treated as a write path.
+- **Apple Calendar is not a system of record.** The Mac app may push a derived day plan into Calendar.app for planning visibility only. Deleting or editing those events in Calendar.app must not update PropertyManager. Postgres + the REST API (via Mac/iPhone UI) remain the only write path for tasks and schedules.
 
 See the client topology diagram in [PropertyManager Asset Architecture](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#client-topology).
+
+---
+
+## Apple Calendar day plan (Mac → OpenClaw)
+
+PropertyManager may place **today’s due work** on the operator’s Apple Calendar for **planning and scheduling visibility only**. This is a **Mac-only, one-way, on-demand** export into Calendar.app — not bidirectional sync, not an API/server feature, and not a second task database.
+
+**Intent:** use Apple Calendar to see and arrange the day plan. Do **not** use Calendar.app to complete, reschedule, activate, or delete PropertyManager tasks.
+
+**Trial status:** ship and use this on the **Mac development build** in real-world day planning first. Do **not** treat OpenClaw calendar export as production-required or value-proven until the operator confirms after hands-on use. Promotion to production Mac builds, and any behavior such as removal-on-complete, stays **provisional** and may be dropped or changed if it is not value-added.
+
+### Requirements
+
+| Rule                              | Requirement                                                                                                                                                                                                                                                                                               |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host                              | **Mac PropertyManagerApp** only. Menu/button: push today’s due tasks to Calendar.                                                                                                                                                                                                                         |
+| Target calendar                   | Existing Calendar.app calendar titled **OpenClaw**. Do not auto-create it; fail clearly if missing.                                                                                                                                                                                                       |
+| Event shape                       | **Timed blocks** stacked from a **configurable day start** (default **08:00** local). Each event lasts `estimated_minutes` (fallback 30). No overlap: next start = previous end.                                                                                                                          |
+| Eligibility                       | Active tasks with `schedule_kind` in `calendar` \| `both` whose calendar `next_due` local date is **≤ today** (due today or still incomplete/overdue).                                                                                                                                                    |
+| Pure meter tasks                  | **Excluded** from Apple Calendar export. Never invent a calendar day from meter hours/miles.                                                                                                                                                                                                              |
+| Task mutations                    | Create, edit, complete, reschedule, and soft-delete of tasks happen **only** in PropertyManager Mac or iPhone UI through the REST API.                                                                                                                                                                    |
+| Calendar delete is view-only      | The operator **may** delete (or edit) a Calendar.app event to clear it from the calendar view. That action must **never** update PropertyManager Postgres, the REST API, or Mac/iOS local task caches.                                                                                                    |
+| Completion removes calendar event | **Provisional default:** when a task is completed in PropertyManager, Mac may remove that task’s PM-managed OpenClaw event(s). Revisit after real-world trial — keep as a single easy-to-disable switch; may be removed entirely if not value-added. Never Calendar-driven completion.                    |
+| Completion                        | Completing the task in PropertyManager advances `next_due` via the normal API path; the task leaves the day-plan push until it is due again.                                                                                                                                                              |
+| Incomplete roll-forward           | Any task **not completed in PropertyManager** must keep receiving a timed slot on subsequent pushes (rolls forward day to day until done). A prior Calendar.app delete does not mark the task done; a later push may recreate the event.                                                                  |
+| Idempotency                       | Re-push updates or replaces PropertyManager-managed events for the day; must not accumulate unbounded duplicates. Stable EventKit marker / URL identifies PM-owned events.                                                                                                                                |
+| DEV vs prod                       | DEV builds tag events with a **DEV** marker and provide **Delete DEV PropertyManager calendar events**. Before promoting calendar sync to production, operator must run DEV cleanup and confirm the OpenClaw calendar has no DEV PM events. Prod markers must never be deleted by the DEV cleanup action. |
+| Authority                         | Calendar events are **derived presentation only**. Calendar.app is never a write path into PropertyManager.                                                                                                                                                                                               |
+| Permissions                       | Requires macOS Calendar (EventKit) access for the Mac app; surface permission failures in the UI.                                                                                                                                                                                                         |
+
+### Out of scope (this feature)
+
+- Writing calendar events from the PropertyManager REST API, Intel Mini, or iOS PropertyManager app (v1)
+- Auto-creating the OpenClaw calendar
+- Any Calendar.app → PropertyManager reverse sync (delete, edit, complete, or reschedule via calendar)
+- Converting meter intervals into Apple Calendar dates
+
+Architecture notes: [PropertyManager Asset Architecture](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#apple-calendar-day-plan).
 
 ---
 
@@ -137,6 +176,21 @@ See the client topology diagram in [PropertyManager Asset Architecture](../archi
 1. The system **proposes** a meter type and unit based on category.
 2. The operator **reviews and confirms or overrides** before the meter is activated.
 3. No meter-based schedules or reading acceptance may run until the operator activates the meter.
+
+### Meter reading entry modes
+
+`asset_meter.current_value` is always the **cumulative absolute total** (hour-meter / odometer face after accept).
+
+Operators may enter readings in either mode:
+
+| Mode     | Request field | Meaning                                                          |
+| -------- | ------------- | ---------------------------------------------------------------- |
+| Absolute | `value`       | Full meter face reading (existing behavior)                      |
+| Delta    | `delta`       | Hours (or miles) **used since last** reading; must be finite > 0 |
+
+Server rule for delta: `new_absolute = current_value + delta`, then the normal accept path (audit trail, usage_since_previous, lower-reading preview/confirm if the resulting absolute would decrease). Reject if both `value` and `delta` are set, or neither. Prefer the name `delta` (not `add_value`).
+
+PM remaining is unchanged and always absolute-based: `remaining_meter = next_due_meter_value − current_value`.
 
 ### Meter reading audit requirements
 
@@ -189,13 +243,73 @@ When completing a meter-scheduled maintenance task:
 ### Calendar intervals
 
 - **Never** convert meter intervals to approximate calendar days (e.g. do not turn "50 hours" into "~7 days").
-- Calendar schedules (`warning_days`, `next_due`) and meter schedules (`meter_interval_value`, `meter_interval_unit`) are **independent** fields.
-- **Combined schedules** (`schedule_kind=both`) are allowed **only** when the manufacturer manual explicitly specifies "whichever comes first" (or equivalent). Both intervals must be stored as authored; the recalc engine evaluates each independently.
+- Calendar schedules (`warning_days`, `next_due`) and meter schedules (`next_due_meter_value`, `meter_interval_value`, `meter_interval_unit`) are **independent** fields.
+- **Combined schedules** (`schedule_kind=both`) are allowed **only** when the manufacturer manual explicitly specifies "whichever comes first" (or equivalent). Both calendar and meter thresholds must be stored as authored; the recalc engine evaluates each independently.
 
-### Meter-based PM
+### Run hours trigger (meter PM)
 
-- Meter intervals originate from manufacturer manual import and are stored on the task at import time.
-- Recalc after accepted readings and completions: `remaining_meter = next_due_meter_value - current_meter_value`.
+**Run hours trigger** means the **absolute** meter reading at which a linked task becomes due — not the repeat interval alone. Example: "Check blade when mower hits **150.0** hours."
+
+| Concept                | Column                                           | Meaning                                                                                                                        |
+| ---------------------- | ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| Absolute due threshold | `next_due_meter_value`                           | Meter reading at which the task becomes due (absolute trigger; column in `005_assets_and_meters.sql`) — no new migration       |
+| Repeat interval        | `meter_interval_value` (+ `meter_interval_unit`) | Repeating interval (e.g. every 50 hours). After completion with an interval: `next_due = meter_value_at_completion + interval` |
+
+#### Controlling rule
+
+Eligibility is determined by the **linked asset**, not by task category:
+
+- Task must have `asset_id` set.
+- Linked asset meter must be **activated** with `meter_type == runtime_hours`.
+- Asset **category is not authoritative** (a `runtime_hours` meter in a non-Equipment category is allowed).
+
+#### Due vs overdue vs remaining
+
+Compare `asset_meter.current_value` to `next_due_meter_value` (Decimal):
+
+| Condition                         | Meaning   | Enrichment                                                               |
+| --------------------------------- | --------- | ------------------------------------------------------------------------ |
+| `current < next_due_meter_value`  | Remaining | `remaining_meter = next_due - current` (positive)                        |
+| `current == next_due_meter_value` | Due now   | `due_meter = true`; **not** overdue                                      |
+| `current > next_due_meter_value`  | Overdue   | `overdue_meter = true` (**strict `>` only**); `remaining_meter` negative |
+
+Expose both `due_meter` and `overdue_meter`. Do **not** treat `>=` as overdue.
+
+#### Schedule kind — no silent promotion
+
+- Saving a non-null `next_due_meter_value` requires **explicit** `schedule_kind` of `meter` or `both`.
+- **Forbidden:** silently changing `calendar` → `meter` (or `both`) on upsert/PATCH.
+- UI default: when calendar fields are already meaningful, default new trigger saves to `both` (operator must still send explicit `meter` or `both`).
+
+#### One-time trigger (no interval)
+
+When `meter_interval_value` is null/absent and the task completes: **clear** `next_due_meter_value` (one-shot). Do not invent a next trigger.
+
+When an interval is present: `next_due_meter_value = meter_value_at_completion + meter_interval_value` (Decimal). Completion must be **atomic** (single multi-statement `BEGIN…COMMIT`, not separate autocommit execs).
+
+#### Authorship (no new DB column)
+
+- **Manufacturer interval** (`meter_interval_*`) keeps existing provenance: `origin` / `source_manual_name` / `manualImport` (or equivalent). Editing the absolute trigger must **not** strip these.
+- **Absolute trigger** (`next_due_meter_value`) is an **operator scheduling decision**. No new authorship column.
+
+#### Validation and save semantics
+
+- Require linked activated `runtime_hours` asset when setting `next_due_meter_value`.
+- Unit must be hours (`hrs`); value must be nonnegative finite numeric (Decimal end-to-end).
+- Blank / `""` is **not** zero — reject blank and non-numeric input.
+- If trigger `<` current meter: allow save with `warnings[]` (trigger behind current).
+- Clients: **deliberate Save only** after valid parse — no autosave of partial/invalid trigger fields.
+- UI labels: "Due when meter reaches (hours)" / "Run hours trigger"; badges: "N hrs left" / "Due now" / "Overdue".
+
+Vehicles / mileage absolute-trigger + interval follow the same pattern later (out of scope for this `runtime_hours` contract).
+
+Architecture and recalc details: [PropertyManager Asset Architecture — Run hours trigger](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#run-hours-trigger-equipment-tasks).
+
+### Meter-based PM (general)
+
+- Meter schedules require an absolute due threshold (`next_due_meter_value`) evaluated against the asset meter current value per the due/overdue/remaining rules above.
+- Repeat intervals (`meter_interval_value`, `meter_interval_unit`) originate from manufacturer manual import when available and drive post-completion advancement of the trigger (or clear on one-time complete).
+- Recalc after accepted readings and completions uses the formulas in the run hours trigger contract above.
 
 ---
 
@@ -247,23 +361,36 @@ Exact auth mechanism is a Phase 1 design detail; the **requirement** is that wri
 
 The following scenarios must pass on the **development VM** before Phase 3 authorization:
 
-| Scenario                                                     | Validates                                       |
-| ------------------------------------------------------------ | ----------------------------------------------- |
-| Concurrent meter entries on same asset                       | Concurrency protection, no lost updates         |
-| Duplicate mobile retries (same `idempotency_key`)            | Idempotent replay                               |
-| Offline sync: queue readings, replay on reconnect            | Ordering, idempotency, conflict handling        |
-| Backdated reading insertion (middle of history)              | Usage recalc, conditional current_value update  |
-| Backdated reading that becomes latest                        | current_value promotion                         |
-| Meter replacement (`meter_epoch` increment)                  | Epoch isolation, no invalid deltas              |
-| Meter rollover (odometer)                                    | Epoch or correction workflow                    |
-| Transactional rollback on partial failure                    | No orphan readings or inconsistent PM state     |
-| Maintenance completion with stale cache                      | Forces confirm-or-enter; rejects silent default |
-| Maintenance completion with new reading                      | Reading link, PM recalc                         |
-| Manual entry provenance                                      | operator_id, entry_method, audit chain          |
-| Combined calendar + meter schedule ("whichever comes first") | Independent evaluation, no day/hour conversion  |
-| Lower-reading preview-and-confirm                            | Two-step flow, audit record                     |
-| RanchBrain mapping report                                    | No auto-apply without approval                  |
-| QR read without auth vs write with auth                      | Token ≠ authorization                           |
+| Scenario                                                     | Validates                                                       |
+| ------------------------------------------------------------ | --------------------------------------------------------------- |
+| Concurrent meter entries on same asset                       | Concurrency protection, no lost updates                         |
+| Duplicate mobile retries (same `idempotency_key`)            | Idempotent replay                                               |
+| Offline sync: queue readings, replay on reconnect            | Ordering, idempotency, conflict handling                        |
+| Backdated reading insertion (middle of history)              | Usage recalc, conditional current_value update                  |
+| Backdated reading that becomes latest                        | current_value promotion                                         |
+| Meter replacement (`meter_epoch` increment)                  | Epoch isolation, no invalid deltas                              |
+| Meter rollover (odometer)                                    | Epoch or correction workflow                                    |
+| Transactional rollback on partial failure                    | No orphan readings or inconsistent PM state                     |
+| Maintenance completion with stale cache                      | Forces confirm-or-enter; rejects silent default                 |
+| Maintenance completion with new reading                      | Reading link, PM recalc                                         |
+| Manual entry provenance                                      | operator_id, entry_method, audit chain                          |
+| Combined calendar + meter schedule ("whichever comes first") | Independent evaluation, no day/hour conversion; explicit `both` |
+| Run hours: current == trigger                                | `due_meter` true; `overdue_meter` false                         |
+| Run hours: current > trigger                                 | `overdue_meter` true (strict `>`); remaining negative           |
+| Run hours: current < trigger                                 | `remaining_meter` positive; not due/overdue                     |
+| Run hours decimal threshold (e.g. 127.4)                     | Decimal compare; no float rounding                              |
+| Run hours one-time complete (no interval)                    | Clears `next_due_meter_value`                                   |
+| Run hours complete with interval                             | `next_due = meter_value_at_completion + interval`; atomic       |
+| Run hours trigger behind current                             | `warnings[]`; still saveable                                    |
+| Run hours + `schedule_kind=both`                             | Accepted when explicit                                          |
+| Calendar + trigger without explicit meter/both               | Rejected; **no** silent `calendar`→`meter` promote              |
+| Blank / invalid / negative trigger                           | Rejected (blank ≠ 0)                                            |
+| Unlinked task + trigger                                      | Rejected                                                        |
+| `runtime_hours` asset in non-Equipment category              | Allowed (category not authoritative)                            |
+| Duplicate/retried completion                                 | Idempotent / safe replay                                        |
+| Lower-reading preview-and-confirm                            | Two-step flow, audit record                                     |
+| RanchBrain mapping report                                    | No auto-apply without approval                                  |
+| QR read without auth vs write with auth                      | Token ≠ authorization                                           |
 
 Test evidence (logs, API responses, DB snapshots) must be archived for operator review at Phase 2 gate.
 

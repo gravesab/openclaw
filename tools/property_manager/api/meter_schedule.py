@@ -49,10 +49,18 @@ def remaining_meter(current: Decimal | None, next_due: Decimal | None) -> Decima
     return decimal_to_db(next_due - current)
 
 
-def is_meter_overdue(current: Decimal | None, next_due: Decimal | None) -> bool:
+def is_meter_due(current: Decimal | None, next_due: Decimal | None) -> bool:
+    """True when current equals trigger (due now). Not overdue."""
     if current is None or next_due is None:
         return False
-    return current >= next_due
+    return current == next_due
+
+
+def is_meter_overdue(current: Decimal | None, next_due: Decimal | None) -> bool:
+    """True only when current is strictly greater than trigger."""
+    if current is None or next_due is None:
+        return False
+    return current > next_due
 
 
 def enrich_task_meter_fields(task: dict[str, Any], current_meter: Decimal | None) -> dict[str, Any]:
@@ -60,6 +68,7 @@ def enrich_task_meter_fields(task: dict[str, Any], current_meter: Decimal | None
     next_due_meter = _as_decimal(item.get("next_due_meter_value"))
     rem = remaining_meter(current_meter, next_due_meter)
     item["remaining_meter"] = format_decimal(rem) if rem is not None else None
+    item["due_meter"] = is_meter_due(current_meter, next_due_meter)
     item["overdue_meter"] = is_meter_overdue(current_meter, next_due_meter)
     return item
 
@@ -71,6 +80,151 @@ def _as_decimal(value: Any) -> Decimal | None:
         return parse_decimal(value)
     except ValueError:
         return None
+
+
+def parse_optional_meter_decimal(value: Any, *, field: str) -> Decimal | None:
+    """Parse optional meter decimal. Blank string is rejected (blank ≠ 0). None clears."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip() == "":
+        raise ValueError(f"{field} must be a decimal number (blank is not zero)")
+    parsed = parse_decimal(value, field=field)
+    if not parsed.is_finite():
+        raise ValueError(f"{field} must be a finite number")
+    if parsed < 0:
+        raise ValueError(f"{field} must be nonnegative")
+    return decimal_to_db(parsed)
+
+
+def parse_positive_delta(value: Any, *, field: str = "delta") -> Decimal:
+    """Parse hours/miles to add. Must be finite and strictly > 0 (blank ≠ 0)."""
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        raise ValueError(f"{field} is required")
+    parsed = parse_decimal(value, field=field)
+    if not parsed.is_finite():
+        raise ValueError(f"{field} must be a finite number")
+    if parsed <= 0:
+        raise ValueError(f"{field} must be greater than zero")
+    return decimal_to_db(parsed)
+
+
+def resolve_meter_reading_absolute(
+    asset_id: str,
+    *,
+    value: Any = None,
+    delta: Any = None,
+    add_value: Any = None,
+) -> tuple[Decimal, Decimal | None]:
+    """Resolve POST body to absolute reading value.
+
+    Accepts either ``value`` (absolute face) or ``delta`` (hours/miles since last).
+    ``add_value`` is rejected — use ``delta``. Returns (absolute, delta_applied).
+    """
+    if add_value is not None and add_value != "":
+        raise ValueError("add_value is not supported; use delta")
+
+    has_value = value is not None and not (isinstance(value, str) and value.strip() == "")
+    has_delta = delta is not None and not (isinstance(delta, str) and delta.strip() == "")
+
+    if has_value and has_delta:
+        raise ValueError("provide either value (absolute) or delta, not both")
+    if not has_value and not has_delta:
+        raise ValueError("value or delta is required")
+
+    if has_delta:
+        delta_dec = parse_positive_delta(delta, field="delta")
+        meter = fetch_meter_row(asset_id)
+        if meter is None:
+            raise ValueError("asset_meter not found")
+        current = _as_decimal(meter.get("current_value")) or Decimal("0")
+        absolute = decimal_to_db(current + delta_dec)
+        return absolute, delta_dec
+
+    absolute = parse_decimal(value, field="value")
+    if not absolute.is_finite():
+        raise ValueError("value must be a finite number")
+    return decimal_to_db(absolute), None
+
+
+_TRIGGER_UNITS_BY_METER_TYPE: dict[str, set[str]] = {
+    "runtime_hours": {"hrs", "hours", "hr", "h"},
+    "mileage": {"mi", "mile", "miles"},
+}
+_CANONICAL_UNIT_BY_METER_TYPE: dict[str, str] = {
+    "runtime_hours": "hrs",
+    "mileage": "mi",
+}
+
+
+def validate_meter_trigger(
+    *,
+    asset_id: Any,
+    schedule_kind: str,
+    next_due_meter: Decimal,
+    meter_interval_unit: str | None = None,
+    expected_meter_type: str | None = None,
+) -> list[str]:
+    """Validate absolute meter trigger for activated runtime_hours or mileage meters.
+
+    Returns warnings (non-fatal). Raises ValueError on reject.
+    Controlling rule: linked asset meter_type (not task category).
+    """
+    if asset_id is None or str(asset_id).strip() == "":
+        raise ValueError("asset_id is required when next_due_meter_value is set")
+    kind = (schedule_kind or "").strip().lower()
+    if kind not in {"meter", "both"}:
+        raise ValueError(
+            "schedule_kind must be 'meter' or 'both' when next_due_meter_value is set "
+            "(silent calendar→meter promotion is forbidden)"
+        )
+
+    aid = str(asset_id).strip()
+    if not meter_is_active(aid):
+        raise ValueError("linked asset meter must be activated before setting a meter trigger")
+    meter = fetch_meter_row(aid)
+    if meter is None:
+        raise ValueError("linked asset has no meter row")
+    meter_type = str(meter.get("meter_type") or "")
+    if expected_meter_type is not None and meter_type != expected_meter_type:
+        raise ValueError(f"linked asset meter_type must be {expected_meter_type}")
+    if meter_type not in _TRIGGER_UNITS_BY_METER_TYPE:
+        raise ValueError(
+            "linked asset meter_type must be runtime_hours or mileage when setting a meter trigger"
+        )
+
+    allowed_units = _TRIGGER_UNITS_BY_METER_TYPE[meter_type]
+    canonical = _CANONICAL_UNIT_BY_METER_TYPE[meter_type]
+    unit = (meter_interval_unit or canonical).strip().lower()
+    if unit not in allowed_units:
+        raise ValueError(
+            f"meter_interval_unit must be {canonical} for {meter_type} triggers (got {unit!r})"
+        )
+
+    warnings: list[str] = []
+    current = _as_decimal(meter.get("current_value"))
+    if current is not None and next_due_meter < current:
+        warnings.append(
+            f"next_due_meter_value ({format_decimal(next_due_meter)}) is behind "
+            f"current meter ({format_decimal(current)})"
+        )
+    return warnings
+
+
+def validate_run_hours_trigger(
+    *,
+    asset_id: Any,
+    schedule_kind: str,
+    next_due_meter: Decimal,
+    meter_interval_unit: str | None = None,
+) -> list[str]:
+    """Validate absolute run-hours trigger. Returns warnings (non-fatal). Raises ValueError on reject."""
+    return validate_meter_trigger(
+        asset_id=asset_id,
+        schedule_kind=schedule_kind,
+        next_due_meter=next_due_meter,
+        meter_interval_unit=meter_interval_unit,
+        expected_meter_type="runtime_hours",
+    )
 
 
 def fetch_meter_row(asset_id: str, *, for_update: bool = False) -> dict[str, Any] | None:
@@ -156,36 +310,16 @@ def activate_meter(
 
 
 def recalc_tasks_for_asset(asset_id: str, current_meter: Decimal | None) -> list[dict[str, Any]]:
-    tasks = pm_db.execute_json(
-        """
-        SELECT id, schedule_kind, meter_interval_value, last_done_meter_value, next_due_meter_value
-        FROM propertymanager.maintenance_tasks
-        WHERE is_active = true
-          AND asset_id = %s
-          AND schedule_kind IN ('meter', 'both')
-        """,
-        (asset_id,),
-    )
-    updated: list[dict[str, Any]] = []
-    for task in tasks:
-        interval = _as_decimal(task.get("meter_interval_value"))
-        if interval is None or interval <= 0:
-            continue
-        last_done = _as_decimal(task.get("last_done_meter_value"))
-        if last_done is None:
-            last_done = current_meter if current_meter is not None else Decimal("0")
-        next_due = decimal_to_db(last_done + interval)
-        pm_db.execute(
-            """
-            UPDATE propertymanager.maintenance_tasks
-            SET next_due_meter_value = %s,
-                updated_at = now()
-            WHERE id = %s
-            """,
-            (next_due, str(task["id"])),
-        )
-        updated.append({"id": str(task["id"]), "next_due_meter_value": format_decimal(next_due)})
-    return updated
+    """No-op for absolute meter triggers.
+
+    Corrected contract: `next_due_meter_value` is an operator-authored absolute
+    trigger. Due/overdue/remaining are enrichment against `current_meter`.
+    Advancement happens only on completion (`meter_at_completion + interval` or
+    clear when one-time). Never rewrite triggers from current+interval here —
+    that destroyed guide first-due values (e.g. belts at 60k with 15k interval).
+    """
+    _ = (asset_id, current_meter)
+    return []
 
 
 def _latest_accepted_in_epoch(asset_id: str, epoch: int) -> dict[str, Any] | None:
@@ -565,6 +699,8 @@ def complete_task_meter(
     schedule_kind = task.get("schedule_kind") or "calendar"
     reading_id = None
     meter_val: Decimal | None = None
+    next_due_meter: Decimal | None = None
+    cleared_one_time = False
 
     if asset_id and schedule_kind in {"meter", "both"}:
         meter_row = fetch_meter_row(str(asset_id))
@@ -593,19 +729,20 @@ def complete_task_meter(
                 raise ValueError("lower reading at completion requires preview/confirm flow first")
             reading_id = result.get("reading_id")
             interval = _as_decimal(task.get("meter_interval_value"))
-            next_due_meter = decimal_to_db(meter_val + interval) if interval else None
-            pm_db.execute(
-                """
-                UPDATE propertymanager.maintenance_tasks
-                SET last_done_meter_value = %s,
-                    next_due_meter_value = %s,
-                    updated_at = now()
-                WHERE id = %s
-                """,
-                (decimal_to_db(meter_val), next_due_meter, task_id),
-            )
+            if interval is not None and interval > 0:
+                next_due_meter = decimal_to_db(meter_val + interval)
+            else:
+                # One-time trigger: clear absolute due threshold.
+                next_due_meter = None
+                cleared_one_time = True
+
     return {
         "asset_id": str(asset_id) if asset_id else None,
         "meter_reading_id": reading_id,
         "meter_value": format_decimal(meter_val) if meter_val is not None else None,
+        "meter_value_decimal": meter_val,
+        "next_due_meter_value": next_due_meter,
+        "cleared_one_time": cleared_one_time,
+        "schedule_kind": schedule_kind,
+        "applied_meter": bool(asset_id and schedule_kind in {"meter", "both"} and meter_val is not None),
     }

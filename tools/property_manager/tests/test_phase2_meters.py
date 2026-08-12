@@ -59,9 +59,16 @@ def test_meter_readings_paginated(asset_id: str) -> None:
     assert isinstance(page["items"], list), page
 
 
-def test_parse_meter_text() -> None:
-    status, result = _req("POST", "/v1/meter-readings/parse", {"text": "mower 42.5 hours"})
+def test_parse_meter_text(asset_id: str) -> None:
+    status, asset = _req("GET", f"/v1/assets/{asset_id}")
+    assert status == 200, asset
+    status, result = _req(
+        "POST",
+        "/v1/meter-readings/parse",
+        {"text": f"{asset['name']} 42.5 hours"},
+    )
     assert status == 200, result
+    assert result.get("asset_id") == asset_id, result
     assert "value" in result, result
 
 
@@ -127,7 +134,7 @@ def main() -> int:
     print("  OK activate-meter (proposed → active)")
     test_meter_readings_paginated(asset_id)
     print("  OK paginated meter-readings (items[])")
-    test_parse_meter_text()
+    test_parse_meter_text(asset_id)
     print("  OK POST /v1/meter-readings/parse")
     # Seed a high reading before lower-reading test on activate-meter asset
     status, _ = _req("POST", f"/v1/assets/{asset_id}/meter-readings", {"value": "200", "entry_method": "api"})

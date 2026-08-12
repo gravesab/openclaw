@@ -404,6 +404,112 @@ public struct ErrorShape: Codable, Sendable {
     }
 }
 
+public struct AiExecuteParams: Codable, Sendable {
+    public let componentid: String
+    public let prompt: String
+    public let requestid: String?
+    public let systemprompt: String?
+    public let timeoutseconds: Double?
+
+    public init(
+        componentid: String,
+        prompt: String,
+        requestid: String?,
+        systemprompt: String?,
+        timeoutseconds: Double?)
+    {
+        self.componentid = componentid
+        self.prompt = prompt
+        self.requestid = requestid
+        self.systemprompt = systemprompt
+        self.timeoutseconds = timeoutseconds
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case componentid = "componentId"
+        case prompt
+        case requestid = "requestId"
+        case systemprompt = "systemPrompt"
+        case timeoutseconds = "timeoutSeconds"
+    }
+}
+
+public struct AiExecutionAttempt: Codable, Sendable {
+    public let providername: String
+    public let modelid: String
+    public let status: AnyCodable
+    public let startedat: String
+    public let finishedat: String
+    public let durationms: Int
+    public let errortype: AnyCodable
+    public let errormessage: AnyCodable
+
+    public init(
+        providername: String,
+        modelid: String,
+        status: AnyCodable,
+        startedat: String,
+        finishedat: String,
+        durationms: Int,
+        errortype: AnyCodable,
+        errormessage: AnyCodable)
+    {
+        self.providername = providername
+        self.modelid = modelid
+        self.status = status
+        self.startedat = startedat
+        self.finishedat = finishedat
+        self.durationms = durationms
+        self.errortype = errortype
+        self.errormessage = errormessage
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case providername = "providerName"
+        case modelid = "modelId"
+        case status
+        case startedat = "startedAt"
+        case finishedat = "finishedAt"
+        case durationms = "durationMs"
+        case errortype = "errorType"
+        case errormessage = "errorMessage"
+    }
+}
+
+public struct AiExecuteResult: Codable, Sendable {
+    public let requestid: String
+    public let componentid: String
+    public let status: AnyCodable
+    public let content: AnyCodable
+    public let selectedmodelid: AnyCodable
+    public let attempts: [AiExecutionAttempt]
+
+    public init(
+        requestid: String,
+        componentid: String,
+        status: AnyCodable,
+        content: AnyCodable,
+        selectedmodelid: AnyCodable,
+        attempts: [AiExecutionAttempt])
+    {
+        self.requestid = requestid
+        self.componentid = componentid
+        self.status = status
+        self.content = content
+        self.selectedmodelid = selectedmodelid
+        self.attempts = attempts
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case requestid = "requestId"
+        case componentid = "componentId"
+        case status
+        case content
+        case selectedmodelid = "selectedModelId"
+        case attempts
+    }
+}
+
 public struct EnvironmentSummary: Codable, Sendable {
     public let id: String
     public let type: String

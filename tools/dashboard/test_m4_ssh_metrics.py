@@ -8,6 +8,11 @@ from tools.dashboard.test_scorecard_approval import dashboard
 
 
 class M4SshMetricsTests(unittest.TestCase):
+    def test_default_key_path_is_dedicated_to_metrics(self):
+        self.assertTrue(
+            dashboard.M4_SSH_KEY.endswith("/.ssh/openclaw_m4_metrics_ed25519")
+        )
+
     def test_missing_key_is_reported_as_credentials_not_configured(self):
         result = dashboard.classify_m4_ssh_metrics_error(
             FileNotFoundError("/missing/key"),

@@ -200,25 +200,18 @@ def patch_editor_and_row(text: str) -> str:
                 }
 """
     if "Due when meter reaches" not in text:
-        anchor = """                    Button("Recalculate Next Due") {
-                        task.nextDue = Calendar.current.date(byAdding: .day, value: task.warningDays, to: task.lastDone) ?? task.lastDone
+        # Prefer frequency-based Recalculate (see patch_mac_recalculate_next_due.py).
+        # Fall back to legacy warningDays button so this deprecated patch still anchors.
+        new_btn = """                    Button("Recalculate Next Due") {
+                        task.nextDue = task.frequency.nextDue(after: task.lastDone)
                     }
                     .fixedSize()
-                    .help("Set Next Due to Last Done plus Warning Days")
+                    .help("Set Next Due to Last Done plus Frequency interval")
 
                     Spacer(minLength: 0)
                 }
-            }
-        }
-    }
-
-    var responseCard: some View {
 """
-        if anchor not in text:
-            raise SystemExit("missing TaskEditor schedule anchor")
-        text = text.replace(
-            anchor,
-            """                    Button("Recalculate Next Due") {
+        old_btn = """                    Button("Recalculate Next Due") {
                         task.nextDue = Calendar.current.date(byAdding: .day, value: task.warningDays, to: task.lastDone) ?? task.lastDone
                     }
                     .fixedSize()
@@ -227,16 +220,33 @@ def patch_editor_and_row(text: str) -> str:
                     Spacer(minLength: 0)
                 }
 """
-            + ui_block
-            + """
-            }
+        tail = """            }
         }
     }
 
     var responseCard: some View {
-""",
-            1,
-        )
+"""
+        if new_btn + "            }\n        }\n    }\n\n    var responseCard: some View {\n" in text or (
+            new_btn in text and "Due when meter reaches" not in text
+        ):
+            anchor = new_btn + "            }\n        }\n    }\n\n    var responseCard: some View {\n"
+            if anchor not in text:
+                # scheduleCard may already have only the button+spacer before responseCard
+                raise SystemExit("missing TaskEditor schedule anchor (frequency button)")
+            text = text.replace(
+                anchor,
+                new_btn + ui_block + "\n" + tail,
+                1,
+            )
+        else:
+            anchor = old_btn + "            }\n        }\n    }\n\n    var responseCard: some View {\n"
+            if anchor not in text:
+                raise SystemExit("missing TaskEditor schedule anchor")
+            text = text.replace(
+                anchor,
+                new_btn + ui_block + "\n" + tail,
+                1,
+            )
         print("patched: TaskEditor run hours UI")
     else:
         print("skip (already): TaskEditor run hours UI")

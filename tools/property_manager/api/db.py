@@ -418,55 +418,6 @@ def execute(query: str, params: Any = None) -> int:
     return 0
 
 
-def execute_script(statements: list[tuple[str, Any]]) -> None:
-    """Run multiple statements as one BEGIN…COMMIT via a single docker exec.
-
-    Each docker `psql -c` is otherwise autocommit; wrapping in one script is the
-    only real atomicity available when TCP password is unset.
-    """
-    if not statements:
-        return
-    parts = ["BEGIN"]
-    for query, params in statements:
-        parts.append(_mogrify(query, params))
-    parts.append("COMMIT")
-    sql = ";\n".join(parts) + ";"
-
-    if use_docker():
-        result = subprocess.run(
-            [
-                "docker",
-                "exec",
-                "-i",
-                DOCKER_CONTAINER,
-                "psql",
-                "-U",
-                DB_CONFIG["user"],
-                "-d",
-                DB_CONFIG["dbname"],
-                "-v",
-                "ON_ERROR_STOP=1",
-                "-At",
-                "-c",
-                sql,
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "psql transaction failed")
-        return
-
-    import psycopg2
-
-    with psycopg2.connect(**DB_CONFIG) as conn:
-        with conn.cursor() as cur:
-            for query, params in statements:
-                cur.execute(query, params)
-        conn.commit()
-
-
 def connect():
     if use_docker():
         return DockerConnection()

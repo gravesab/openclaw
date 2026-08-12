@@ -2,6 +2,7 @@ import SwiftUI
 
 struct AssetDetailView: View {
     @EnvironmentObject private var store: PropertyStore
+    @Environment(\.dismiss) private var dismiss
     let assetId: UUID
 
     @State private var asset: RanchAsset?
@@ -10,6 +11,8 @@ struct AssetDetailView: View {
     @State private var showVoiceSheet = false
     @State private var editingTask: AssetTaskSummary?
     @State private var isActivating = false
+    @State private var isDeactivating = false
+    @State private var showDeactivateConfirm = false
     @State private var errorMessage: String?
 
     var body: some View {
@@ -22,6 +25,7 @@ struct AssetDetailView: View {
                     meterCard(asset)
                     serviceCard(asset)
                     historyCard
+                    deactivateCard
                 } else {
                     ProgressView()
                 }
@@ -30,6 +34,14 @@ struct AssetDetailView: View {
         }
         .navigationTitle(asset?.name ?? "Asset")
         .toolbar {
+            ToolbarItem(placement: .destructiveAction) {
+                if asset != nil {
+                    Button("Deactivate", role: .destructive) {
+                        showDeactivateConfirm = true
+                    }
+                    .disabled(isDeactivating)
+                }
+            }
             if asset?.meter?.hasMeter == true {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
@@ -58,6 +70,18 @@ struct AssetDetailView: View {
                 Task { await loadReadings() }
             }
         }
+        .confirmationDialog(
+            "Deactivate \(asset?.name ?? "asset")?",
+            isPresented: $showDeactivateConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Deactivate", role: .destructive) {
+                Task { await deactivate() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This hides the asset from lists. Meter history is kept and it can be reactivated later from the API or a future Reactivate UI.")
+        }
         .alert("Error", isPresented: Binding(
             get: { errorMessage != nil },
             set: { if !$0 { errorMessage = nil } }
@@ -69,6 +93,23 @@ struct AssetDetailView: View {
         .task {
             await loadAsset()
         }
+    }
+
+    @ViewBuilder
+    private var deactivateCard: some View {
+        Button(role: .destructive) {
+            showDeactivateConfirm = true
+        } label: {
+            if isDeactivating {
+                ProgressView()
+                    .frame(maxWidth: .infinity)
+            } else {
+                Text("Remove from list")
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .buttonStyle(.bordered)
+        .disabled(isDeactivating)
     }
 
     @ViewBuilder
@@ -180,7 +221,7 @@ struct AssetDetailView: View {
             RunHoursTriggerSheet(
                 taskID: task.id,
                 taskTitle: task.item,
-                assetID: full?.assetId ?? asset?.id,
+                assetID: full?.assetId ?? asset.id,
                 currentScheduleKind: full?.scheduleKind ?? task.scheduleKind,
                 calendarIsMeaningful: full.map { $0.warningDays > 0 } ?? true,
                 initialTrigger: full?.nextDueMeterValue ?? task.nextDueMeterValue,
@@ -249,6 +290,18 @@ struct AssetDetailView: View {
             await store.refreshAssets()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func deactivate() async {
+        isDeactivating = true
+        defer { isDeactivating = false }
+        let ok = await store.deactivateAsset(id: assetId)
+        if ok {
+            await store.refreshAssets()
+            dismiss()
+        } else if let message = store.errorMessage {
+            errorMessage = message
         }
     }
 

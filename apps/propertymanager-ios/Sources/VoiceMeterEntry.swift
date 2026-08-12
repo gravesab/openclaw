@@ -26,7 +26,7 @@ struct VoiceMeterEntrySheet: View {
                 Text("Say something like:")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                Text("\"The DR mower now has 127.4 hours.\"")
+                Text("\"The DR mower now has 127.4 hours.\"\nor \"Add 2.5 hours on the DR mower.\"")
                     .font(.subheadline)
 
                 TextEditor(text: $transcript)
@@ -44,7 +44,11 @@ struct VoiceMeterEntrySheet: View {
                 if let parseResult {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Matched: \(parseResult.assetName ?? "Asset")")
-                        Text("Value: \(parseResult.value, specifier: "%.1f") \(parseResult.unit ?? "")")
+                        if let delta = parseResult.delta {
+                            Text("Add: \(delta, specifier: "%.1f") \(parseResult.unit ?? "")")
+                        } else if let value = parseResult.value {
+                            Text("Value: \(value, specifier: "%.1f") \(parseResult.unit ?? "")")
+                        }
                     }
                     .font(.subheadline)
                 }
@@ -88,7 +92,12 @@ struct VoiceMeterEntrySheet: View {
         isSaving = true
         defer { isSaving = false }
         do {
-            let result = parseResult ?? (try await store.client.parseMeterText(transcript))
+            let result: MeterParseResult
+            if let existing = parseResult {
+                result = existing
+            } else {
+                result = try await store.client.parseMeterText(transcript)
+            }
             parseResult = result
 
             if let preview = pendingPreview {
@@ -101,12 +110,25 @@ struct VoiceMeterEntrySheet: View {
                 onSaved(updated)
                 dismiss()
             } else {
-                let updated = try await store.client.submitMeterReading(
-                    assetId: result.assetId,
-                    value: result.value,
-                    note: transcript,
-                    entryMethod: "voice"
-                )
+                let updated: RanchAsset
+                if let delta = result.delta {
+                    updated = try await store.client.submitMeterReading(
+                        assetId: result.assetId,
+                        delta: delta,
+                        note: transcript,
+                        entryMethod: "voice"
+                    )
+                } else if let value = result.value {
+                    updated = try await store.client.submitMeterReading(
+                        assetId: result.assetId,
+                        value: value,
+                        note: transcript,
+                        entryMethod: "voice"
+                    )
+                } else {
+                    errorMessage = "Parse result missing value or delta."
+                    return
+                }
                 onSaved(updated)
                 dismiss()
             }

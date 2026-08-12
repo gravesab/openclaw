@@ -1,7 +1,25 @@
 import type { ImageMetadata } from "openclaw/plugin-sdk/media-runtime";
-import type sharpImport from "sharp";
 
-type SharpFactory = typeof sharpImport;
+type SharpInputOptions = {
+  failOn?: "none" | "truncated" | "error" | "warning";
+  limitInputPixels?: number | boolean;
+};
+
+type SharpPipeline = {
+  metadata(): Promise<{ width?: number; height?: number; hasAlpha?: boolean; channels?: number }>;
+  rotate(): SharpPipeline;
+  resize(options: {
+    width: number;
+    height: number;
+    fit: "inside";
+    withoutEnlargement: boolean;
+  }): SharpPipeline;
+  jpeg(options: { quality: number; mozjpeg: boolean }): SharpPipeline;
+  png(options: { compressionLevel: number }): SharpPipeline;
+  toBuffer(): Promise<Buffer>;
+};
+
+type SharpFactory = (buffer: Buffer, options?: SharpInputOptions) => SharpPipeline;
 
 type ResizeToJpegParams = {
   buffer: Buffer;
@@ -48,7 +66,7 @@ async function loadSharp(maxInputPixels: number): Promise<SharpFactory> {
         return ((buffer, options) =>
           sharp(buffer, {
             ...options,
-            failOnError: false,
+            failOn: "none",
             limitInputPixels: maxInputPixels,
           })) as SharpFactory;
       })

@@ -13,6 +13,7 @@ final class PropertyStore: ObservableObject {
     @Published var assets: [RanchAsset] = []
     @Published var deepLinkAssetId: UUID?
     @Published var filter: TaskFilter = .all
+    @Published var originFilter: OriginFilter = .all
     @Published var selectedCategory: String = "All"
     @Published var searchText: String = ""
     @Published var isLoading = false
@@ -41,6 +42,9 @@ final class PropertyStore: ObservableObject {
                 if selectedCategory != "All", task.categoryName != selectedCategory {
                     return false
                 }
+                if let wanted = originFilter.matches, task.origin != wanted {
+                    return false
+                }
                 switch filter {
                 case .all:
                     break
@@ -61,9 +65,13 @@ final class PropertyStore: ObservableObject {
                 }
                 if !searchText.isEmpty {
                     let needle = searchText.lowercased()
+                    let group = TaskTitle.displayAssetName(task: task, assets: assets)
+                    let display = TaskTitle.displayItemTitle(item: task.item, group: group)
                     let haystack = [
                         task.area,
                         task.item,
+                        group,
+                        display,
                         task.categoryName,
                         task.priority,
                         task.notes ?? "",
@@ -72,6 +80,9 @@ final class PropertyStore: ObservableObject {
                         task.vendor ?? "",
                         task.suppliesNeeded ?? "",
                         task.primaryPartNumber ?? "",
+                        task.origin.label,
+                        task.manufacturer ?? "",
+                        task.sourceManualName ?? "",
                     ].joined(separator: " ").lowercased()
                     if !haystack.contains(needle) {
                         return false
@@ -79,11 +90,24 @@ final class PropertyStore: ObservableObject {
                 }
                 return true
             }
-            .sorted { lhs, rhs in
-                if lhs.dueStatus.sortRank != rhs.dueStatus.sortRank {
-                    return lhs.dueStatus.sortRank < rhs.dueStatus.sortRank
+    }
+
+    /// Sections by asset name (or area), A–Z; within section display title A–Z.
+    var groupedTasks: [TaskGroupSection] {
+        let filtered = filteredTasks
+        var buckets: [String: [MaintenanceTask]] = [:]
+        for task in filtered {
+            let key = TaskTitle.displayAssetName(task: task, assets: assets)
+            buckets[key, default: []].append(task)
+        }
+        return buckets.keys.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .map { name in
+                let sortedTasks = (buckets[name] ?? []).sorted { lhs, rhs in
+                    let l = TaskTitle.displayItemTitle(item: lhs.item, group: name)
+                    let r = TaskTitle.displayItemTitle(item: rhs.item, group: name)
+                    return l.localizedCaseInsensitiveCompare(r) == .orderedAscending
                 }
-                return lhs.nextDue < rhs.nextDue
+                return TaskGroupSection(name: name, tasks: sortedTasks)
             }
     }
 
@@ -103,10 +127,46 @@ final class PropertyStore: ObservableObject {
         }.count
     }
 
-    func refresh() async {
+    func activeTaskCount(inCategoryNamed name: String) -> Int {
+        tasks.filter { $0.categoryName.caseInsensitiveCompare(name) == .orderedSame && $0.isActive }.count
+    }
+
+    func destinationCategories(excluding name: String) -> [MaintenanceCategory] {
+        categories
+            .filter { $0.name.caseInsensitiveCompare(name) != .orderedSame }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func testConnection() async {
+        errorMessage = nil
+        statusMessage = "Testing connection…"
+        do {
+            let health = try await client.health()
+            // Refresh without wiping the connection probe message until the end.
+            await refresh(clearStatus: false)
+            if errorMessage != nil {
+                statusMessage = nil
+                return
+            }
+            await refreshAssets(clearStatus: false)
+            if errorMessage != nil {
+                statusMessage = nil
+                return
+            }
+            let label = health.status ?? "ok"
+            statusMessage = "Online — \(label) · \(tasks.count) tasks, \(assets.count) assets"
+        } catch {
+            statusMessage = nil
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func refresh(clearStatus: Bool = true) async {
         isLoading = true
         errorMessage = nil
-        statusMessage = nil
+        if clearStatus {
+            statusMessage = nil
+        }
         defer { isLoading = false }
 
         do {
@@ -120,11 +180,20 @@ final class PropertyStore: ObservableObject {
         }
     }
 
-    func refreshAssets() async {
+    func refreshAssets(clearStatus: Bool = true) async {
         isLoadingAssets = true
+        if clearStatus {
+            errorMessage = nil
+        }
         defer { isLoadingAssets = false }
         do {
             assets = try await client.fetchAssets()
+            if statusMessage == nil
+                || statusMessage?.hasPrefix("Updated") == true
+                || statusMessage?.hasPrefix("Testing") == true
+            {
+                statusMessage = "Updated \(tasks.count) tasks, \(assets.count) assets"
+            }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -197,9 +266,41 @@ final class PropertyStore: ObservableObject {
 
     func delete(task: MaintenanceTask) async -> Bool {
         do {
-            try await client.deleteTask(id: task.id)
+            _ = try await client.deleteTask(id: task.id)
             tasks.removeAll { $0.id == task.id }
             statusMessage = "Deleted \(task.area) / \(task.item)"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Soft-deactivate: hides from lists; meter history remains on the server.
+    func deactivateAsset(id: UUID) async -> Bool {
+        do {
+            try await client.deactivateAsset(id: id)
+            assets.removeAll { $0.id == id }
+            statusMessage = "Deactivated asset"
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func deleteCategory(_ category: MaintenanceCategory, reassignTo: String? = nil) async -> Bool {
+        do {
+            _ = try await client.deleteCategory(id: category.id, reassignTo: reassignTo)
+            categories.removeAll { $0.id == category.id }
+            if let reassignTo {
+                for index in tasks.indices where tasks[index].categoryName.caseInsensitiveCompare(category.name) == .orderedSame {
+                    tasks[index].categoryName = reassignTo
+                }
+            } else {
+                tasks.removeAll { $0.categoryName.caseInsensitiveCompare(category.name) == .orderedSame }
+            }
+            statusMessage = "Deleted category \(category.name)"
             return true
         } catch {
             errorMessage = error.localizedDescription

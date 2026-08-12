@@ -14,7 +14,7 @@ source_document: "HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md"
 
 This paper defines a direction for making ChatGPT useful, understandable, and trustworthy across ranch operations, health, finances, energy, and institutional knowledge.
 
-Status: Proposed design baseline
+Status: Proposed design baseline  
 Date: August 2, 2026
 
 ## Executive summary
@@ -136,18 +136,18 @@ Energy should combine consumption, generation, cost, and equipment context. The 
 
 ## 7. Requirements for ChatGPT to implement
 
-| ID   | Requirement             | Required behavior                                                                                          | Acceptance signal                                                                                 |
-| ---- | ----------------------- | ---------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| F-01 | Unified capture         | One Ask or Add control accepts text, voice, files, images, and structured entries from every domain.       | A new item is captured in two interactions or fewer and lands in Inbox with editable suggestions. |
-| F-02 | Plain-language status   | Summarize system outcomes and impact before routing or infrastructure details.                             | A nontechnical user can state whether action is required without Technical details.               |
-| F-03 | Explicit data states    | Distinguish missing, stale, disconnected, processing, and error states from measured zero.                 | No chart displays zero for absent or failed data; state and last-updated time are visible.        |
-| F-04 | Knowledge lifecycle     | Support capture, classification, review, approval, supersession, archive, provenance, and version history. | Every Ranch Brain fact links to source, approver, date, and prior versions.                       |
-| F-05 | Domain clarity          | Use user-facing domains and eliminate unexplained repository names.                                        | Every item has one primary domain; cross-links do not create conflicting copies.                  |
-| F-06 | Health ingestion        | Provide manual, document, import, and connector paths with units and source labels.                        | Imported and manual readings are distinguishable, editable, and exportable.                       |
-| F-07 | Financial ledger        | Support accounts, transactions, reconciliation, liabilities, net worth, tax tags, and evidence.            | Net worth is reproducible from balances; totals expose date and inclusion rules.                  |
-| F-08 | Energy tracking         | Support readings, bills, generation, tariffs, costs, and equipment associations.                           | Every value exposes source and state; anomalies link to underlying readings.                      |
-| F-09 | Privacy and permissions | Provide domain-level access, connector consent, audit history, export, and deletion.                       | A user can see access history and revoke future access.                                           |
-| F-10 | Reversible AI actions   | Preview consequential classifications, approvals, merges, and corrections.                                 | The user can inspect and undo each AI-assisted change without data loss.                          |
+| ID | Requirement | Required behavior | Acceptance signal |
+| --- | --- | --- | --- |
+| F-01 | Unified capture | One Ask or Add control accepts text, voice, files, images, and structured entries from every domain. | A new item is captured in two interactions or fewer and lands in Inbox with editable suggestions. |
+| F-02 | Plain-language status | Summarize system outcomes and impact before routing or infrastructure details. | A nontechnical user can state whether action is required without Technical details. |
+| F-03 | Explicit data states | Distinguish missing, stale, disconnected, processing, and error states from measured zero. | No chart displays zero for absent or failed data; state and last-updated time are visible. |
+| F-04 | Knowledge lifecycle | Support capture, classification, review, approval, supersession, archive, provenance, and version history. | Every Ranch Brain fact links to source, approver, date, and prior versions. |
+| F-05 | Domain clarity | Use user-facing domains and eliminate unexplained repository names. | Every item has one primary domain; cross-links do not create conflicting copies. |
+| F-06 | Health ingestion | Provide manual, document, import, and connector paths with units and source labels. | Imported and manual readings are distinguishable, editable, and exportable. |
+| F-07 | Financial ledger | Support accounts, transactions, reconciliation, liabilities, net worth, tax tags, and evidence. | Net worth is reproducible from balances; totals expose date and inclusion rules. |
+| F-08 | Energy tracking | Support readings, bills, generation, tariffs, costs, and equipment associations. | Every value exposes source and state; anomalies link to underlying readings. |
+| F-09 | Privacy and permissions | Provide domain-level access, connector consent, audit history, export, and deletion. | A user can see access history and revoke future access. |
+| F-10 | Reversible AI actions | Preview consequential classifications, approvals, merges, and corrections. | The user can inspect and undo each AI-assisted change without data loss. |
 
 ## 8. Dashboard and visualization rules
 

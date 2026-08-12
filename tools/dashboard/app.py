@@ -54,7 +54,7 @@ M4_SSH_HOST = os.environ.get("OPENCLAW_M4_SSH_HOST", "192.168.50.117")
 M4_SSH_USER = os.environ.get("OPENCLAW_M4_SSH_USER", "andrewgraves")
 M4_SSH_KEY = os.environ.get(
     "OPENCLAW_M4_SSH_KEY",
-    str(Path.home() / ".ssh/openclaw_dev_backup_ed25519"),
+    str(Path.home() / ".ssh/openclaw_m4_metrics_ed25519"),
 )
 INTELMINI_STORAGE_HOST = os.environ.get(
     "OPENCLAW_INTELMINI_STORAGE_HOST",
@@ -906,6 +906,7 @@ def build_system_health():
     checks.append(
         check_service(
             "OpenClaw Gateway",
+            "XDG_RUNTIME_DIR=/run/user/$(id -u) "
             "systemctl --user is-active openclaw-gateway.service",
             "User service",
         )
@@ -914,8 +915,8 @@ def build_system_health():
     checks.append(
         check_service(
             "OpenClaw Listener",
-            "systemctl --user is-active openclaw-listener.service",
-            "User service",
+            "systemctl is-active openclaw-listener.service",
+            "System service",
         )
     )
 

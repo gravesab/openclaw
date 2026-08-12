@@ -651,6 +651,9 @@ export function applyBaileysEncryptedStreamFinishHotfix(params = {}) {
       ) ||
       patchedText.includes(
         "...(typeof agent?.dispatch === 'function' ? { dispatcher: agent } : {}),",
+      ) ||
+      patchedText.includes(
+        "const dispatcher = typeof agent?.dispatch === 'function' ? agent : undefined;",
       );
     const legacyDispatcherPatchable =
       patchedText.includes(BAILEYS_MEDIA_DISPATCHER_NEEDLE) &&

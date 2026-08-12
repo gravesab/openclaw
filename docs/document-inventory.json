@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-12T19:01:04.441319+00:00",
-  "source_fingerprint": "ad24d43d2c6738ee1aa49aa68e4fa0d5525e00cc950b68386142e8902693a807",
+  "generated_at": "2026-08-12T19:02:08.650062+00:00",
+  "source_fingerprint": "ae34759c206684bc56558359b48e8af3f50f04d6a3ee66f5d79d84f38b0b5f02",
   "document_count": 680,
   "documents": [
     {
@@ -2536,8 +2536,8 @@
       "last_reviewed": "2026-08-03",
       "category": "Governance",
       "metadata_present": true,
-      "size_bytes": 5899,
-      "modified_epoch": 1786560855
+      "size_bytes": 5893,
+      "modified_epoch": 1786561300
     },
     {
       "path": "docs/foundation/FOUNDATIONAL_DOCUMENTS.md",

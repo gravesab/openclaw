@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import redis
 import psycopg2
 from datetime import datetime
@@ -18,6 +19,13 @@ DB = {
     "password": os.environ.get("OPENCLAW_DB_PASSWORD"),
 }
 
+DOCKER_CONTAINER = os.environ.get("OPENCLAW_DB_CONTAINER", "postgres")
+USE_DOCKER = os.environ.get("OPENCLAW_DB_VIA_DOCKER", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+}
+
 def get_recent_events():
     raw = r.lrange("openclaw:events", 0, 10)
     events = []
@@ -31,6 +39,36 @@ def get_recent_events():
     return events
 
 def get_recent_memories():
+    if USE_DOCKER:
+        sql = """
+            SELECT COALESCE(json_agg(row_to_json(memory_rows)), '[]'::json)::text
+            FROM (
+                SELECT agent_name, category, LEFT(content, 600) AS content, created_at
+                FROM long_term_memory
+                WHERE category != 'gmail_summary'
+                ORDER BY created_at DESC
+                LIMIT 5
+            ) AS memory_rows
+        """
+        result = subprocess.run(
+            [
+                "docker",
+                "exec",
+                DOCKER_CONTAINER,
+                "psql",
+                "-U",
+                DB["user"],
+                "-d",
+                DB["dbname"],
+                "-Atqc",
+                sql,
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return json.loads(result.stdout.strip() or "[]")
+
     conn = psycopg2.connect(**DB)
     cur = conn.cursor()
 
@@ -47,43 +85,57 @@ def get_recent_memories():
     cur.close()
     conn.close()
 
-    return rows
+    return [
+        {
+            "agent_name": row[0],
+            "category": row[1],
+            "content": row[2],
+            "created_at": row[3],
+        }
+        for row in rows
+    ]
 
-print("=" * 60)
-print("OPENCLAW DAILY BRIEFING")
-print("=" * 60)
 
-print()
-print("Generated:", datetime.now())
+def main():
+    print("=" * 60)
+    print("OPENCLAW DAILY BRIEFING")
+    print("=" * 60)
 
-print()
-print("=" * 60)
-print("RECENT EVENTS")
-print("=" * 60)
+    print()
+    print("Generated:", datetime.now())
 
-events = get_recent_events()
+    print()
+    print("=" * 60)
+    print("RECENT EVENTS")
+    print("=" * 60)
 
-if not events:
-    print("No recent events found.")
-else:
-    for e in events:
-        print()
-        print(f"[{e.get('agent', 'Unknown')}] {e.get('type', 'unknown')}")
-        print(e.get("message", ""))
+    events = get_recent_events()
 
-print()
-print("=" * 60)
-print("RECENT NON-GMAIL MEMORIES")
-print("=" * 60)
+    if not events:
+        print("No recent events found.")
+    else:
+        for event in events:
+            print()
+            print(f"[{event.get('agent', 'Unknown')}] {event.get('type', 'unknown')}")
+            print(event.get("message", ""))
 
-memories = get_recent_memories()
+    print()
+    print("=" * 60)
+    print("RECENT NON-GMAIL MEMORIES")
+    print("=" * 60)
 
-if not memories:
-    print("No recent non-Gmail memories found.")
-else:
-    for m in memories:
-        print()
-        print(f"Agent: {m[0]}")
-        print(f"Category: {m[1]}")
-        print(f"Content: {m[2]}")
-        print(f"Created: {m[3]}")
+    memories = get_recent_memories()
+
+    if not memories:
+        print("No recent non-Gmail memories found.")
+    else:
+        for memory in memories:
+            print()
+            print(f"Agent: {memory['agent_name']}")
+            print(f"Category: {memory['category']}")
+            print(f"Content: {memory['content']}")
+            print(f"Created: {memory['created_at']}")
+
+
+if __name__ == "__main__":
+    main()

@@ -30,7 +30,8 @@ extension PropertyAPIClient {
 
     func submitMeterReading(
         assetId: UUID,
-        value: Double,
+        value: Double? = nil,
+        delta: Double? = nil,
         note: String?,
         entryMethod: String = "manual"
     ) async throws -> MacRanchAsset {
@@ -39,7 +40,14 @@ extension PropertyAPIClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         meterApplyAuth(&request)
-        var body: [String: Any] = ["value": String(value), "entry_method": entryMethod]
+        var body: [String: Any] = ["entry_method": entryMethod]
+        if let delta {
+            body["delta"] = String(delta)
+        } else if let value {
+            body["value"] = String(value)
+        } else {
+            throw MacMeterError.serverMessage("value or delta is required")
+        }
         if let note, !note.isEmpty { body["note"] = note }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await Self.sharedSession.data(for: request)
@@ -91,6 +99,26 @@ extension PropertyAPIClient {
         return result.asset
     }
 
+    /// Soft-deactivate / reactivate. Response may be null when deactivating.
+    func patchAsset(id: UUID, isActive: Bool) async throws {
+        let url = try makeURL("v1/assets/\(id.uuidString)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        meterApplyAuth(&request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["is_active": isActive])
+        let (data, response) = try await Self.sharedSession.data(for: request)
+        try validate(response, data: data)
+    }
+
+    func deactivateAsset(id: UUID) async throws {
+        try await patchAsset(id: id, isActive: false)
+    }
+
+    func reactivateAsset(id: UUID) async throws {
+        try await patchAsset(id: id, isActive: true)
+    }
+
     /// Auth headers for meter mutating calls (API key and/or operator PIN).
     fileprivate func meterApplyAuth(_ request: inout URLRequest) {
         applyAuth(&request)
@@ -99,11 +127,14 @@ extension PropertyAPIClient {
 
 enum MacMeterError: LocalizedError {
     case lowerReadingConfirmation(MacLowerReadingPreview)
+    case serverMessage(String)
 
     var errorDescription: String? {
         switch self {
         case .lowerReadingConfirmation:
             return "Reading is lower than current. Confirmation required."
+        case .serverMessage(let message):
+            return message
         }
     }
 }

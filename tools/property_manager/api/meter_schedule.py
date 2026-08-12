@@ -96,6 +96,56 @@ def parse_optional_meter_decimal(value: Any, *, field: str) -> Decimal | None:
     return decimal_to_db(parsed)
 
 
+def parse_positive_delta(value: Any, *, field: str = "delta") -> Decimal:
+    """Parse hours/miles to add. Must be finite and strictly > 0 (blank ≠ 0)."""
+    if value is None or (isinstance(value, str) and value.strip() == ""):
+        raise ValueError(f"{field} is required")
+    parsed = parse_decimal(value, field=field)
+    if not parsed.is_finite():
+        raise ValueError(f"{field} must be a finite number")
+    if parsed <= 0:
+        raise ValueError(f"{field} must be greater than zero")
+    return decimal_to_db(parsed)
+
+
+def resolve_meter_reading_absolute(
+    asset_id: str,
+    *,
+    value: Any = None,
+    delta: Any = None,
+    add_value: Any = None,
+) -> tuple[Decimal, Decimal | None]:
+    """Resolve POST body to absolute reading value.
+
+    Accepts either ``value`` (absolute face) or ``delta`` (hours/miles since last).
+    ``add_value`` is rejected — use ``delta``. Returns (absolute, delta_applied).
+    """
+    if add_value is not None and add_value != "":
+        raise ValueError("add_value is not supported; use delta")
+
+    has_value = value is not None and not (isinstance(value, str) and value.strip() == "")
+    has_delta = delta is not None and not (isinstance(delta, str) and delta.strip() == "")
+
+    if has_value and has_delta:
+        raise ValueError("provide either value (absolute) or delta, not both")
+    if not has_value and not has_delta:
+        raise ValueError("value or delta is required")
+
+    if has_delta:
+        delta_dec = parse_positive_delta(delta, field="delta")
+        meter = fetch_meter_row(asset_id)
+        if meter is None:
+            raise ValueError("asset_meter not found")
+        current = _as_decimal(meter.get("current_value")) or Decimal("0")
+        absolute = decimal_to_db(current + delta_dec)
+        return absolute, delta_dec
+
+    absolute = parse_decimal(value, field="value")
+    if not absolute.is_finite():
+        raise ValueError("value must be a finite number")
+    return decimal_to_db(absolute), None
+
+
 _TRIGGER_UNITS_BY_METER_TYPE: dict[str, set[str]] = {
     "runtime_hours": {"hrs", "hours", "hr", "h"},
     "mileage": {"mi", "mile", "miles"},

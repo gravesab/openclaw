@@ -412,9 +412,18 @@ def create_meter_reading(asset_id: str):
 
     payload = request.get_json(silent=True) or {}
     try:
-        value = parse_decimal(payload.get("value"), field="value")
+        value, delta_applied = ms.resolve_meter_reading_absolute(
+            asset_id,
+            value=payload.get("value"),
+            delta=payload.get("delta"),
+            add_value=payload.get("add_value"),
+        )
     except ValueError as exc:
-        return validation_error(str(exc), field="value")
+        msg = str(exc)
+        field = "delta" if "delta" in msg.lower() or "add_value" in msg.lower() else "value"
+        if "either value" in msg or "value or delta" in msg:
+            field = "value"
+        return validation_error(msg, field=field)
 
     idempotency_key = request.headers.get("Idempotency-Key") or payload.get("idempotency_key")
     idempotency_key = str(idempotency_key).strip() if idempotency_key else None
@@ -477,14 +486,34 @@ def create_meter_reading(asset_id: str):
                 "proposed_value": result.get("proposed_value"),
                 "options": result.get("options"),
                 "preview_token": result.get("preview_token"),
+                "delta": format_decimal(delta_applied) if delta_applied is not None else None,
             },
         )
 
+    absolute_written = format_decimal(value)
+    delta_out = format_decimal(delta_applied) if delta_applied is not None else None
+
     if result.get("idempotent_replay"):
-        return jsonify({"asset": fetch_asset_or_404(asset_id), "reading": _serialize_reading(result["reading"]), "idempotent_replay": True})
+        body = {
+            "asset": fetch_asset_or_404(asset_id),
+            "reading": _serialize_reading(result["reading"]),
+            "idempotent_replay": True,
+            "value": absolute_written,
+            "current_value": result.get("current_value"),
+            "delta": delta_out,
+        }
+        return jsonify(body)
 
     updated = fetch_asset_or_404(asset_id)
-    return jsonify({"asset": updated, "reading_id": result.get("reading_id"), "current_value": result.get("current_value")})
+    return jsonify(
+        {
+            "asset": updated,
+            "reading_id": result.get("reading_id"),
+            "value": absolute_written,
+            "current_value": result.get("current_value"),
+            "delta": delta_out,
+        }
+    )
 
 
 @auth_required(allow_pin=True)
@@ -535,6 +564,11 @@ _VALUE_PATTERN = re.compile(
     r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|miles?|mi|cycles?)?",
     re.IGNORECASE,
 )
+# "add 2.5 hours", "add 10 miles" → delta mode
+_DELTA_PATTERN = re.compile(
+    r"\b(?:add|plus|\+)\s*(?P<delta>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|miles?|mi|cycles?)?",
+    re.IGNORECASE,
+)
 
 
 def _similarity(a: str, b: str) -> float:
@@ -547,11 +581,19 @@ def parse_meter_reading():
     if not text:
         return validation_error("text is required", field="text")
 
-    match = _VALUE_PATTERN.search(text)
-    if not match:
-        return validation_error("Could not find a meter value in text", field="text")
-
-    value = format_decimal(parse_decimal(match.group("value")))
+    delta_match = _DELTA_PATTERN.search(text)
+    if delta_match:
+        amount = format_decimal(parse_decimal(delta_match.group("delta"), field="delta"))
+        entry_mode = "delta"
+        absolute_value = None
+        delta_value = amount
+    else:
+        match = _VALUE_PATTERN.search(text)
+        if not match:
+            return validation_error("Could not find a meter value in text", field="text")
+        absolute_value = format_decimal(parse_decimal(match.group("value")))
+        delta_value = None
+        entry_mode = "absolute"
 
     assets = pm_db.execute_json(
         f"""
@@ -596,7 +638,9 @@ def parse_meter_reading():
         {
             "asset_id": str(best["id"]),
             "asset_name": best.get("name"),
-            "value": value,
+            "value": absolute_value,
+            "delta": delta_value,
+            "entry_mode": entry_mode,
             "unit": unit,
             "meter_type": meter_type,
             "confidence": round(best_score, 3),

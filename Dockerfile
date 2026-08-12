@@ -180,6 +180,8 @@ COPY --from=runtime-assets --chown=node:node /app/skills ./skills
 COPY --from=runtime-assets --chown=node:node /app/docs ./docs
 COPY --from=runtime-assets --chown=node:node /app/qa ./qa
 COPY --from=runtime-assets --chown=node:node /app/tools/ai_intelligence ./tools/ai_intelligence
+COPY --from=runtime-assets --chown=node:node /app/config/ai_intelligence ./config/ai_intelligence
+COPY --from=runtime-assets --chown=node:node /app/migrations/ai_intelligence ./migrations/ai_intelligence
 
 RUN python3 -m venv /app/tools/ai_intelligence/.venv && \
     /app/tools/ai_intelligence/.venv/bin/pip install \

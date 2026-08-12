@@ -13,4 +13,3 @@ EnvironmentFile=-/home/gravesab/.config/openclaw/db.env
 ExecStart=/home/gravesab/ai/projects/openclaw/tools/briefing/.venv/bin/python3 /home/gravesab/ai/projects/openclaw/tools/briefing/briefing_manager.py
 StandardOutput=append:/home/gravesab/openclaw_briefing.log
 StandardError=append:/home/gravesab/openclaw_briefing.log
-

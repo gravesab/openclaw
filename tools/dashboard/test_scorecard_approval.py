@@ -661,6 +661,76 @@ class ScorecardDashboardTests(unittest.TestCase):
         self.assertEqual(disk["status"], "Intel Mini probe unavailable")
         self.assertIsNone(disk["pct_num"])
 
+    def test_remote_internal_storage_shows_root_and_entire_physical_drive(self):
+        remote_output = (
+            "/ /dev/mapper/ubuntu--vg-ubuntu--lv ext4\n"
+            "Filesystem 1-blocks Used Available Capacity Mounted on\n"
+            "/dev/mapper/ubuntu--vg-ubuntu--lv 107374182400 81604378624 "
+            "20293720448 80% /\n"
+            "__ROOT_CHAIN__\n"
+            "ubuntu--vg-ubuntu--lv 107374182400 lvm\n"
+            "nvme0n1p3 247712415744 part\n"
+            "nvme0n1 251040123904 disk"
+        )
+        with mock.patch.object(
+            dashboard.subprocess,
+            "check_output",
+            return_value=remote_output,
+        ) as check_output:
+            disk = dashboard.get_remote_internal_storage_info()
+
+        self.assertTrue(disk["available"])
+        self.assertEqual(disk["label"], "Intel Mini Internal Drive")
+        self.assertEqual(disk["physical_device"], "/dev/nvme0n1")
+        self.assertEqual(disk["physical_total"], "233.8GiB")
+        self.assertEqual(disk["root_allocated"], "100.0GiB")
+        self.assertEqual(disk["outside_root_allocation"], "133.8GiB")
+        self.assertEqual(disk["pct_num"], 80)
+        remote_command = check_output.call_args.args[0][-1]
+        self.assertIn("findmnt", remote_command)
+        self.assertIn("df -P -B1", remote_command)
+        self.assertIn("lsblk -b -s", remote_command)
+
+    def test_storage_panel_distinguishes_dev_and_intel_mini_disks(self):
+        local_disk = {
+            "label": "Development VM Internal Disk",
+            "path": "/",
+            "total": "123G",
+            "used": "45G",
+            "free": "73G",
+            "pct": "39%",
+            "pct_num": 39,
+            "color": "#22c55e",
+            "status": "Healthy",
+            "available": True,
+        }
+        intel_disk = {
+            **local_disk,
+            "label": "Intel Mini Internal Drive",
+            "physical_total": "233.8GiB",
+            "root_allocated": "100.0GiB",
+            "outside_root_allocation": "133.8GiB",
+            "remote_host": "intelmini",
+        }
+        external_disk = {**local_disk, "label": "External AI Storage — Intel Mini"}
+        with (
+            mock.patch.object(dashboard, "get_disk_info", return_value=local_disk),
+            mock.patch.object(
+                dashboard, "get_remote_internal_storage_info", return_value=intel_disk
+            ),
+            mock.patch.object(
+                dashboard, "get_external_storage_info", return_value=external_disk
+            ),
+            mock.patch.object(dashboard, "storage_chart_html", return_value="<chart>"),
+        ):
+            rendered = dashboard.storage_panel_html()
+
+        self.assertIn("Development VM Internal Disk", rendered)
+        self.assertIn("Intel Mini Internal Drive", rendered)
+        self.assertIn("Entire physical drive", rendered)
+        self.assertIn("233.8GiB", rendered)
+        self.assertIn("Outside root allocation", rendered)
+
     def test_backup_remote_probe_uses_read_only_ssh_inventory(self):
         snapshot = {
             "host": "intelmini",

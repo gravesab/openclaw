@@ -1,0 +1,305 @@
+{
+  "format_version": 2,
+  "authority": "propertymanager",
+  "canonical_migrations": [
+    {"version": "001", "order": 1, "filename": "001_initial_schema.sql", "sha256": "11b4427e5115cb159b1b48e0a2886ef1e9e04575f7455c26e2e4ba068021d84f", "reapplication_permitted": false},
+    {"version": "002", "order": 2, "filename": "002_rich_task_model.sql", "sha256": "a60c5e604bc42d5331c2b77819e3976588d76b99ae25880eb8c85114f59d8ec2", "reapplication_permitted": false},
+    {"version": "003", "order": 3, "filename": "003_part_quantity.sql", "sha256": "49365ba4d30ff4543ad3a48a9aa3a0b430aebb300c3d67e568c6a679bb218147", "reapplication_permitted": false},
+    {"version": "004", "order": 4, "filename": "004_task_origin.sql", "sha256": "1e9a03e9cc383928c992638685df922a3bc6a28a4a54a8a8f18b98be0da6c40c", "reapplication_permitted": false},
+    {"version": "005", "order": 5, "filename": "005_assets_and_meters.sql", "sha256": "f90a39cdc6234d72a431d4caba23720d98aa7b4dff1a83f15845ecb936ff0147", "reapplication_permitted": true},
+    {"version": "006", "order": 6, "filename": "006_phase1_meter_audit.sql", "sha256": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0", "reapplication_permitted": true}
+  ],
+  "reserved_versions": [
+    {"version": "007", "status": "noncanonical_forbidden", "reason": "Reserved because a noncanonical migration was published in branch history; never restore, rename, reuse, or adopt."},
+    {"version": "008", "status": "noncanonical_forbidden", "reason": "Reserved because mutable noncanonical migrations were published in branch history; never restore, rename, reuse, or adopt."}
+  ],
+  "next_canonical_version": "009",
+  "schema_contract": {
+    "normalization_version": 1,
+    "comparison": {
+      "tables": "exact lexical-name set",
+      "columns": "exact ordinal list",
+      "constraints": "exact lexical-name list using normalized logical definitions",
+      "indexes": "exact lexical-name list using normalized expressions, order, uniqueness, and predicates",
+      "canonical_data": "exact key-sorted rows for declared canonical data"
+    },
+    "allowed_extras": {
+      "tables": [],
+      "columns": [],
+      "constraints": [],
+      "indexes": [],
+      "canonical_data": []
+    },
+    "tables": {
+      "asset_meter": {
+        "columns": [
+          {"name": "asset_id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "meter_type", "type": "text", "nullable": false, "default": "'none'", "precision": null, "scale": null, "generated": null},
+          {"name": "current_value", "type": "numeric", "nullable": false, "default": "0", "precision": 14, "scale": 3, "generated": null},
+          {"name": "unit", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "latest_reading_at", "type": "timestamp with time zone", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "updated_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "meter_epoch", "type": "integer", "nullable": false, "default": "1", "precision": null, "scale": null, "generated": null},
+          {"name": "row_version", "type": "integer", "nullable": false, "default": "1", "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "asset_meter_asset_id_fkey", "kind": "foreign_key", "columns": ["asset_id"], "definition": "FOREIGN KEY (asset_id) REFERENCES propertymanager.assets (id)", "references": {"table": "assets", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "CASCADE"},
+          {"name": "asset_meter_pkey", "kind": "primary_key", "columns": ["asset_id"], "definition": "PRIMARY KEY (asset_id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "asset_meter_type_check", "kind": "check", "columns": ["meter_type"], "definition": "CHECK (meter_type IN ('runtime_hours', 'mileage', 'cycles', 'none'))", "references": null, "on_update": null, "on_delete": null}
+        ],
+        "indexes": [
+          {"name": "asset_meter_pkey", "unique": true, "method": "btree", "keys": [{"expression": "asset_id", "order": "ASC"}], "predicate": null}
+        ]
+      },
+      "asset_meter_reading": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "asset_id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "value", "type": "numeric", "nullable": false, "default": null, "precision": 14, "scale": 3, "generated": null},
+          {"name": "reading_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "entry_method", "type": "text", "nullable": false, "default": "'manual'", "precision": null, "scale": null, "generated": null},
+          {"name": "note", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "correction_reason", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "usage_since_previous", "type": "numeric", "nullable": true, "default": null, "precision": 14, "scale": 3, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "previous_reading_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "meter_type_at_entry", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "unit_at_entry", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "status", "type": "text", "nullable": false, "default": "'accepted'", "precision": null, "scale": null, "generated": null},
+          {"name": "operator_identity", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "integration_identity", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "idempotency_key", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "meter_epoch", "type": "integer", "nullable": false, "default": "1", "precision": null, "scale": null, "generated": null},
+          {"name": "corrects_reading_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "asset_meter_reading_asset_id_fkey", "kind": "foreign_key", "columns": ["asset_id"], "definition": "FOREIGN KEY (asset_id) REFERENCES propertymanager.assets (id)", "references": {"table": "assets", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "CASCADE"},
+          {"name": "asset_meter_reading_correction_reason_check", "kind": "check", "columns": ["correction_reason"], "definition": "CHECK (correction_reason IS NULL OR correction_reason IN ('replacement', 'rollover', 'correction'))", "references": null, "on_update": null, "on_delete": null},
+          {"name": "asset_meter_reading_corrects_reading_id_fkey", "kind": "foreign_key", "columns": ["corrects_reading_id"], "definition": "FOREIGN KEY (corrects_reading_id) REFERENCES propertymanager.asset_meter_reading (id)", "references": {"table": "asset_meter_reading", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"},
+          {"name": "asset_meter_reading_entry_method_check", "kind": "check", "columns": ["entry_method"], "definition": "CHECK (entry_method IN ('manual', 'voice', 'qr', 'api', 'telegram', 'completion'))", "references": null, "on_update": null, "on_delete": null},
+          {"name": "asset_meter_reading_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "asset_meter_reading_previous_reading_id_fkey", "kind": "foreign_key", "columns": ["previous_reading_id"], "definition": "FOREIGN KEY (previous_reading_id) REFERENCES propertymanager.asset_meter_reading (id)", "references": {"table": "asset_meter_reading", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"},
+          {"name": "asset_meter_reading_status_check", "kind": "check", "columns": ["status"], "definition": "CHECK (status IN ('accepted', 'rejected', 'corrected'))", "references": null, "on_update": null, "on_delete": null}
+        ],
+        "indexes": [
+          {"name": "asset_meter_reading_asset_epoch_reading_at_idx", "unique": false, "method": "btree", "keys": [{"expression": "asset_id", "order": "ASC"}, {"expression": "meter_epoch", "order": "ASC"}, {"expression": "reading_at", "order": "ASC"}, {"expression": "created_at", "order": "ASC"}], "predicate": null},
+          {"name": "asset_meter_reading_asset_id_reading_at_idx", "unique": false, "method": "btree", "keys": [{"expression": "asset_id", "order": "ASC"}, {"expression": "reading_at", "order": "DESC"}], "predicate": null},
+          {"name": "asset_meter_reading_idempotency_idx", "unique": true, "method": "btree", "keys": [{"expression": "asset_id", "order": "ASC"}, {"expression": "idempotency_key", "order": "ASC"}], "predicate": "idempotency_key IS NOT NULL AND status = 'accepted'"},
+          {"name": "asset_meter_reading_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null},
+          {"name": "asset_meter_reading_status_idx", "unique": false, "method": "btree", "keys": [{"expression": "asset_id", "order": "ASC"}, {"expression": "status", "order": "ASC"}], "predicate": "status = 'accepted'"}
+        ]
+      },
+      "asset_task_mapping_proposals": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "ranchbrain_task_ref", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "task_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "proposed_asset_id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "match_rationale", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "confidence", "type": "numeric", "nullable": false, "default": "0", "precision": 5, "scale": 4, "generated": null},
+          {"name": "status", "type": "text", "nullable": false, "default": "'pending'", "precision": null, "scale": null, "generated": null},
+          {"name": "reviewed_by", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "reviewed_at", "type": "timestamp with time zone", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "asset_task_mapping_proposals_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "asset_task_mapping_proposals_proposed_asset_id_fkey", "kind": "foreign_key", "columns": ["proposed_asset_id"], "definition": "FOREIGN KEY (proposed_asset_id) REFERENCES propertymanager.assets (id)", "references": {"table": "assets", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "CASCADE"},
+          {"name": "asset_task_mapping_proposals_status_check", "kind": "check", "columns": ["status"], "definition": "CHECK (status IN ('pending', 'approved', 'rejected'))", "references": null, "on_update": null, "on_delete": null},
+          {"name": "asset_task_mapping_proposals_task_id_fkey", "kind": "foreign_key", "columns": ["task_id"], "definition": "FOREIGN KEY (task_id) REFERENCES propertymanager.maintenance_tasks (id)", "references": {"table": "maintenance_tasks", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"}
+        ],
+        "indexes": [
+          {"name": "asset_task_mapping_proposals_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null},
+          {"name": "asset_task_mapping_proposals_status_idx", "unique": false, "method": "btree", "keys": [{"expression": "status", "order": "ASC"}, {"expression": "confidence", "order": "DESC"}], "predicate": null},
+          {"name": "asset_task_mapping_proposals_task_asset_pending_idx", "unique": true, "method": "btree", "keys": [{"expression": "ranchbrain_task_ref", "order": "ASC"}, {"expression": "proposed_asset_id", "order": "ASC"}], "predicate": "status = 'pending'"}
+        ]
+      },
+      "assets": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "external_id", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "ranchbrain_guid", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "name", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "manufacturer", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "model", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "category", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "location", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "aliases", "type": "jsonb", "nullable": false, "default": "'[]'::jsonb", "precision": null, "scale": null, "generated": null},
+          {"name": "qr_token", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "is_active", "type": "boolean", "nullable": false, "default": "true", "precision": null, "scale": null, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "updated_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "meter_proposed_type", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "meter_proposed_unit", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "meter_activated_at", "type": "timestamp with time zone", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "assets_external_id_key", "kind": "unique", "columns": ["external_id"], "definition": "UNIQUE (external_id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "assets_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "assets_qr_token_key", "kind": "unique", "columns": ["qr_token"], "definition": "UNIQUE (qr_token)", "references": null, "on_update": null, "on_delete": null}
+        ],
+        "indexes": [
+          {"name": "assets_external_id_idx", "unique": false, "method": "btree", "keys": [{"expression": "external_id", "order": "ASC"}], "predicate": null},
+          {"name": "assets_external_id_key", "unique": true, "method": "btree", "keys": [{"expression": "external_id", "order": "ASC"}], "predicate": null},
+          {"name": "assets_name_lower_idx", "unique": false, "method": "btree", "keys": [{"expression": "lower(name)", "order": "ASC"}], "predicate": null},
+          {"name": "assets_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null},
+          {"name": "assets_qr_token_idx", "unique": false, "method": "btree", "keys": [{"expression": "qr_token", "order": "ASC"}], "predicate": null},
+          {"name": "assets_qr_token_key", "unique": true, "method": "btree", "keys": [{"expression": "qr_token", "order": "ASC"}], "predicate": null}
+        ]
+      },
+      "maintenance_categories": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "name", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "icon", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "color_name", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "is_built_in", "type": "boolean", "nullable": false, "default": "false", "precision": null, "scale": null, "generated": null},
+          {"name": "sort_order", "type": "integer", "nullable": false, "default": "0", "precision": null, "scale": null, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "updated_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "maintenance_categories_name_key", "kind": "unique", "columns": ["name"], "definition": "UNIQUE (name)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_categories_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null}
+        ],
+        "indexes": [
+          {"name": "maintenance_categories_name_key", "unique": true, "method": "btree", "keys": [{"expression": "name", "order": "ASC"}], "predicate": null},
+          {"name": "maintenance_categories_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null}
+        ]
+      },
+      "maintenance_completions": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "task_id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "completed_at", "type": "timestamp with time zone", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "note", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "meter_value_at_completion", "type": "numeric", "nullable": true, "default": null, "precision": 14, "scale": 3, "generated": null},
+          {"name": "meter_reading_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "maintenance_completions_meter_reading_id_fkey", "kind": "foreign_key", "columns": ["meter_reading_id"], "definition": "FOREIGN KEY (meter_reading_id) REFERENCES propertymanager.asset_meter_reading (id)", "references": {"table": "asset_meter_reading", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"},
+          {"name": "maintenance_completions_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_completions_task_id_fkey", "kind": "foreign_key", "columns": ["task_id"], "definition": "FOREIGN KEY (task_id) REFERENCES propertymanager.maintenance_tasks (id)", "references": {"table": "maintenance_tasks", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "CASCADE"}
+        ],
+        "indexes": [
+          {"name": "maintenance_completions_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null}
+        ]
+      },
+      "maintenance_task_parts": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "task_id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "name", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "oem_part_number", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "part_number", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "buy_url", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "cost", "type": "numeric", "nullable": false, "default": "0", "precision": 10, "scale": 2, "generated": null},
+          {"name": "sort_order", "type": "integer", "nullable": false, "default": "0", "precision": null, "scale": null, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "updated_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "quantity", "type": "numeric", "nullable": false, "default": "1", "precision": 12, "scale": 3, "generated": null},
+          {"name": "vendor", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null},
+          {"name": "notes", "type": "text", "nullable": false, "default": "''", "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "maintenance_task_parts_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_task_parts_task_id_fkey", "kind": "foreign_key", "columns": ["task_id"], "definition": "FOREIGN KEY (task_id) REFERENCES propertymanager.maintenance_tasks (id)", "references": {"table": "maintenance_tasks", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "CASCADE"}
+        ],
+        "indexes": [
+          {"name": "maintenance_task_parts_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null},
+          {"name": "maintenance_task_parts_task_id_idx", "unique": false, "method": "btree", "keys": [{"expression": "task_id", "order": "ASC"}, {"expression": "sort_order", "order": "ASC"}], "predicate": null}
+        ]
+      },
+      "maintenance_task_photos": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "task_id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "file_name", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "storage_path", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "maintenance_task_photos_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_task_photos_task_id_fkey", "kind": "foreign_key", "columns": ["task_id"], "definition": "FOREIGN KEY (task_id) REFERENCES propertymanager.maintenance_tasks (id)", "references": {"table": "maintenance_tasks", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "CASCADE"}
+        ],
+        "indexes": [
+          {"name": "maintenance_task_photos_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null},
+          {"name": "maintenance_task_photos_task_id_idx", "unique": false, "method": "btree", "keys": [{"expression": "task_id", "order": "ASC"}, {"expression": "created_at", "order": "ASC"}], "predicate": null}
+        ]
+      },
+      "maintenance_tasks": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "area", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "item", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "category_name", "type": "text", "nullable": false, "default": "'House'", "precision": null, "scale": null, "generated": null},
+          {"name": "priority", "type": "text", "nullable": false, "default": "'Medium'", "precision": null, "scale": null, "generated": null},
+          {"name": "frequency", "type": "text", "nullable": false, "default": "'As Needed'", "precision": null, "scale": null, "generated": null},
+          {"name": "task_description", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "response_instructions", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "supplies_needed", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "notes", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "result_notes", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "estimated_minutes", "type": "integer", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "warning_days", "type": "integer", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "critical_days", "type": "integer", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "last_done", "type": "timestamp with time zone", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "next_due", "type": "timestamp with time zone", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "send_telegram_update", "type": "boolean", "nullable": false, "default": "true", "precision": null, "scale": null, "generated": null},
+          {"name": "include_in_daily_briefing", "type": "boolean", "nullable": false, "default": "true", "precision": null, "scale": null, "generated": null},
+          {"name": "alert_if_overdue", "type": "boolean", "nullable": false, "default": "true", "precision": null, "scale": null, "generated": null},
+          {"name": "is_active", "type": "boolean", "nullable": false, "default": "true", "precision": null, "scale": null, "generated": null},
+          {"name": "part_url", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "vendor", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "part_number", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "part_cost", "type": "numeric", "nullable": true, "default": null, "precision": 10, "scale": 2, "generated": null},
+          {"name": "annual_cost", "type": "numeric", "nullable": true, "default": null, "precision": 10, "scale": 2, "generated": null},
+          {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "updated_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "kind", "type": "text", "nullable": false, "default": "'Scheduled'", "precision": null, "scale": null, "generated": null},
+          {"name": "manufacturer", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "source_manual_name", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "completion_history", "type": "jsonb", "nullable": false, "default": "'[]'::jsonb", "precision": null, "scale": null, "generated": null},
+          {"name": "tools_required", "type": "jsonb", "nullable": false, "default": "'[]'::jsonb", "precision": null, "scale": null, "generated": null},
+          {"name": "origin", "type": "text", "nullable": false, "default": "'owner'", "precision": null, "scale": null, "generated": null},
+          {"name": "asset_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "schedule_kind", "type": "text", "nullable": false, "default": "'calendar'", "precision": null, "scale": null, "generated": null},
+          {"name": "meter_interval_value", "type": "numeric", "nullable": true, "default": null, "precision": 14, "scale": 3, "generated": null},
+          {"name": "meter_interval_unit", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "last_done_meter_value", "type": "numeric", "nullable": true, "default": null, "precision": 14, "scale": 3, "generated": null},
+          {"name": "next_due_meter_value", "type": "numeric", "nullable": true, "default": null, "precision": 14, "scale": 3, "generated": null}
+        ],
+        "constraints": [
+          {"name": "maintenance_tasks_area_item_unique", "kind": "unique", "columns": ["area", "item"], "definition": "UNIQUE (area, item)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_tasks_asset_id_fkey", "kind": "foreign_key", "columns": ["asset_id"], "definition": "FOREIGN KEY (asset_id) REFERENCES propertymanager.assets (id)", "references": {"table": "assets", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"},
+          {"name": "maintenance_tasks_kind_check", "kind": "check", "columns": ["kind"], "definition": "CHECK (kind IN ('Scheduled', 'Work Request'))", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_tasks_origin_check", "kind": "check", "columns": ["origin"], "definition": "CHECK (origin IN ('manufacturer', 'owner'))", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_tasks_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "maintenance_tasks_schedule_kind_check", "kind": "check", "columns": ["schedule_kind"], "definition": "CHECK (schedule_kind IN ('calendar', 'meter', 'both'))", "references": null, "on_update": null, "on_delete": null}
+        ],
+        "indexes": [
+          {"name": "maintenance_tasks_area_item_unique", "unique": true, "method": "btree", "keys": [{"expression": "area", "order": "ASC"}, {"expression": "item", "order": "ASC"}], "predicate": null},
+          {"name": "maintenance_tasks_asset_id_idx", "unique": false, "method": "btree", "keys": [{"expression": "asset_id", "order": "ASC"}], "predicate": "is_active = true"},
+          {"name": "maintenance_tasks_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null}
+        ]
+      }
+    },
+    "canonical_data": {
+      "maintenance_categories": {
+        "key": ["id"],
+        "columns": ["id", "name", "icon", "color_name", "is_built_in", "sort_order"],
+        "rows": [
+          ["00000000-0000-0000-0000-000000000001", "Pool", "drop.fill", "blue", true, 10],
+          ["00000000-0000-0000-0000-000000000002", "Hot Tub", "bubbles.and.sparkles.fill", "cyan", true, 20],
+          ["00000000-0000-0000-0000-000000000003", "Grounds", "leaf.fill", "green", true, 30],
+          ["00000000-0000-0000-0000-000000000004", "Equipment", "wrench.and.screwdriver.fill", "orange", true, 40],
+          ["00000000-0000-0000-0000-000000000005", "House", "house.fill", "purple", true, 50],
+          ["00000000-0000-0000-0000-000000000006", "Safety", "shield.fill", "red", true, 60],
+          ["00000000-0000-0000-0000-000000000007", "Tractor", "gearshape.2.fill", "brown", true, 70],
+          ["00000000-0000-0000-0000-000000000008", "Property", "map.fill", "brown", true, 80]
+        ]
+      }
+    }
+  }
+}

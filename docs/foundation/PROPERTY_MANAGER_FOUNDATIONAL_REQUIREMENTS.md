@@ -1,19 +1,19 @@
 ---
 title: "PropertyManager Foundational Requirements"
-version: "1.3"
+version: "1.4"
 status: "Phase 3 deployed — post-deploy verification"
 owner: "OpenClaw Operator"
-last_reviewed: "2026-07-29"
+last_reviewed: "2026-07-30"
 category: "Governance"
 source_document: "PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md"
 ---
 
 # PropertyManager Foundational Requirements
 
-Version: 1.3  
+Version: 1.4  
 Status: **Phase 3 deployed on production Intel Mini** — post-deploy verification  
 Owner: OpenClaw Operator  
-Last Updated: 2026-07-29
+Last Updated: 2026-07-30
 
 ---
 
@@ -117,8 +117,47 @@ All PropertyManager work follows a **two-environment, two-gate** model aligned w
 - **All clients** (Mac, iPhone/iPad, Dashboard QR page, Telegram, RanchBrain CLI) interact **only through the PropertyManager REST API**. No client reads or writes Postgres directly.
 - Mac and iOS may maintain a local JSON cache for offline display; cache is a **derived copy**, not authoritative.
 - CSV export remains legacy/briefing-only and must not be treated as a write path.
+- **Apple Calendar is not a system of record.** The Mac app may push a derived day plan into Calendar.app for planning visibility only. Deleting or editing those events in Calendar.app must not update PropertyManager. Postgres + the REST API (via Mac/iPhone UI) remain the only write path for tasks and schedules.
 
 See the client topology diagram in [PropertyManager Asset Architecture](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#client-topology).
+
+---
+
+## Apple Calendar day plan (Mac → OpenClaw)
+
+PropertyManager may place **today’s due work** on the operator’s Apple Calendar for **planning and scheduling visibility only**. This is a **Mac-only, one-way, on-demand** export into Calendar.app — not bidirectional sync, not an API/server feature, and not a second task database.
+
+**Intent:** use Apple Calendar to see and arrange the day plan. Do **not** use Calendar.app to complete, reschedule, activate, or delete PropertyManager tasks.
+
+**Trial status:** ship and use this on the **Mac development build** in real-world day planning first. Do **not** treat OpenClaw calendar export as production-required or value-proven until the operator confirms after hands-on use. Promotion to production Mac builds, and any behavior such as removal-on-complete, stays **provisional** and may be dropped or changed if it is not value-added.
+
+### Requirements
+
+| Rule                              | Requirement                                                                                                                                                                                                                                                                                               |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Host                              | **Mac PropertyManagerApp** only. Menu/button: push today’s due tasks to Calendar.                                                                                                                                                                                                                         |
+| Target calendar                   | Existing Calendar.app calendar titled **OpenClaw**. Do not auto-create it; fail clearly if missing.                                                                                                                                                                                                       |
+| Event shape                       | **Timed blocks** stacked from a **configurable day start** (default **08:00** local). Each event lasts `estimated_minutes` (fallback 30). No overlap: next start = previous end.                                                                                                                          |
+| Eligibility                       | Active tasks with `schedule_kind` in `calendar` \| `both` whose calendar `next_due` local date is **≤ today** (due today or still incomplete/overdue).                                                                                                                                                    |
+| Pure meter tasks                  | **Excluded** from Apple Calendar export. Never invent a calendar day from meter hours/miles.                                                                                                                                                                                                              |
+| Task mutations                    | Create, edit, complete, reschedule, and soft-delete of tasks happen **only** in PropertyManager Mac or iPhone UI through the REST API.                                                                                                                                                                    |
+| Calendar delete is view-only      | The operator **may** delete (or edit) a Calendar.app event to clear it from the calendar view. That action must **never** update PropertyManager Postgres, the REST API, or Mac/iOS local task caches.                                                                                                    |
+| Completion removes calendar event | **Provisional default:** when a task is completed in PropertyManager, Mac may remove that task’s PM-managed OpenClaw event(s). Revisit after real-world trial — keep as a single easy-to-disable switch; may be removed entirely if not value-added. Never Calendar-driven completion.                    |
+| Completion                        | Completing the task in PropertyManager advances `next_due` via the normal API path; the task leaves the day-plan push until it is due again.                                                                                                                                                              |
+| Incomplete roll-forward           | Any task **not completed in PropertyManager** must keep receiving a timed slot on subsequent pushes (rolls forward day to day until done). A prior Calendar.app delete does not mark the task done; a later push may recreate the event.                                                                  |
+| Idempotency                       | Re-push updates or replaces PropertyManager-managed events for the day; must not accumulate unbounded duplicates. Stable EventKit marker / URL identifies PM-owned events.                                                                                                                                |
+| DEV vs prod                       | DEV builds tag events with a **DEV** marker and provide **Delete DEV PropertyManager calendar events**. Before promoting calendar sync to production, operator must run DEV cleanup and confirm the OpenClaw calendar has no DEV PM events. Prod markers must never be deleted by the DEV cleanup action. |
+| Authority                         | Calendar events are **derived presentation only**. Calendar.app is never a write path into PropertyManager.                                                                                                                                                                                               |
+| Permissions                       | Requires macOS Calendar (EventKit) access for the Mac app; surface permission failures in the UI.                                                                                                                                                                                                         |
+
+### Out of scope (this feature)
+
+- Writing calendar events from the PropertyManager REST API, Intel Mini, or iOS PropertyManager app (v1)
+- Auto-creating the OpenClaw calendar
+- Any Calendar.app → PropertyManager reverse sync (delete, edit, complete, or reschedule via calendar)
+- Converting meter intervals into Apple Calendar dates
+
+Architecture notes: [PropertyManager Asset Architecture](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#apple-calendar-day-plan).
 
 ---
 
@@ -137,6 +176,21 @@ See the client topology diagram in [PropertyManager Asset Architecture](../archi
 1. The system **proposes** a meter type and unit based on category.
 2. The operator **reviews and confirms or overrides** before the meter is activated.
 3. No meter-based schedules or reading acceptance may run until the operator activates the meter.
+
+### Meter reading entry modes
+
+`asset_meter.current_value` is always the **cumulative absolute total** (hour-meter / odometer face after accept).
+
+Operators may enter readings in either mode:
+
+| Mode     | Request field | Meaning                                                          |
+| -------- | ------------- | ---------------------------------------------------------------- |
+| Absolute | `value`       | Full meter face reading (existing behavior)                      |
+| Delta    | `delta`       | Hours (or miles) **used since last** reading; must be finite > 0 |
+
+Server rule for delta: `new_absolute = current_value + delta`, then the normal accept path (audit trail, usage_since_previous, lower-reading preview/confirm if the resulting absolute would decrease). Reject if both `value` and `delta` are set, or neither. Prefer the name `delta` (not `add_value`).
+
+PM remaining is unchanged and always absolute-based: `remaining_meter = next_due_meter_value − current_value`.
 
 ### Meter reading audit requirements
 

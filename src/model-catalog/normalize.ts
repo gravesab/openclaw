@@ -226,7 +226,10 @@ function normalizeModelCatalogCompat(value: unknown): ModelCompatConfig | undefi
     thinkingFormat === "deepseek" ||
     thinkingFormat === "qwen" ||
     thinkingFormat === "qwen-chat-template" ||
-    thinkingFormat === "zai"
+    thinkingFormat === "zai" ||
+    thinkingFormat === "together" ||
+    thinkingFormat === "string-thinking" ||
+    thinkingFormat === "ant-ling"
   ) {
     compat.thinkingFormat = thinkingFormat;
   }

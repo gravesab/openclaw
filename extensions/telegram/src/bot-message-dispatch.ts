@@ -1314,8 +1314,11 @@ export const dispatchTelegramMessage = async ({
       void statusReactionController.setThinking();
     }
 
-    const propertyManagerInboundText = String(
-      ctxPayload.CommandBody ?? ctxPayload.RawBody ?? ctxPayload.Body ?? "",
+    const propertyManagerInboundText = (
+      ctxPayload.CommandBody ??
+      ctxPayload.RawBody ??
+      ctxPayload.Body ??
+      ""
     ).trim();
     const propertyManagerNormalizedText = propertyManagerInboundText.toLowerCase();
     const isPropertyManagerCommand =
@@ -1348,11 +1351,13 @@ export const dispatchTelegramMessage = async ({
               ? Number(threadSpec.id)
               : undefined;
 
-        await bot.api.sendMessage(chatId, "✅ Got it — working on it...", {
-          ...(acknowledgementThreadId !== undefined
+        await bot.api.sendMessage(
+          chatId,
+          "✅ Got it — working on it...",
+          acknowledgementThreadId !== undefined
             ? { message_thread_id: acknowledgementThreadId }
-            : {}),
-        });
+            : {},
+        );
 
         const { execFileSync } = await import("node:child_process");
         const propertyManagerReply = execFileSync(
@@ -1371,11 +1376,9 @@ export const dispatchTelegramMessage = async ({
         await bot.api.sendMessage(
           chatId,
           propertyManagerReply || "🌳 PropertyManager\n\nNo response generated.",
-          {
-            ...(acknowledgementThreadId !== undefined
-              ? { message_thread_id: acknowledgementThreadId }
-              : {}),
-          },
+          acknowledgementThreadId !== undefined
+            ? { message_thread_id: acknowledgementThreadId }
+            : {},
         );
       } catch (err) {
         await bot.api.sendMessage(chatId, `🚨 PropertyManager error\n\n${formatErrorMessage(err)}`);
@@ -1392,11 +1395,13 @@ export const dispatchTelegramMessage = async ({
               ? Number(threadSpec.id)
               : undefined;
 
-        await bot.api.sendMessage(chatId, "✅ Got it — working on it...", {
-          ...(acknowledgementThreadId !== undefined
+        await bot.api.sendMessage(
+          chatId,
+          "✅ Got it — working on it...",
+          acknowledgementThreadId !== undefined
             ? { message_thread_id: acknowledgementThreadId }
-            : {}),
-        });
+            : {},
+        );
       } catch (err) {
         logAckFailure({
           log: logVerbose,

@@ -209,6 +209,9 @@ const ModelCompatSchema = z
         z.literal("qwen"),
         z.literal("qwen-chat-template"),
         z.literal("zai"),
+        z.literal("together"),
+        z.literal("string-thinking"),
+        z.literal("ant-ling"),
       ])
       .optional(),
     requiresToolResultName: z.boolean().optional(),

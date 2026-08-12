@@ -18,8 +18,10 @@ from auth import auth_required, auth_status
 from decimal_utils import parse_decimal, decimal_to_db
 from errors import error_response, validation_error
 from mapping_proposals import register_mapping_routes
+from maintenance_proposals import register_maintenance_proposal_routes
 
 app = Flask(__name__)
+register_maintenance_proposal_routes(app)
 
 # Intentional upload ceiling (aligned with Gunicorn request timeout for large bodies).
 # 32 MiB covers photo/manual attachments without unbounded memory growth.
@@ -310,12 +312,18 @@ def _probe_postgres_and_schema() -> tuple[bool, bool]:
             SELECT
                 to_regclass('propertymanager.assets')::text AS assets_table,
                 to_regclass('propertymanager.asset_meter')::text AS meter_table,
-                to_regclass('propertymanager.maintenance_tasks')::text AS tasks_table
+                to_regclass('propertymanager.maintenance_tasks')::text AS tasks_table,
+                to_regclass('propertymanager.maintenance_proposals')::text AS proposals_table
             """
         )
         if row is None:
             return True, False
-        schema_ok = bool(row.get("assets_table") and row.get("meter_table") and row.get("tasks_table"))
+        schema_ok = bool(
+            row.get("assets_table")
+            and row.get("meter_table")
+            and row.get("tasks_table")
+            and row.get("proposals_table")
+        )
         return True, schema_ok
     except Exception:
         logger.exception("health check: postgres/schema probe failed")
@@ -334,7 +342,7 @@ def health():
         "postgres_reachable": postgres_reachable,
         "schema_available": schema_available,
         "db_mode": "docker_exec" if pm_db.use_docker() else "tcp",
-        "schema_version": "006",
+        "schema_version": "009",
         "attachments_root": ATTACHMENTS_ROOT,
         "max_content_length": MAX_UPLOAD_BYTES,
         **auth_status(),

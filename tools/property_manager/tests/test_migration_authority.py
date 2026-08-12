@@ -31,8 +31,9 @@ APPROVED_HASHES = {
     "004_task_origin.sql": "1e9a03e9cc383928c992638685df922a3bc6a28a4a54a8a8f18b98be0da6c40c",
     "005_assets_and_meters.sql": "f90a39cdc6234d72a431d4caba23720d98aa7b4dff1a83f15845ecb936ff0147",
     "006_phase1_meter_audit.sql": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0",
+    "009_maintenance_proposals.sql": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a",
 }
-APPROVED_CONTRACT_HASH = "f3fac5c764d65f2f01d155461b3447e79b7128c7b1f93cda56600d27bfdc11d4"
+APPROVED_CONTRACT_HASH = "63063adf5396817e8fa8607a5ccb108cdc3d79a4f9c6a046e6068ee1a6f59a52"
 APPROVED_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 APPROVED_RESOURCE_LIMITS = {
     "MAX_MANIFEST_BYTES": 1 * 1024 * 1024,
@@ -51,6 +52,7 @@ APPROVED_REAPPLICATION = {
     "004": False,
     "005": True,
     "006": True,
+    "009": True,
 }
 APPROVED_TABLES = (
     "asset_meter",
@@ -59,6 +61,7 @@ APPROVED_TABLES = (
     "assets",
     "maintenance_categories",
     "maintenance_completions",
+    "maintenance_proposals",
     "maintenance_task_parts",
     "maintenance_task_photos",
     "maintenance_tasks",
@@ -139,7 +142,7 @@ def index(name, unique_value, *keys, predicate=None):
 
 
 # Hand-maintained oracle derived directly from 001_initial_schema.sql through
-# 006_phase1_meter_audit.sql. It must never be populated from the manifest.
+# 009_maintenance_proposals.sql. It must never be populated from the manifest.
 EXPECTED_SCHEMA_ORACLE = {
     "normalization_version": 1,
     "comparison": {
@@ -288,6 +291,35 @@ EXPECTED_SCHEMA_ORACLE = {
                 foreign("maintenance_completions_task_id_fkey", ("task_id",), "maintenance_tasks", ("id",), "CASCADE"),
             ],
             "indexes": [index("maintenance_completions_pkey", True, ("id", "ASC"))],
+        },
+        "maintenance_proposals": {
+            "columns": [
+                column("id", "uuid", False), column("proposal_version", "integer", False, "1"),
+                column("operation_id", "text", False), column("schema_version", "text", False),
+                column("source_evidence_ref", "text", False), column("provider", "text", False),
+                column("model", "text", False), column("model_output", "jsonb", False),
+                column("guardrail_actions", "jsonb", False, "'[]'::jsonb"),
+                column("validation_status", "text", False), column("status", "text", False, "'pending'"),
+                column("created_by", "text", False), column("integration_identity", "text", False),
+                column("idempotency_key", "text", False), column("reviewed_by", "text", True),
+                column("reviewed_at", "timestamp with time zone", True), column("rejection_reason", "text", True),
+                column("created_at", "timestamp with time zone", False, "now()"),
+                column("updated_at", "timestamp with time zone", False, "now()"),
+            ],
+            "constraints": [
+                check("maintenance_proposals_guardrail_actions_array_check", ("guardrail_actions",), "CHECK (jsonb_typeof(guardrail_actions) = 'array')"),
+                check("maintenance_proposals_model_output_object_check", ("model_output",), "CHECK (jsonb_typeof(model_output) = 'object')"),
+                primary("maintenance_proposals_pkey", "id"),
+                check("maintenance_proposals_proposal_version_check", ("proposal_version",), "CHECK (proposal_version > 0)"),
+                check("maintenance_proposals_review_check", ("reviewed_at", "reviewed_by", "status"), "CHECK ((status = 'pending' AND reviewed_by IS NULL AND reviewed_at IS NULL) OR (status IN ('confirmed', 'rejected') AND reviewed_by IS NOT NULL AND reviewed_at IS NOT NULL))"),
+                check("maintenance_proposals_status_check", ("status",), "CHECK (status IN ('pending', 'confirmed', 'rejected'))"),
+                check("maintenance_proposals_validation_status_check", ("validation_status",), "CHECK (validation_status = 'valid')"),
+            ],
+            "indexes": [
+                index("maintenance_proposals_idempotency_idx", True, ("integration_identity", "ASC"), ("idempotency_key", "ASC")),
+                index("maintenance_proposals_pkey", True, ("id", "ASC")),
+                index("maintenance_proposals_review_queue_idx", False, ("status", "ASC"), ("created_at", "DESC")),
+            ],
         },
         "maintenance_task_parts": {
             "columns": [
@@ -455,7 +487,7 @@ class AuthorityFixture(unittest.TestCase):
                 for spec in self.manifest.canonical
             ]
         return {
-            "declared_version": "006",
+            "declared_version": "009",
             "concurrent_migration_activity": False,
             "unexplained_schema_objects": False,
             "identity": {
@@ -493,16 +525,17 @@ class ManifestFingerprintTests(AuthorityFixture):
             APPROVED_REAPPLICATION,
         )
         self.assertEqual(self.manifest.reserved_versions, ("007", "008"))
-        self.assertEqual(self.manifest.next_canonical_version, "009")
-        self.assertNotIn("009", {spec.version for spec in self.manifest.canonical})
+        self.assertEqual(self.manifest.next_canonical_version, "010")
+        self.assertNotIn("007", {spec.version for spec in self.manifest.canonical})
+        self.assertNotIn("008", {spec.version for spec in self.manifest.canonical})
 
-    def test_complete_independent_001_through_006_oracle(self):
+    def test_complete_independent_canonical_oracle(self):
         self.assertEqual(self.manifest.schema_contract, EXPECTED_SCHEMA_ORACLE)
         tables = EXPECTED_SCHEMA_ORACLE["tables"]
         self.assertEqual(tuple(tables), APPROVED_TABLES)
-        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 124)
-        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 32)
-        self.assertEqual(sum(len(table["indexes"]) for table in tables.values()), 25)
+        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 143)
+        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 39)
+        self.assertEqual(sum(len(table["indexes"]) for table in tables.values()), 28)
         self.assertEqual(
             len(EXPECTED_SCHEMA_ORACLE["canonical_data"]["maintenance_categories"]["rows"]),
             8,
@@ -551,9 +584,9 @@ class ManifestFingerprintTests(AuthorityFixture):
         )
         contract = raw["schema_contract"]
         self.assertEqual(tuple(contract["tables"]), APPROVED_TABLES)
-        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 124)
-        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 32)
-        self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 25)
+        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 143)
+        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 39)
+        self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 28)
         migration_created_indexes = {
             "maintenance_task_parts_task_id_idx", "maintenance_task_photos_task_id_idx",
             "assets_external_id_idx", "assets_qr_token_idx", "assets_name_lower_idx",
@@ -561,6 +594,7 @@ class ManifestFingerprintTests(AuthorityFixture):
             "asset_meter_reading_idempotency_idx", "asset_meter_reading_asset_epoch_reading_at_idx",
             "asset_meter_reading_status_idx", "asset_task_mapping_proposals_status_idx",
             "asset_task_mapping_proposals_task_asset_pending_idx",
+            "maintenance_proposals_idempotency_idx", "maintenance_proposals_review_queue_idx",
         }
         all_indexes = {
             index["name"]
@@ -1238,7 +1272,7 @@ class MetadataAndLedgerTests(AuthorityFixture):
                 metadata["declared_version"] = value
             self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
         lower, higher = self.metadata(), self.metadata()
-        lower["declared_version"], higher["declared_version"] = "005", "009"
+        lower["declared_version"], higher["declared_version"] = "006", "010"
         self.assertEqual(self.snapshot(lower).status, authority.AuditStatus.SNAPSHOT_PARTIAL)
         self.assertEqual(self.snapshot(higher).status, authority.AuditStatus.SNAPSHOT_LATER)
 
@@ -1431,7 +1465,7 @@ class MetadataAndLedgerTests(AuthorityFixture):
         for metadata in mutations:
             self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.LEDGER_INCONSISTENT)
         later = copy.deepcopy(valid)
-        later["ledger"]["entries"].append({"order": 7, "version": "009", "filename": "009.sql", "sha256": "0" * 64})
+        later["ledger"]["entries"].append({"order": 8, "version": "010", "filename": "010.sql", "sha256": "0" * 64})
         self.assertEqual(self.snapshot(later).status, authority.AuditStatus.SNAPSHOT_LATER)
 
     def test_malformed_ledger_entries_never_escape(self):

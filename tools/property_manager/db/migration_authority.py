@@ -100,7 +100,7 @@ class UnsafeAuthorityObjectError(OSError):
 class AuditStatus(str, enum.Enum):
     MIGRATION_FILES_VERIFIED = "migration_files_verified"
     MIGRATION_FILES_INVALID = "migration_files_invalid"
-    SNAPSHOT_CONSISTENT = "snapshot_consistent_001_006"
+    SNAPSHOT_CONSISTENT = "snapshot_consistent_001_009"
     SNAPSHOT_PARTIAL = "snapshot_partial"
     SNAPSHOT_AMBIGUOUS = "snapshot_ambiguous"
     SNAPSHOT_LATER = "snapshot_later_than_authorized"
@@ -732,7 +732,8 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
         if type(raw["format_version"]) is not int or raw["format_version"] != 2 or raw["authority"] != "propertymanager":
             raise AuthorityConfigurationError("authority manifest version is invalid")
         entries = raw["canonical_migrations"]
-        if type(entries) is not list or len(entries) != 6:
+        expected_versions = ("001", "002", "003", "004", "005", "006", "009")
+        if type(entries) is not list or len(entries) != len(expected_versions):
             raise AuthorityConfigurationError("canonical migration list is invalid")
         canonical: list[MigrationSpec] = []
         for position, raw_entry in enumerate(entries, 1):
@@ -742,7 +743,7 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
             )
             if (
                 type(spec.version) is not str
-                or spec.version != f"{position:03d}"
+                or spec.version != expected_versions[position - 1]
                 or type(spec.order) is not int
                 or spec.order != position
                 or type(spec.filename) is not str
@@ -764,9 +765,9 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
                 raise AuthorityConfigurationError("reserved migration entry is invalid")
             _safe_contract_text(entry["reason"], "reserved migration reason")
             reserved_versions.append(entry["version"])
-        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "009":
+        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "010":
             raise AuthorityConfigurationError("reserved or next migration version is invalid")
-        return AuthorityManifest(tuple(canonical), ("007", "008"), "009", _validate_contract(raw["schema_contract"]))
+        return AuthorityManifest(tuple(canonical), ("007", "008"), "010", _validate_contract(raw["schema_contract"]))
     except AuthorityConfigurationError:
         raise
     except (BoundedInputError, MemoryError, RecursionError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
@@ -1020,7 +1021,7 @@ def _classify_ledger(manifest: AuthorityManifest, ledger: Any) -> AuditStatus | 
                 or type(entry["sha256"]) is not str
             ):
                 return AuditStatus.LEDGER_INCONSISTENT
-            if entry["version"] > "006":
+            if entry["version"] > "009":
                 return AuditStatus.SNAPSHOT_LATER
         expected = [
             {"order": spec.order, "version": spec.version, "filename": spec.filename, "sha256": spec.sha256}
@@ -1062,9 +1063,9 @@ def _audit_supplied_metadata(
         declared = metadata["declared_version"]
         if type(declared) is not str or re.fullmatch(r"[0-9]{3}", declared) is None:
             return _result(AuditStatus.SNAPSHOT_AMBIGUOUS, manifest, identity_assurance=assurance)
-        if declared < "006":
+        if declared < "009":
             return _result(AuditStatus.SNAPSHOT_PARTIAL, manifest, identity_assurance=assurance)
-        if declared > "006":
+        if declared > "009":
             return _result(AuditStatus.SNAPSHOT_LATER, manifest, identity_assurance=assurance)
         ledger_status = _classify_ledger(manifest, metadata["ledger"])
         if ledger_status:

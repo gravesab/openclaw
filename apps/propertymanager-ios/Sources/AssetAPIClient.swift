@@ -26,6 +26,18 @@ extension PropertyAPIClient {
         return try decoder.decode(RanchAsset.self, from: data)
     }
 
+    func renameAsset(id: UUID, name: String) async throws -> RanchAsset {
+        let url = try makeURL("/assets/\(id.uuidString)", versioned: true)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["name": name])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(RanchAsset.self, from: data)
+    }
+
     func fetchMeterReadings(assetId: UUID, limit: Int = 50) async throws -> [MeterReading] {
         let url = try makeURL("/assets/\(assetId.uuidString)/meter-readings?limit=\(limit)", versioned: true)
         let request = authorizedRequest(url: url)

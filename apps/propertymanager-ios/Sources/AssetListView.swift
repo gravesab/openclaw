@@ -6,8 +6,10 @@ struct AssetListView: View {
     @State private var assetPendingDeactivate: RanchAsset?
     @State private var showDeactivateConfirm = false
 
-    var meteredAssets: [RanchAsset] {
-        store.assets.filter { $0.meter?.hasMeter == true }
+    var visibleAssets: [RanchAsset] {
+        store.assets.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
     }
 
     var body: some View {
@@ -15,7 +17,7 @@ struct AssetListView: View {
             if store.isLoadingAssets {
                 ProgressView("Loading assets…")
             }
-            ForEach(meteredAssets) { asset in
+            ForEach(visibleAssets) { asset in
                 NavigationLink(value: asset.id) {
                     AssetRowView(asset: asset)
                 }
@@ -68,6 +70,10 @@ struct AssetRowView: View {
                 .font(.headline)
             if let meter = asset.meter, meter.hasMeter {
                 Text("\(formatValue(meter.currentValue)) \(meter.unit)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Frequency-based maintenance")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }

@@ -62,6 +62,27 @@ class DockerExecDrainTests(unittest.TestCase):
     def test_wait_inflight_returns_when_empty(self) -> None:
         self.assertEqual(self.db.wait_inflight_docker_execs(timeout=1.0), 0)
 
+    def test_execute_script_uses_one_atomic_docker_psql_call(self) -> None:
+        completed = subprocess.CompletedProcess(
+            ["docker", "exec"], 0, "COMMIT\n", ""
+        )
+        statements = [
+            ("INSERT INTO sample (name) VALUES (%s)", ("operator's mower",)),
+            ("UPDATE sample SET active = %s WHERE name = %s", (True, "operator's mower")),
+        ]
+
+        with mock.patch.object(
+            self.db, "_docker_psql", return_value=completed
+        ) as docker_psql:
+            self.db.execute_script(statements)
+
+        docker_psql.assert_called_once()
+        sql = docker_psql.call_args.args[0]
+        self.assertTrue(sql.startswith("BEGIN;"))
+        self.assertTrue(sql.endswith("COMMIT;"))
+        self.assertIn("operator''s mower", sql)
+        self.assertIn("active = TRUE", sql)
+
     def test_wait_inflight_terminates_on_timeout(self) -> None:
         class HangProc:
             def __init__(self) -> None:

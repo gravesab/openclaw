@@ -12,9 +12,10 @@ from werkzeug.exceptions import HTTPException
 
 import db as pm_db
 import meter_schedule as ms
+import task_title as tt
 from assets_api import register_asset_routes
 from auth import auth_required, auth_status
-from decimal_utils import parse_decimal
+from decimal_utils import parse_decimal, decimal_to_db
 from errors import error_response, validation_error
 from mapping_proposals import register_mapping_routes
 
@@ -49,6 +50,9 @@ TASK_COLUMNS = """
 """
 
 PATCHABLE_FIELDS = {
+    "area",
+    "item",
+    "estimated_minutes",
     "vendor",
     "part_number",
     "part_url",
@@ -69,7 +73,14 @@ PATCHABLE_FIELDS = {
     "next_due_meter_value",
 }
 
-NUMERIC_PATCH_FIELDS = {"part_cost", "annual_cost", "meter_interval_value", "last_done_meter_value", "next_due_meter_value"}
+NUMERIC_PATCH_FIELDS = {
+    "part_cost",
+    "annual_cost",
+    "meter_interval_value",
+    "last_done_meter_value",
+    "next_due_meter_value",
+    "estimated_minutes",
+}
 
 PART_COLUMNS = """
     id, task_id, name, oem_part_number, part_number, buy_url, cost, quantity,
@@ -91,12 +102,35 @@ PART_UPSERT_FIELDS = {
 
 def normalize_patch_value(field: str, value):
     if field in NUMERIC_PATCH_FIELDS:
-        if value is None or value == "":
+        if value is None:
+            return None
+        # Blank string is invalid for meter fields (blank ≠ 0); other numerics may clear via "".
+        if value == "":
+            if field in {
+                "meter_interval_value",
+                "last_done_meter_value",
+                "next_due_meter_value",
+            }:
+                raise ValueError(f"{field} must be a decimal number (blank is not zero)")
             return None
         try:
+            if field in {
+                "meter_interval_value",
+                "last_done_meter_value",
+                "next_due_meter_value",
+            }:
+                return ms.parse_optional_meter_decimal(value, field=field)
+            if field == "estimated_minutes":
+                return int(value)
             return float(value)
         except (TypeError, ValueError) as exc:
             raise ValueError(f"{field} must be a number") from exc
+
+    if field == "schedule_kind":
+        text = str(value or "").strip().lower()
+        if text not in ms.SCHEDULE_KINDS:
+            raise ValueError(f"schedule_kind must be one of {sorted(ms.SCHEDULE_KINDS)}")
+        return text
 
     if field == "origin":
         text = str(value or "").strip().lower()
@@ -115,6 +149,30 @@ def normalize_origin(value) -> str:
     if text in {"manufacturer", "owner"}:
         return text
     return "owner"
+
+
+def fetch_asset_name(asset_id: str) -> str | None:
+    row = pm_db.execute_one_json(
+        """
+        SELECT name
+        FROM propertymanager.assets
+        WHERE id = %s AND is_active = true
+        """,
+        (asset_id,),
+    )
+    if row is None:
+        return None
+    name = row.get("name")
+    return str(name).strip() if name else None
+
+
+def normalize_written_task_title(*, area: str, item: str, asset_id) -> tuple[str, str]:
+    return tt.normalize_task_area_and_item(
+        area=area,
+        item=item,
+        asset_id=asset_id,
+        fetch_asset_name=fetch_asset_name,
+    )
 
 
 def normalize_part_payload(raw: dict, *, sort_order: int) -> dict:
@@ -579,26 +637,79 @@ def upsert_task():
     if schedule_kind not in ms.SCHEDULE_KINDS:
         schedule_kind = "calendar"
 
-    meter_interval_value = payload.get("meter_interval_value")
-    if meter_interval_value is not None and meter_interval_value != "":
-        meter_interval_value = float(meter_interval_value)
-    else:
+    try:
         meter_interval_value = None
-
-    last_done_meter = payload.get("last_done_meter_value")
-    next_due_meter = payload.get("next_due_meter_value")
-    if last_done_meter is not None and last_done_meter != "":
-        last_done_meter = float(last_done_meter)
-    else:
+        if "meter_interval_value" in payload:
+            meter_interval_value = ms.parse_optional_meter_decimal(
+                payload.get("meter_interval_value"), field="meter_interval_value"
+            )
         last_done_meter = None
-    if next_due_meter is not None and next_due_meter != "":
-        next_due_meter = float(next_due_meter)
-    else:
+        if "last_done_meter_value" in payload:
+            last_done_meter = ms.parse_optional_meter_decimal(
+                payload.get("last_done_meter_value"), field="last_done_meter_value"
+            )
         next_due_meter = None
+        if "next_due_meter_value" in payload:
+            raw_trigger = payload.get("next_due_meter_value")
+            if raw_trigger is None:
+                next_due_meter = None
+            else:
+                next_due_meter = ms.parse_optional_meter_decimal(
+                    raw_trigger, field="next_due_meter_value"
+                )
+    except ValueError as exc:
+        return validation_error(str(exc))
 
     asset_id = payload.get("asset_id")
     if asset_id is not None and str(asset_id).strip() == "":
         asset_id = None
+
+    area, item = normalize_written_task_title(
+        area=str(payload.get("area") or "House"),
+        item=str(payload.get("item") or ""),
+        asset_id=asset_id,
+    )
+
+    existing_dates = None
+    if payload.get("id"):
+        existing_dates = pm_db.execute_one_json(
+            """
+            SELECT last_done, next_due
+            FROM propertymanager.maintenance_tasks
+            WHERE id = %s
+            """,
+            (task_id,),
+        )
+    default_last_done = datetime.now(timezone.utc)
+    last_done = (
+        payload.get("last_done")
+        or (existing_dates or {}).get("last_done")
+        or default_last_done
+    )
+    next_due = (
+        payload.get("next_due")
+        or (existing_dates or {}).get("next_due")
+        or (default_last_done + timedelta(days=30))
+    )
+
+    meter_interval_unit = str(payload.get("meter_interval_unit") or "").strip() or None
+    warnings: list[str] = []
+    if next_due_meter is not None:
+        if meter_interval_unit is None and asset_id:
+            meter_row = ms.fetch_meter_row(str(asset_id))
+            meter_type = str((meter_row or {}).get("meter_type") or "")
+            meter_interval_unit = ms._CANONICAL_UNIT_BY_METER_TYPE.get(meter_type) or "hrs"
+        elif meter_interval_unit is None:
+            meter_interval_unit = "hrs"
+        try:
+            warnings = ms.validate_meter_trigger(
+                asset_id=asset_id,
+                schedule_kind=schedule_kind,
+                next_due_meter=next_due_meter,
+                meter_interval_unit=meter_interval_unit,
+            )
+        except ValueError as exc:
+            return validation_error(str(exc))
 
     pm_db.execute(
         """
@@ -665,9 +776,9 @@ def upsert_task():
         """,
         (
             task_id,
-            str(payload.get("area") or "House"),
-            str(payload.get("item") or ""),
-            str(payload.get("category_name") or payload.get("area") or "House"),
+            area,
+            item,
+            str(payload.get("category_name") or area or "House"),
             str(payload.get("priority") or "Medium"),
             str(payload.get("frequency") or "Monthly"),
             str(payload.get("task_description") or ""),
@@ -678,8 +789,8 @@ def upsert_task():
             int(payload.get("estimated_minutes") or 30),
             int(payload.get("warning_days") or 30),
             int(payload.get("critical_days") or 45),
-            payload.get("last_done"),
-            payload.get("next_due"),
+            last_done,
+            next_due,
             bool(payload.get("send_telegram_update", True)),
             bool(payload.get("include_in_daily_briefing", True)),
             bool(payload.get("alert_if_overdue", True)),
@@ -691,7 +802,7 @@ def upsert_task():
             asset_id,
             schedule_kind,
             meter_interval_value,
-            str(payload.get("meter_interval_unit") or "") or None,
+            meter_interval_unit,
             last_done_meter,
             next_due_meter,
             json.dumps(history),
@@ -742,7 +853,10 @@ def upsert_task():
     updated = fetch_task_or_404(task_id)
     if updated is None:
         return jsonify({"error": "Task upsert failed"}), 500
-    return jsonify(enrich_tasks([updated])[0])
+    body = enrich_tasks([updated])[0]
+    if warnings:
+        body["warnings"] = warnings
+    return jsonify(body)
 
 
 @app.patch("/tasks/<task_id>")
@@ -763,7 +877,50 @@ def patch_task(task_id: str):
         for field, value in payload.items():
             updates[field] = normalize_patch_value(field, value)
     except ValueError as exc:
-        return jsonify({"error": str(exc)}), 400
+        return validation_error(str(exc))
+
+    existing = fetch_task_or_404(task_id)
+    if existing is None:
+        return jsonify({"error": "Task not found"}), 404
+
+    # Re-canonicalize title when area/item/asset_id participate in the patch.
+    if {"area", "item", "asset_id"} & set(updates):
+        effective_area = updates["area"] if "area" in updates else existing.get("area")
+        effective_item = updates["item"] if "item" in updates else existing.get("item")
+        effective_asset = updates["asset_id"] if "asset_id" in updates else existing.get("asset_id")
+        area, item = normalize_written_task_title(
+            area=str(effective_area or "House"),
+            item=str(effective_item or ""),
+            asset_id=effective_asset,
+        )
+        updates["area"] = area
+        updates["item"] = item
+
+    warnings: list[str] = []
+    setting_trigger = "next_due_meter_value" in updates and updates.get("next_due_meter_value") is not None
+    if setting_trigger:
+        effective_asset = updates["asset_id"] if "asset_id" in updates else existing.get("asset_id")
+        effective_kind = updates["schedule_kind"] if "schedule_kind" in updates else (
+            existing.get("schedule_kind") or "calendar"
+        )
+        effective_unit = updates["meter_interval_unit"] if "meter_interval_unit" in updates else (
+            existing.get("meter_interval_unit")
+        )
+        if not effective_unit:
+            meter_row = ms.fetch_meter_row(str(effective_asset)) if effective_asset else None
+            meter_type = str((meter_row or {}).get("meter_type") or "")
+            effective_unit = ms._CANONICAL_UNIT_BY_METER_TYPE.get(meter_type) or "hrs"
+            if "meter_interval_unit" not in updates:
+                updates["meter_interval_unit"] = effective_unit
+        try:
+            warnings = ms.validate_meter_trigger(
+                asset_id=effective_asset,
+                schedule_kind=str(effective_kind),
+                next_due_meter=updates["next_due_meter_value"],
+                meter_interval_unit=str(effective_unit),
+            )
+        except ValueError as exc:
+            return validation_error(str(exc))
 
     set_clause = ", ".join(f"{column} = %s" for column in updates)
     values = list(updates.values()) + [task_id]
@@ -777,10 +934,14 @@ def patch_task(task_id: str):
         """,
         values,
     )
+
     updated = fetch_task_or_404(task_id)
     if updated is None or affected == 0:
         return jsonify({"error": "Task not found"}), 404
-    return jsonify(enrich_tasks([updated])[0])
+    body = enrich_tasks([updated])[0]
+    if warnings:
+        body["warnings"] = warnings
+    return jsonify(body)
 
 
 @app.delete("/tasks/<task_id>")
@@ -946,6 +1107,10 @@ def complete_task(task_id: str):
     if task is None:
         return error_response("NOT_FOUND", "Task not found", status=404)
 
+    # Calendar next_due on complete: completed_at + warning_days (legacy CSV-era
+    # interval). Mac Recalculate Next Due uses Frequency instead (lastDone +
+    # Daily/Weekly/…/Yearly). Do not change this prod formula without an
+    # explicit migration — Mac Recalculate is local until Save.
     warning_days = int(task.get("warning_days") or 0)
     next_due = completed_at + timedelta(days=max(warning_days, 1))
 
@@ -973,32 +1138,73 @@ def complete_task(task_id: str):
         return validation_error(str(exc))
 
     completion_id = str(uuid4())
-    pm_db.execute(
-        """
-        INSERT INTO propertymanager.maintenance_completions
-            (id, task_id, completed_at, note, meter_value_at_completion, meter_reading_id)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """,
+    meter_val_db = None
+    if meter_result and meter_result.get("meter_value_decimal") is not None:
+        meter_val_db = decimal_to_db(meter_result["meter_value_decimal"])
+    elif meter_value is not None:
+        meter_val_db = decimal_to_db(meter_value)
+
+    statements: list[tuple] = [
         (
-            completion_id,
-            task_id,
-            completed_at,
-            note,
-            meter_result.get("meter_value") if meter_result else meter_value,
-            (meter_result or {}).get("meter_reading_id"),
+            """
+            INSERT INTO propertymanager.maintenance_completions
+                (id, task_id, completed_at, note, meter_value_at_completion, meter_reading_id)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                completion_id,
+                task_id,
+                completed_at,
+                note,
+                meter_val_db,
+                (meter_result or {}).get("meter_reading_id"),
+            ),
         ),
-    )
-    pm_db.execute(
-        """
-        UPDATE propertymanager.maintenance_tasks
-        SET last_done = %s,
-            next_due = %s,
-            result_notes = COALESCE(%s, result_notes),
-            updated_at = now()
-        WHERE id = %s
-        """,
-        (completed_at, next_due, note, task_id),
-    )
+    ]
+
+    if meter_result and meter_result.get("applied_meter"):
+        statements.append(
+            (
+                """
+                UPDATE propertymanager.maintenance_tasks
+                SET last_done = %s,
+                    next_due = %s,
+                    last_done_meter_value = %s,
+                    next_due_meter_value = %s,
+                    result_notes = COALESCE(%s, result_notes),
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (
+                    completed_at,
+                    next_due,
+                    meter_val_db,
+                    meter_result.get("next_due_meter_value"),
+                    note,
+                    task_id,
+                ),
+            )
+        )
+    else:
+        statements.append(
+            (
+                """
+                UPDATE propertymanager.maintenance_tasks
+                SET last_done = %s,
+                    next_due = %s,
+                    result_notes = COALESCE(%s, result_notes),
+                    updated_at = now()
+                WHERE id = %s
+                """,
+                (completed_at, next_due, note, task_id),
+            )
+        )
+
+    try:
+        pm_db.execute_script(statements)
+    except RuntimeError as exc:
+        return error_response("DB_ERROR", str(exc), status=500)
+
     updated = pm_db.execute_one_json(
         f"""
         SELECT

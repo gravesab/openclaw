@@ -7,6 +7,7 @@ import json
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from typing import Any
 from uuid import uuid4
 
 from flask import g, jsonify, request
@@ -575,6 +576,34 @@ def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
 
+def _select_meter_asset(text: str, assets: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, float]:
+    """Prefer the most specific substring match before fuzzy similarity."""
+    text_lower = text.lower()
+    best = None
+    best_score = 0.0
+    best_rank = (0, 0, 0.0)
+
+    for row in assets:
+        names = [str(row.get("name") or "")]
+        aliases = row.get("aliases") or []
+        if isinstance(aliases, list):
+            names.extend(str(alias) for alias in aliases)
+        names.append(str(row.get("external_id") or ""))
+
+        for name in names:
+            if not name:
+                continue
+            is_substring = name.lower() in text_lower
+            score = 1.0 if is_substring else _similarity(name, text)
+            rank = (1 if is_substring else 0, len(name) if is_substring else 0, score)
+            if rank > best_rank:
+                best_rank = rank
+                best_score = score
+                best = row
+
+    return best, best_score
+
+
 def parse_meter_reading():
     payload = request.get_json(silent=True) or {}
     text = str(payload.get("text") or "").strip()
@@ -604,25 +633,7 @@ def parse_meter_reading():
         """
     )
 
-    text_lower = text.lower()
-    best = None
-    best_score = 0.0
-    for row in assets:
-        names = [str(row.get("name") or "")]
-        aliases = row.get("aliases") or []
-        if isinstance(aliases, list):
-            names.extend(str(a) for a in aliases)
-        names.append(str(row.get("external_id") or ""))
-        for name in names:
-            if not name:
-                continue
-            if name.lower() in text_lower:
-                score = 1.0
-            else:
-                score = _similarity(name, text)
-            if score > best_score:
-                best_score = score
-                best = row
+    best, best_score = _select_meter_asset(text, assets)
 
     if best is None or best_score < 0.35:
         return error_response(

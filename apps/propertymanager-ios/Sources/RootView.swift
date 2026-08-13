@@ -7,17 +7,17 @@ struct RootView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if PropertyManagerBuildEnvironment.isDevelopment {
-                Text("PROPERTY MANAGER DEV · DEV DATA")
-                    .font(.caption2.bold())
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 4)
-                    .foregroundStyle(.black)
-                    .background(Color.orange)
-                    .accessibilityLabel("Property Manager Development using development data")
-            }
+            Text(PropertyManagerBuildIdentity.label)
+                .font(.caption2.bold().monospacedDigit())
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
+                .foregroundStyle(.black)
+                .background(PropertyManagerBuildEnvironment.isDevelopment ? Color.orange : Color.green)
+                .accessibilityLabel(
+                    "Property Manager \(PropertyManagerBuildIdentity.environment) version "
+                        + PropertyManagerBuildIdentity.version)
 
             HStack(spacing: 8) {
                 Text("Appearance")

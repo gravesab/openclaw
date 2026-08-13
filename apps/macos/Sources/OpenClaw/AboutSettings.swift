@@ -33,6 +33,9 @@ struct AboutSettings: View {
                     .font(.title3.bold())
                 Text("Version \(self.versionString)")
                     .foregroundStyle(.secondary)
+                Text(OpenClawMacBuildIdentity.environment)
+                    .font(.caption.bold())
+                    .foregroundStyle(OpenClawMacBuildIdentity.color)
                 if let buildTimestamp {
                     Text("Built \(buildTimestamp)\(self.buildSuffix)")
                         .font(.footnote)

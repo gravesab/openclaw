@@ -145,6 +145,9 @@ struct RootTabs: View {
                 self.rootOverlays(
                     self.sidebarSplitContent
                         .tint(OpenClawBrand.accent))))
+            .safeAreaInset(edge: .top, spacing: 0) {
+                BuildIdentityBanner()
+            }
             .overlay(alignment: .topLeading) {
                 self.uiTestReadinessMarker
             }

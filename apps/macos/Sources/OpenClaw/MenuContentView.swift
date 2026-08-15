@@ -173,6 +173,15 @@ struct MenuContent: View {
             if let updater, updater.isAvailable, self.updateStatus.isUpdateReady {
                 Button("Update ready, restart now?") { updater.checkForUpdates(nil) }
             }
+            HStack {
+                Text(OpenClawMacBuildIdentity.label)
+                    .font(.caption.monospacedDigit().weight(.semibold))
+                    .foregroundStyle(OpenClawMacBuildIdentity.color)
+                Spacer(minLength: 0)
+            }
+            .accessibilityLabel(
+                "OpenClaw \(OpenClawMacBuildIdentity.environment) version "
+                    + OpenClawMacBuildIdentity.version)
             Button("Quit") { NSApplication.shared.terminate(nil) }
         }
         .task(id: self.state.swabbleEnabled) {

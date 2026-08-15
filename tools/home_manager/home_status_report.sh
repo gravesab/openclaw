@@ -22,12 +22,6 @@ systemctl --user --no-pager --lines=15 status openclaw-gateway.service || true
 echo
 
 echo "=============================="
-echo "Voice Service"
-echo "=============================="
-systemctl --user --no-pager --lines=15 status openclaw-voice.service || true
-echo
-
-echo "=============================="
 echo "Dashboard"
 echo "=============================="
 systemctl --user --no-pager --lines=15 status openclaw-dashboard.service || true

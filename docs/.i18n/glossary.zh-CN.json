@@ -986,5 +986,109 @@
   {
     "source": "ds4 (local DeepSeek V4)",
     "target": "ds4（本地 DeepSeek V4）"
+  },
+  {
+    "source": "OpenClaw Documentation Center",
+    "target": "OpenClaw 文档中心"
+  },
+  {
+    "source": "OpenClaw Dashboard Report",
+    "target": "OpenClaw 仪表板报告"
+  },
+  {
+    "source": "OpenClaw Project Context",
+    "target": "OpenClaw 项目上下文"
+  },
+  {
+    "source": "PropertyManager Asset Architecture",
+    "target": "PropertyManager 资产架构"
+  },
+  {
+    "source": "OpenClaw Python Web Runtime Inventory",
+    "target": "OpenClaw Python Web 运行时清单"
+  },
+  {
+    "source": "RanchBot Architecture",
+    "target": "RanchBot 架构"
+  },
+  {
+    "source": "OpenClaw Tools and Engineering Practices",
+    "target": "OpenClaw 工具与工程实践"
+  },
+  {
+    "source": "Bot loop protection",
+    "target": "机器人循环保护"
+  },
+  {
+    "source": "Personal agent benchmark pack",
+    "target": "个人智能体基准包"
+  },
+  {
+    "source": "OpenClaw AI Governance Manifest",
+    "target": "OpenClaw AI 治理清单"
+  },
+  {
+    "source": "OpenClaw Foundational Documentation",
+    "target": "OpenClaw 基础文档"
+  },
+  {
+    "source": "OpenClaw Development Directive",
+    "target": "OpenClaw 开发指令"
+  },
+  {
+    "source": "OpenClaw Operations Runbook",
+    "target": "OpenClaw 运维手册"
+  },
+  {
+    "source": "OpenClaw Project Overview",
+    "target": "OpenClaw 项目概述"
+  },
+  {
+    "source": "PropertyManager Foundational Requirements",
+    "target": "PropertyManager 基础要求"
+  },
+  {
+    "source": "OpenClaw Restore Manifest",
+    "target": "OpenClaw 恢复清单"
+  },
+  {
+    "source": "OpenClaw Operational Philosophy",
+    "target": "OpenClaw 运营理念"
+  },
+  {
+    "source": "SOUL.md personality guide",
+    "target": "SOUL.md 个性指南"
+  },
+  {
+    "source": "Admin HTTP RPC plugin",
+    "target": "Admin HTTP RPC 插件"
+  },
+  {
+    "source": "Operator scopes",
+    "target": "操作员权限范围"
+  },
+  {
+    "source": "Gateway security",
+    "target": "网关安全"
+  },
+  {
+    "source": "Remote access",
+    "target": "远程访问"
+  },
+  {
+    "source": "SDK subpaths",
+    "target": "SDK 子路径"
+  },
+  {
+    "source": "Admin Http Rpc plugin",
+    "target": "Admin Http Rpc 插件"
+  },
+  {
+    "source": "admin-http-rpc",
+    "target": "admin-http-rpc"
+  },
+  {
+    "source": "ds4",
+    "target": "ds4"
   }
 ]

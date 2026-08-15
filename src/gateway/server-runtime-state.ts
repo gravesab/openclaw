@@ -90,6 +90,9 @@ export async function createGatewayRuntimeState(params: {
   logHooks: ReturnType<typeof createSubsystemLogger>;
   logPlugins: ReturnType<typeof createSubsystemLogger>;
   getReadiness?: ReadinessChecker;
+  getTrustedRecordDevelopmentRuntime?: Parameters<
+    typeof createGatewayHttpServer
+  >[0]["getTrustedRecordDevelopmentRuntime"];
 }): Promise<{
   releasePluginRouteRegistry: () => void;
   httpServer: HttpServer;
@@ -247,6 +250,7 @@ export async function createGatewayRuntimeState(params: {
         getResolvedAuth: params.getResolvedAuth,
         rateLimiter: params.rateLimiter,
         getReadiness: params.getReadiness,
+        getTrustedRecordDevelopmentRuntime: params.getTrustedRecordDevelopmentRuntime,
         tlsOptions: params.gatewayTls?.enabled ? params.gatewayTls.tlsOptions : undefined,
       });
       // Attach upgrade handler BEFORE listening to prevent race condition

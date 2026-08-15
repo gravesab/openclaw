@@ -18,6 +18,9 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 API = os.environ.get("PROPERTYMANAGER_API_BASE", "http://127.0.0.1:5062").rstrip("/")
+POSTGRES_CONTAINER = os.environ.get("PROPERTYMANAGER_POSTGRES_CONTAINER", "postgres")
+DB_USER = os.environ.get("PROPERTYMANAGER_DB_USER", "openclaw")
+DB_NAME = os.environ.get("PROPERTYMANAGER_DB_NAME", "")
 AUTH_HEADERS = {
     "Content-Type": "application/json",
     "X-Operator-Identity": "phase1-test",
@@ -47,8 +50,28 @@ def _req(method: str, path: str, body: dict | None = None, headers: dict | None 
 
 
 def _psql(sql: str) -> None:
+    if not DB_NAME.endswith("_dev"):
+        raise RuntimeError(
+            "Refusing test database mutation: "
+            f"PROPERTYMANAGER_DB_NAME must end with _dev, got {DB_NAME!r}"
+        )
+
     result = subprocess.run(
-        ["docker", "exec", "-i", "postgres", "psql", "-U", "openclaw", "-d", "openclaw", "-v", "ON_ERROR_STOP=1", "-c", sql],
+        [
+            "docker",
+            "exec",
+            "-i",
+            POSTGRES_CONTAINER,
+            "psql",
+            "-U",
+            DB_USER,
+            "-d",
+            DB_NAME,
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            sql,
+        ],
         capture_output=True,
         text=True,
         check=False,
@@ -62,18 +85,18 @@ def wait_health() -> None:
         try:
             with urllib.request.urlopen(API + "/health", timeout=2) as resp:
                 data = json.loads(resp.read().decode())
-                if data.get("schema_version") == "006":
+                if data.get("schema_version") == "009":
                     return
         except (urllib.error.URLError, TimeoutError, json.JSONDecodeError):
             pass
         time.sleep(0.5)
-    raise RuntimeError("API health check failed or schema_version != 006")
+    raise RuntimeError("API health check failed or schema_version != 009")
 
 
 def test_health() -> None:
     status, data = _req("GET", "/health")
     assert status == 200, data
-    assert data.get("schema_version") == "006", data
+    assert data.get("schema_version") == "009", data
     assert data.get("api_version") == "v1", data
 
 
@@ -208,12 +231,12 @@ def test_mapping_proposal_flow() -> None:
         [
             "docker",
             "exec",
-            "postgres",
+            POSTGRES_CONTAINER,
             "psql",
             "-U",
-            "openclaw",
+            DB_USER,
             "-d",
-            "openclaw",
+            DB_NAME,
             "-At",
             "-c",
             f"SELECT asset_id::text FROM propertymanager.maintenance_tasks WHERE id = '{task_id}';",

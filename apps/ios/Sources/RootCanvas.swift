@@ -109,6 +109,9 @@ struct RootCanvas: View {
                 CameraFlashOverlay(nonce: self.appModel.cameraFlashNonce)
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            BuildIdentityBanner()
+        }
         .gatewayTrustPromptAlert()
         .deepLinkAgentPromptAlert()
         .execApprovalPromptDialog()

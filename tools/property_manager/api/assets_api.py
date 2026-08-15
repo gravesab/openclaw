@@ -7,6 +7,7 @@ import json
 import re
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
+from typing import Any
 from uuid import uuid4
 
 from flask import g, jsonify, request
@@ -124,6 +125,37 @@ def fetch_asset_or_404(asset_id: str) -> dict | None:
     return enrich_asset(row)
 
 
+def asset_name_conflicts(name: str, *, excluding_asset_id: str | None = None) -> bool:
+    """Return whether an active asset already uses this human-visible name."""
+    normalized_name = name.strip()
+    params: list[str] = [normalized_name]
+    exclusion = ""
+    if excluding_asset_id is not None:
+        exclusion = " AND id <> %s"
+        params.append(excluding_asset_id)
+    row = pm_db.execute_one_json(
+        f"""
+        SELECT id
+        FROM propertymanager.assets
+        WHERE is_active = true
+          AND lower(btrim(name)) = lower(btrim(%s))
+          {exclusion}
+        LIMIT 1
+        """,
+        params,
+    )
+    return row is not None
+
+
+def duplicate_asset_name_response():
+    return error_response(
+        "ASSET_NAME_CONFLICT",
+        "An active asset with this name already exists",
+        field="name",
+        status=409,
+    )
+
+
 def enrich_asset(row: dict) -> dict:
     item = dict(row)
     asset_id = str(item["id"])
@@ -233,6 +265,8 @@ def create_asset():
     name = str(payload.get("name") or "").strip()
     if not external_id or not name:
         return validation_error("external_id and name are required")
+    if asset_name_conflicts(name):
+        return duplicate_asset_name_response()
 
     asset_id = str(payload.get("id") or uuid4())
     qr_token = str(payload.get("qr_token") or uuid4().hex)
@@ -299,6 +333,14 @@ def patch_asset(asset_id: str):
     )
     if exists is None:
         return error_response("NOT_FOUND", "Asset not found", status=404)
+
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            return validation_error("name is required", field="name")
+        if asset_name_conflicts(name, excluding_asset_id=asset_id):
+            return duplicate_asset_name_response()
+        payload["name"] = name
 
     updates = []
     values = []
@@ -412,9 +454,18 @@ def create_meter_reading(asset_id: str):
 
     payload = request.get_json(silent=True) or {}
     try:
-        value = parse_decimal(payload.get("value"), field="value")
+        value, delta_applied = ms.resolve_meter_reading_absolute(
+            asset_id,
+            value=payload.get("value"),
+            delta=payload.get("delta"),
+            add_value=payload.get("add_value"),
+        )
     except ValueError as exc:
-        return validation_error(str(exc), field="value")
+        msg = str(exc)
+        field = "delta" if "delta" in msg.lower() or "add_value" in msg.lower() else "value"
+        if "either value" in msg or "value or delta" in msg:
+            field = "value"
+        return validation_error(msg, field=field)
 
     idempotency_key = request.headers.get("Idempotency-Key") or payload.get("idempotency_key")
     idempotency_key = str(idempotency_key).strip() if idempotency_key else None
@@ -477,14 +528,34 @@ def create_meter_reading(asset_id: str):
                 "proposed_value": result.get("proposed_value"),
                 "options": result.get("options"),
                 "preview_token": result.get("preview_token"),
+                "delta": format_decimal(delta_applied) if delta_applied is not None else None,
             },
         )
 
+    absolute_written = format_decimal(value)
+    delta_out = format_decimal(delta_applied) if delta_applied is not None else None
+
     if result.get("idempotent_replay"):
-        return jsonify({"asset": fetch_asset_or_404(asset_id), "reading": _serialize_reading(result["reading"]), "idempotent_replay": True})
+        body = {
+            "asset": fetch_asset_or_404(asset_id),
+            "reading": _serialize_reading(result["reading"]),
+            "idempotent_replay": True,
+            "value": absolute_written,
+            "current_value": result.get("current_value"),
+            "delta": delta_out,
+        }
+        return jsonify(body)
 
     updated = fetch_asset_or_404(asset_id)
-    return jsonify({"asset": updated, "reading_id": result.get("reading_id"), "current_value": result.get("current_value")})
+    return jsonify(
+        {
+            "asset": updated,
+            "reading_id": result.get("reading_id"),
+            "value": absolute_written,
+            "current_value": result.get("current_value"),
+            "delta": delta_out,
+        }
+    )
 
 
 @auth_required(allow_pin=True)
@@ -535,10 +606,43 @@ _VALUE_PATTERN = re.compile(
     r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|miles?|mi|cycles?)?",
     re.IGNORECASE,
 )
+# "add 2.5 hours", "add 10 miles" → delta mode
+_DELTA_PATTERN = re.compile(
+    r"\b(?:add|plus|\+)\s*(?P<delta>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|miles?|mi|cycles?)?",
+    re.IGNORECASE,
+)
 
 
 def _similarity(a: str, b: str) -> float:
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+
+def _select_meter_asset(text: str, assets: list[dict[str, Any]]) -> tuple[dict[str, Any] | None, float]:
+    """Prefer the most specific substring match before fuzzy similarity."""
+    text_lower = text.lower()
+    best = None
+    best_score = 0.0
+    best_rank = (0, 0, 0.0)
+
+    for row in assets:
+        names = [str(row.get("name") or "")]
+        aliases = row.get("aliases") or []
+        if isinstance(aliases, list):
+            names.extend(str(alias) for alias in aliases)
+        names.append(str(row.get("external_id") or ""))
+
+        for name in names:
+            if not name:
+                continue
+            is_substring = name.lower() in text_lower
+            score = 1.0 if is_substring else _similarity(name, text)
+            rank = (1 if is_substring else 0, len(name) if is_substring else 0, score)
+            if rank > best_rank:
+                best_rank = rank
+                best_score = score
+                best = row
+
+    return best, best_score
 
 
 def parse_meter_reading():
@@ -547,11 +651,19 @@ def parse_meter_reading():
     if not text:
         return validation_error("text is required", field="text")
 
-    match = _VALUE_PATTERN.search(text)
-    if not match:
-        return validation_error("Could not find a meter value in text", field="text")
-
-    value = format_decimal(parse_decimal(match.group("value")))
+    delta_match = _DELTA_PATTERN.search(text)
+    if delta_match:
+        amount = format_decimal(parse_decimal(delta_match.group("delta"), field="delta"))
+        entry_mode = "delta"
+        absolute_value = None
+        delta_value = amount
+    else:
+        match = _VALUE_PATTERN.search(text)
+        if not match:
+            return validation_error("Could not find a meter value in text", field="text")
+        absolute_value = format_decimal(parse_decimal(match.group("value")))
+        delta_value = None
+        entry_mode = "absolute"
 
     assets = pm_db.execute_json(
         f"""
@@ -562,25 +674,7 @@ def parse_meter_reading():
         """
     )
 
-    text_lower = text.lower()
-    best = None
-    best_score = 0.0
-    for row in assets:
-        names = [str(row.get("name") or "")]
-        aliases = row.get("aliases") or []
-        if isinstance(aliases, list):
-            names.extend(str(a) for a in aliases)
-        names.append(str(row.get("external_id") or ""))
-        for name in names:
-            if not name:
-                continue
-            if name.lower() in text_lower:
-                score = 1.0
-            else:
-                score = _similarity(name, text)
-            if score > best_score:
-                best_score = score
-                best = row
+    best, best_score = _select_meter_asset(text, assets)
 
     if best is None or best_score < 0.35:
         return error_response(
@@ -596,7 +690,9 @@ def parse_meter_reading():
         {
             "asset_id": str(best["id"]),
             "asset_name": best.get("name"),
-            "value": value,
+            "value": absolute_value,
+            "delta": delta_value,
+            "entry_mode": entry_mode,
             "unit": unit,
             "meter_type": meter_type,
             "confidence": round(best_score, 3),

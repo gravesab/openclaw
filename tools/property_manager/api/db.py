@@ -418,6 +418,27 @@ def execute(query: str, params: Any = None) -> int:
     return 0
 
 
+def execute_script(statements: list[tuple[str, Any]]) -> None:
+    """Execute parameterized statements as one atomic transaction."""
+    if not statements:
+        return
+
+    if use_docker():
+        sql = "BEGIN;\n" + "\n".join(
+            _mogrify(query, params).rstrip().rstrip(";") + ";"
+            for query, params in statements
+        ) + "\nCOMMIT;"
+        result = _docker_psql(sql)
+        _raise_psql_failure(result)
+        return
+
+    with connect() as connection:
+        with connection.cursor() as cursor:
+            for query, params in statements:
+                cursor.execute(query, params)
+        connection.commit()
+
+
 def connect():
     if use_docker():
         return DockerConnection()

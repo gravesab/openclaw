@@ -189,6 +189,7 @@ export function createGatewayCloseHandler(params: {
   heartbeatRunner: HeartbeatRunner;
   updateCheckStop?: (() => void) | null;
   stopTaskRegistryMaintenance?: (() => Promise<void> | void) | null;
+  closeTrustedRecordRuntime?: (() => Promise<void> | void) | null;
   nodePresenceTimers: Map<string, ReturnType<typeof setInterval>>;
   broadcast: (event: string, payload: unknown, opts?: { dropIfSlow?: boolean }) => void;
   tickInterval: ReturnType<typeof setInterval>;
@@ -347,6 +348,11 @@ export function createGatewayCloseHandler(params: {
       await shutdownStep(
         "task-registry-maintenance",
         () => params.stopTaskRegistryMaintenance?.(),
+        warnings,
+      );
+      await shutdownStep(
+        "trusted-record-runtime",
+        () => params.closeTrustedRecordRuntime?.(),
         warnings,
       );
       await shutdownStep("update-check", () => params.updateCheckStop?.(), warnings);

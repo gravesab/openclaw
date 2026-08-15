@@ -1,0 +1,4 @@
+[Service]
+Environment=OPENCLAW_M4_SSH_KEY=%h/.ssh/openclaw_m4_metrics_ed25519
+Environment=OPENCLAW_M4_SSH_HOST=m4-metrics-host
+Environment=OPENCLAW_M4_SSH_USER=metrics-user

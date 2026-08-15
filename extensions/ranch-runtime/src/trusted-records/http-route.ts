@@ -42,10 +42,7 @@ function sendMethodNotAllowed(res: ServerResponse, allow: string): void {
   });
 }
 
-async function readJsonBody(
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<unknown | undefined> {
+async function readJsonBody(req: IncomingMessage, res: ServerResponse): Promise<unknown> {
   const chunks: Buffer[] = [];
   let totalBytes = 0;
   let tooLarge = false;

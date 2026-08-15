@@ -3,7 +3,7 @@ set -u
 
 export TZ="America/Chicago"
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 REPORT_DIR="$BASE/reports/daily-briefings"
 mkdir -p "$REPORT_DIR"
 

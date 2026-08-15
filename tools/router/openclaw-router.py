@@ -13,13 +13,14 @@ Responsibilities:
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
 
 
-BASE = Path("/home/gravesab/ai/projects/openclaw")
+BASE = Path(os.environ.get("OPENCLAW_BASE", Path(__file__).resolve().parents[2])).resolve()
 
 BACKEND = (
     BASE
@@ -32,8 +33,8 @@ CHAT_AGENT = (
 )
 
 CHAT_PYTHON = Path(
-    "/home/gravesab/ai/projects/openclaw/.venv/bin/python"
-)
+    os.environ.get("OPENCLAW_PYTHON", sys.executable)
+).resolve()
 
 RANCHBRAIN = (
     BASE
@@ -385,68 +386,14 @@ def route(text: str) -> tuple[str, str]:
 
 
 def run_chat_agent(question: str) -> int:
-    # Advisory mode records the model RanchBrain recommends without
-    # changing the current production ChatAgent model.
-    if AI_ADVISOR.is_file() and CHAT_PYTHON.is_file():
-        try:
-            subprocess.run(
-                [
-                    str(CHAT_PYTHON),
-                    str(AI_ADVISOR),
-                    question,
-                ],
-                text=True,
-                capture_output=True,
-                timeout=15,
-                check=False,
-            )
-        except Exception:
-            # Advisory routing must never interrupt the working bot.
-            pass
-
-    if not CHAT_AGENT.is_file():
-        print(
-            "🚨 OpenClaw Router error\n\n"
-            f"ChatAgent not found: {CHAT_AGENT}"
-        )
-        return 1
-
-    if not CHAT_PYTHON.is_file():
-        print(
-            "🚨 OpenClaw Router error\n\n"
-            f"ChatAgent Python environment not found: {CHAT_PYTHON}"
-        )
-        return 1
-
-    try:
-        result = subprocess.run(
-            [str(CHAT_PYTHON), str(CHAT_AGENT), question],
-            text=True,
-            capture_output=True,
-            timeout=300,
-        )
-    except subprocess.TimeoutExpired:
-        print("⚠️ OpenClaw AI timed out while answering.")
-        return 1
-    except Exception as exc:
-        print(
-            "🚨 OpenClaw Router error\n\n"
-            f"{exc}"
-        )
-        return 1
-
-    output = (result.stdout or "").strip()
-    error = (result.stderr or "").strip()
-
-    if output:
-        print(output)
-    elif error:
-        print("⚠️ OpenClaw AI failed\n\n" + error)
-    else:
-        print("The AI returned no response.")
-
-    return result.returncode
-
+    """Fail closed until Ranch conversational AI is reconnected on beta."""
+    print(
+        "🌳 OpenClaw Ranch Bot\n\n"
+        "Conversational AI fallback is not enabled in this beta migration. "
+        "Deterministic Ranch, PropertyManager, backup, briefing, and RanchBrain "
+        "commands remain available. Send /help to see available commands."
+    )
+    return 0
 
 def run_ranchbrain_review(command: str) -> int:
     if not RANCHBRAIN_REVIEW.is_file():

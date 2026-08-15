@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 
+import os
 import subprocess
 import sys
 import re
 from pathlib import Path
 
-BASE = Path("/home/gravesab/ai/projects/openclaw")
+BASE = Path(os.environ.get("OPENCLAW_BASE", Path(__file__).resolve().parents[2])).resolve()
 METER_SCRIPT = BASE / "tools/property_manager/propertymanager-meter.py"
 UPDATE_SCRIPT = BASE / "tools/property_manager/propertymanager-update.py"
 SUMMARY_SCRIPT = BASE / "tools/property_manager/propertymanager-summary.sh"

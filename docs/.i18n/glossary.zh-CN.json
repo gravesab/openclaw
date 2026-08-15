@@ -1750,5 +1750,25 @@
   {
     "source": "Portals",
     "target": "门户"
+  },
+  {
+    "source": "PropertyManager Asset Architecture",
+    "target": "PropertyManager 资产架构"
+  },
+  {
+    "source": "RanchBot Architecture",
+    "target": "RanchBot 架构"
+  },
+  {
+    "source": "OpenClaw AI Governance Manifest",
+    "target": "OpenClaw AI 治理清单"
+  },
+  {
+    "source": "PropertyManager Foundational Requirements",
+    "target": "PropertyManager 基础要求"
+  },
+  {
+    "source": "OpenClaw Operational Philosophy",
+    "target": "OpenClaw 运营理念"
   }
 ]

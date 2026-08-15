@@ -4,6 +4,9 @@
   "private": true,
   "description": "Ranch-owned OpenClaw integration boundary",
   "type": "module",
+  "dependencies": {
+    "zod": "4.4.3"
+  },
   "devDependencies": {
     "@openclaw/plugin-sdk": "workspace:*",
     "openclaw": "workspace:*"

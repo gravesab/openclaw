@@ -1,10 +1,10 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
-import { requireNodeSqlite } from "../infra/node-sqlite.js";
-import { configureSqliteWalMaintenance, type SqliteWalMaintenance } from "../infra/sqlite-wal.js";
 import { TrustedRecordConflictError, TrustedRecordNotFoundError } from "./errors.js";
 import { parseTrustedRecord } from "./schema.js";
+import { requireNodeSqlite } from "./sqlite-runtime.js";
+import { configureSqliteWalMaintenance, type SqliteWalMaintenance } from "./sqlite-runtime.js";
 import type { TrustedRecordStore } from "./store.js";
 import type { TrustedRecord, TrustedRecordCorrection } from "./types.js";
 

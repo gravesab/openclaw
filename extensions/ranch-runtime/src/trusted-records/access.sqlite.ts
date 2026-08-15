@@ -1,14 +1,14 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
-import { requireNodeSqlite } from "../infra/node-sqlite.js";
-import { configureSqliteWalMaintenance, type SqliteWalMaintenance } from "../infra/sqlite-wal.js";
 import type {
   TrustedRecordAccessPolicy,
   TrustedRecordAuditEvent,
   TrustedRecordAuditSink,
   TrustedRecordPolicySource,
 } from "./access.js";
+import { requireNodeSqlite } from "./sqlite-runtime.js";
+import { configureSqliteWalMaintenance, type SqliteWalMaintenance } from "./sqlite-runtime.js";
 
 type PolicyRow = {
   policy_id: string;

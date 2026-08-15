@@ -232,3 +232,16 @@ extensions/discord/assets/embedded-app-sdk.mjs
 /.opengrep-out/
 /.crabbox-artifacts
 .comux*
+
+# Ranch runtime and generated state
+**/.venv/
+tools/dashboard/backups/
+tools/dashboard/events.jsonl
+ranchbrain/index/
+ranchbrain/memories/
+ranchbrain/embeddings/
+
+# PropertyManager live operational data
+tools/property_manager/maintenance_log.csv
+tools/property_manager/pool_hot_tub_maintenance.csv
+tools/property_manager/property_tasks.csv

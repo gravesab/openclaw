@@ -1,0 +1,14 @@
+{
+  "id": "ranch-runtime",
+  "name": "Ranch Runtime",
+  "description": "Ranch-owned integration boundary for AI Intelligence and Trusted Records.",
+  "enabledByDefault": false,
+  "activation": {
+    "onStartup": true
+  },
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

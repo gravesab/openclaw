@@ -4,6 +4,7 @@
 
 import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
 import { handleAiExecute } from "./src/ai-intelligence.js";
+import { registerTrustedRecordsDevelopment } from "./src/trusted-records/plugin.js";
 
 export default definePluginEntry({
   id: "ranch-runtime",
@@ -11,6 +12,8 @@ export default definePluginEntry({
   description: "Ranch-owned integration boundary for AI Intelligence and Trusted Records.",
 
   register(api) {
+    const trustedRecords = registerTrustedRecordsDevelopment(api);
+
     api.registerGatewayMethod("ai.execute", handleAiExecute, { scope: "operator.write" });
 
     api.registerGatewayMethod(
@@ -22,7 +25,7 @@ export default definePluginEntry({
           openclawBaseline: "2026.8.1-beta.2",
           capabilities: {
             aiIntelligence: "registered",
-            trustedRecords: "pending-migration",
+            trustedRecords: trustedRecords.enabled ? "registered" : "disabled",
           },
         });
       },

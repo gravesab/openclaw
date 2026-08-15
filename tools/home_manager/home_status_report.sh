@@ -86,7 +86,7 @@ echo
 echo "=============================="
 echo "Scrypted"
 echo "=============================="
-~/ai/projects/openclaw/tools/scrypted/scrypted_status.sh || true
+"${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/tools/scrypted/scrypted_status.sh" || true
 echo
 
 echo "=============================="

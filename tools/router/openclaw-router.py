@@ -27,11 +27,6 @@ BACKEND = (
     / "tools/property_manager/propertymanager-telegram-command.py"
 )
 
-CHAT_AGENT = (
-    BASE
-    / "tools/chat_agent/chat_agent.py"
-)
-
 CHAT_PYTHON = Path(
     os.environ.get("OPENCLAW_PYTHON", sys.executable)
 ).resolve()
@@ -44,11 +39,6 @@ RANCHBRAIN = (
 RANCHBRAIN_REVIEW = (
     BASE
     / "tools/ranchbrain/ranchbrain-review.py"
-)
-
-AI_ADVISOR = (
-    BASE
-    / "tools/ai_intelligence/advisory_route.py"
 )
 
 

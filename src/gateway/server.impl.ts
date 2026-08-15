@@ -513,6 +513,10 @@ export type GatewayServerOptions = {
    * reparsing openclaw.json during server startup.
    */
   startupConfigSnapshotRead?: ReadConfigFileSnapshotWithPluginMetadataResult;
+  /**
+   * Development-only trusted-record runtime. Disabled unless explicitly supplied.
+   */
+  trustedRecordsDevelopment?: import("./server-trusted-records.js").GatewayTrustedRecordDevelopmentOptions;
 };
 
 type SetupWizardRunner = NonNullable<GatewayServerOptions["wizardRunner"]>;
@@ -541,6 +545,10 @@ export async function startGatewayServer(
   logAcceptedEnvOption({
     key: "OPENCLAW_RAW_STREAM_PATH",
     description: "raw stream log path override",
+  });
+  logAcceptedEnvOption({
+    key: "OPENCLAW_TRUSTED_RECORDS_DEV",
+    description: "development trusted-record runtime enabled",
   });
   if (!resumeGatewayRestartTraceFromEnv(process.env, [["source", "env"]])) {
     const restartHandoff = readGatewayRestartHandoffSync();
@@ -888,6 +896,13 @@ export async function startGatewayServer(
       logHooks,
       logPlugins,
       getReadiness,
+      getTrustedRecordDevelopmentRuntime: () =>
+        trustedRecordDevelopmentRuntime && opts.trustedRecordsDevelopment
+          ? {
+              runtime: trustedRecordDevelopmentRuntime,
+              actorId: opts.trustedRecordsDevelopment.actorId,
+            }
+          : undefined,
     }),
   );
   const { createGatewayNodeSessionRuntime } = await import("./server-node-session-runtime.js");
@@ -924,6 +939,9 @@ export async function startGatewayServer(
   };
 
   let closePreludeStarted = false;
+  let trustedRecordDevelopmentRuntime:
+    | import("../trusted-records/runtime.development.js").TrustedRecordDevelopmentRuntime
+    | null = null;
   let postReadyMaintenanceTimer: ReturnType<typeof setTimeout> | null = null;
   const clearPostReadyMaintenanceTimer = () => {
     if (!postReadyMaintenanceTimer) {
@@ -991,6 +1009,10 @@ export async function startGatewayServer(
         heartbeatRunner: runtimeState.heartbeatRunner,
         updateCheckStop: runtimeState.stopGatewayUpdateCheck,
         stopTaskRegistryMaintenance: stopTaskRegistryMaintenanceOnDemand,
+        closeTrustedRecordRuntime: () => {
+          trustedRecordDevelopmentRuntime?.close();
+          trustedRecordDevelopmentRuntime = null;
+        },
         nodePresenceTimers,
         broadcast,
         tickInterval: runtimeState.tickInterval,
@@ -1025,6 +1047,13 @@ export async function startGatewayServer(
   };
 
   try {
+    if (opts.trustedRecordsDevelopment) {
+      const { createTrustedRecordDevelopmentRuntime } =
+        await import("../trusted-records/runtime.development.js");
+      trustedRecordDevelopmentRuntime = createTrustedRecordDevelopmentRuntime({
+        dataDir: opts.trustedRecordsDevelopment.dataDir,
+      });
+    }
     const earlyRuntime = await startupTrace.measure("runtime.early", () =>
       loadGatewayStartupEarlyModule().then(({ startGatewayEarlyRuntime }) =>
         startGatewayEarlyRuntime({

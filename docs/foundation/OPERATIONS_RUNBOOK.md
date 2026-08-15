@@ -187,6 +187,33 @@ If the WSGI service cannot start:
 The direct Flask server is a temporary rollback path, not an accepted steady
 production state.
 
+## Restricted remote host metrics
+
+Optional remote memory, process, CPU, and uptime reporting uses a dedicated
+Ed25519 key configured with `OPENCLAW_M4_SSH_KEY`. Do not reuse a backup,
+deployment, interactive-login, or tunnel credential. Keep Development and
+Production keys separate.
+
+The remote authorization entry must use OpenSSH `restrict` and a forced command
+that invokes only an installed copy of `tools/dashboard/m4_metrics_helper.py`.
+The forced command
+must not dispatch `$SSH_ORIGINAL_COMMAND`, accept arguments, start a shell, or
+permit forwarding or a PTY. Install the dashboard environment variables from
+`scripts/systemd/openclaw-dashboard-m4-metrics.conf.example`, then reload the
+user service.
+
+Validation must prove all of the following before promotion:
+
+1. Requesting an arbitrary SSH command still returns only the fixed metrics
+   JSON document.
+2. The private key is mode `0600` and readable only by the dashboard account.
+3. The dashboard reports memory, Ollama process/CPU, and uptime without exposing
+   remote command output or key material.
+4. Removing or rejecting the key fails closed as unavailable metrics without
+   affecting the Ollama HTTP health check.
+5. Production installation and dashboard reload have explicit operator
+   authorization.
+
 ---
 
 # Documentation Policy

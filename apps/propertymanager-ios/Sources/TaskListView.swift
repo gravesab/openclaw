@@ -13,21 +13,57 @@ struct TaskListView: View {
             if store.isLoading {
                 ProgressView("Loading tasks…")
             }
-            ForEach(store.filteredTasks) { task in
-                TaskRowView(task: task) {
-                    completingTask = task
-                    completionNote = ""
-                    meterConfirmValue = ""
-                    confirmCurrentMeter = false
-                    if task.requiresMeterOnComplete, let assetId = task.assetId {
-                        Task { await loadAssetForCompletion(assetId) }
+            if let asset = store.selectedTaskAsset {
+                Section {
+                    HStack {
+                        Label(asset.name, systemImage: "line.3.horizontal.decrease.circle.fill")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Button("All Assets") {
+                            store.selectedTaskAssetId = nil
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                } header: {
+                    Text("Showing tasks for")
+                }
+            }
+            ForEach(store.groupedTasks) { section in
+                Section(section.name) {
+                    ForEach(section.tasks) { task in
+                        TaskRowView(
+                            task: task,
+                            groupName: section.name
+                        ) {
+                            completingTask = task
+                            completionNote = ""
+                            meterConfirmValue = ""
+                            confirmCurrentMeter = false
+                            if task.requiresMeterOnComplete, let assetId = task.assetId {
+                                Task { await loadAssetForCompletion(assetId) }
+                            }
+                        }
                     }
                 }
             }
         }
+        .navigationDestination(for: UUID.self) { taskID in
+            TaskDetailView(taskID: taskID)
+        }
         .navigationTitle("Tasks")
         .searchable(text: $store.searchText)
         .refreshable { await store.refresh() }
+        .safeAreaInset(edge: .top) {
+            Picker("Origin", selection: $store.originFilter) {
+                ForEach(OriginFilter.allCases) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal)
+            .padding(.bottom, 6)
+            .background(.bar)
+        }
         .toolbar {
             ToolbarItem(placement: .primaryAction) {
                 Picker("Filter", selection: $store.filter) {
@@ -45,10 +81,16 @@ struct TaskListView: View {
 
     @ViewBuilder
     private func completionSheet(_ task: MaintenanceTask) -> some View {
+        let group = TaskTitle.displayAssetName(task: task, assets: store.assets)
+        let title = TaskTitle.displayItemTitle(item: task.item, group: group)
         NavigationStack {
             Form {
                 Section("Task") {
-                    Text("\(task.area) / \(task.item)")
+                    Text("\(group) / \(title)")
+                    if let eta = TaskTitle.estimatedTimeLabel(minutes: task.estimatedMinutes) {
+                        Text(eta)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Section("Note") {
                     TextField("Completion note", text: $completionNote)
@@ -124,26 +166,84 @@ struct TaskListView: View {
 
 struct TaskRowView: View {
     let task: MaintenanceTask
+    let groupName: String
     let onComplete: () -> Void
 
     var body: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(task.item).font(.headline)
-                Text("\(task.area) · \(task.categoryName)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if task.requiresMeterOnComplete {
-                    Label("Meter schedule", systemImage: "gauge.with.dots.needle.67percent")
-                        .font(.caption2)
-                        .foregroundStyle(.orange)
+        let title = TaskTitle.displayItemTitle(item: task.item, group: groupName)
+        HStack(alignment: .top, spacing: 12) {
+            // Whole row navigates to detail; Done stays outside the link.
+            NavigationLink(value: task.id) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .multilineTextAlignment(.leading)
+                        .lineLimit(3)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    if let eta = TaskTitle.estimatedTimeLabel(minutes: task.estimatedMinutes) {
+                        Text(eta)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Text(TaskTitle.dueDateLabel(date: task.nextDue))
+                        .font(.caption)
+                        .foregroundStyle(dueDateColor)
+                    if let badge = task.runHoursBadge {
+                        Text(badge)
+                            .font(.caption2)
+                            .foregroundStyle(
+                                task.overdueMeter == true
+                                    ? Color.red
+                                    : (task.dueMeter == true ? Color.orange : Color.secondary)
+                            )
+                    } else if task.requiresMeterOnComplete {
+                        Label("Meter schedule", systemImage: "gauge.with.dots.needle.67percent")
+                            .font(.caption2)
+                            .foregroundStyle(.orange)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            Spacer()
-            Button("Done", action: onComplete)
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            .buttonStyle(.plain)
+            .layoutPriority(1)
+
+            VStack(alignment: .trailing, spacing: 8) {
+                TaskOriginBadge(origin: task.origin)
+                Button("Done", action: onComplete)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
+            .fixedSize(horizontal: true, vertical: false)
         }
         .padding(.vertical, 4)
+    }
+
+    private var dueDateColor: Color {
+        switch task.dueStatus {
+        case .critical, .overdue:
+            return .red
+        case .dueSoon:
+            return .orange
+        case .ok:
+            return .secondary
+        }
+    }
+}
+
+struct TaskOriginBadge: View {
+    let origin: TaskOrigin
+
+    var body: some View {
+        Text(origin.label)
+            .font(.caption2)
+            .fontWeight(.bold)
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(origin == .manufacturer ? Color.blue.opacity(0.16) : Color.orange.opacity(0.16))
+            .foregroundStyle(origin == .manufacturer ? Color.blue : Color.orange)
+            .clipShape(Capsule())
     }
 }

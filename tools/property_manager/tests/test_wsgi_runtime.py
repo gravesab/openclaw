@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[3]
 CONFIG_PATH = API_DIR / "gunicorn.conf.py"
 WSGI_PATH = API_DIR / "wsgi.py"
 UNIT_PATH = Path(__file__).resolve().parents[1] / "deploy" / "propertymanager-api.service"
+DEV_RUNNER_PATH = API_DIR / "run_wsgi.sh"
 
 
 def load_config():
@@ -82,6 +83,15 @@ class PropertyManagerWsgiConfigurationTests(unittest.TestCase):
                 self.assertTrue(hasattr(module, "application"))
                 self.assertIs(module.application, module.application)
                 run_mock.assert_not_called()
+
+                # Verify the health contract without contacting PostgreSQL.
+                api_module = sys.modules["propertymanager_api"]
+                with mock.patch.object(
+                    api_module, "_probe_postgres_and_schema", return_value=(True, True)
+                ):
+                    response = module.application.test_client().get("/health")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["service"], "propertymanager-api")
         finally:
             if str(API_DIR) in sys.path:
                 sys.path.remove(str(API_DIR))
@@ -112,6 +122,14 @@ class PropertyManagerWsgiConfigurationTests(unittest.TestCase):
         self.assertIn("wsgi:application", script)
         self.assertIn("gunicorn.conf.py", script)
         self.assertNotIn("propertymanager_api.py", script)
+
+    def test_development_runner_refuses_non_development_database(self):
+        script = DEV_RUNNER_PATH.read_text(encoding="utf-8")
+        self.assertIn('OPENCLAW_ENVIRONMENT:-development', script)
+        self.assertIn('PROPERTYMANAGER_DB_NAME:-openclaw_dev', script)
+        self.assertIn('PROPERTYMANAGER_DB_NAME" != *_dev', script)
+        self.assertIn("Refusing to start development PropertyManager", script)
+        self.assertIn("exit 78", script)
 
 
 if __name__ == "__main__":

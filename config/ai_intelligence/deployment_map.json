@@ -28,15 +28,16 @@
       "display_name": "PropertyManager",
       "description": "Property tasks, maintenance records, assets, parts, costs, and task completion.",
       "privacy_tier": "local",
-      "primary_model": "ollama-hermes3-8b",
+      "primary_model": "omlx-qwen3.5-9b-4bit",
       "fallback_models": [
+        "ollama-hermes3-8b",
         "ollama-gemma3-12b",
         "ollama-llama3.2-3b"
       ],
       "task_type": "private_property_data",
       "assignment_status": "configured",
-      "configuration_source": "PropertyManager AI fallback configuration",
-      "verification_status": "needs-runtime-verification"
+      "configuration_source": "OMLX-D03 Development routing approval",
+      "verification_status": "development-live-verification-required"
     },
     {
       "id": "telegram_ranch_bot",

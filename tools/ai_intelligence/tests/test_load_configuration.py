@@ -28,7 +28,7 @@ class ConfigurationLoaderTests(unittest.TestCase):
         cls.plan = MODULE.build_plan()
 
     def test_expected_model_count(self) -> None:
-        self.assertEqual(len(self.plan.models), 9)
+        self.assertEqual(len(self.plan.models), 10)
 
     def test_expected_benchmark_count(self) -> None:
         self.assertEqual(len(self.plan.benchmarks), 10)

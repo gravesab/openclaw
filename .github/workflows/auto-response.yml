@@ -24,6 +24,9 @@ jobs:
       issues: write
       pull-requests: write
     runs-on: ubuntu-24.04
+    env:
+      GH_APP_PRIVATE_KEY: ${{ secrets.GH_APP_PRIVATE_KEY }}
+      GH_APP_PRIVATE_KEY_FALLBACK: ${{ secrets.GH_APP_PRIVATE_KEY_FALLBACK }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -31,20 +34,22 @@ jobs:
           persist-credentials: false
       - uses: actions/create-github-app-token@v3
         id: app-token
+        if: env.GH_APP_PRIVATE_KEY != ''
         continue-on-error: true
         with:
           app-id: "2729701"
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          private-key: ${{ env.GH_APP_PRIVATE_KEY }}
       - uses: actions/create-github-app-token@v3
         id: app-token-fallback
-        if: steps.app-token.outcome == 'failure'
+        if: steps.app-token.outputs.token == '' && env.GH_APP_PRIVATE_KEY_FALLBACK != ''
+        continue-on-error: true
         with:
           app-id: "2971289"
-          private-key: ${{ secrets.GH_APP_PRIVATE_KEY_FALLBACK }}
+          private-key: ${{ env.GH_APP_PRIVATE_KEY_FALLBACK }}
       - name: Run Barnacle auto-response
         uses: actions/github-script@v9
         with:
-          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token }}
+          github-token: ${{ steps.app-token.outputs.token || steps.app-token-fallback.outputs.token || github.token }}
           script: |
             const { pathToFileURL } = require("node:url");
             const moduleUrl = pathToFileURL(

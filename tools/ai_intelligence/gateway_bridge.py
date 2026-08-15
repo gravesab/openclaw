@@ -6,6 +6,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +61,19 @@ def read_request() -> dict[str, Any]:
     return payload
 
 
+def request_parameters(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Return an isolated parameter object from a gateway request."""
+
+    parameters = payload.get("parameters")
+    if parameters is None:
+        return {}
+    if not isinstance(parameters, dict):
+        raise ValueError("Gateway parameters must be a JSON object")
+    if any(not isinstance(key, str) for key in parameters):
+        raise ValueError("Gateway parameter names must be strings")
+    return dict(parameters)
+
+
 def serialize_result(result: Any) -> dict[str, Any]:
     return {
         "requestId": result.request_id,
@@ -94,6 +108,7 @@ def main() -> int:
         prompt=payload["prompt"],
         system_prompt=payload.get("systemPrompt"),
         timeout_seconds=float(payload.get("timeoutSeconds", 60)),
+        parameters=request_parameters(payload),
     )
     json.dump(serialize_result(result), sys.stdout, separators=(",", ":"))
     sys.stdout.write("\n")

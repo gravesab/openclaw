@@ -41,7 +41,9 @@ struct MacAssetsPanel: View {
 
             if let asset = meteredAssets.first(where: { $0.id == selectedAssetId }) {
                 Divider()
-                MacAssetDetailPanel(asset: asset, store: store)
+                MacAssetDetailPanel(asset: asset, store: store) {
+                    selectedAssetId = nil
+                }
             }
         }
         .task { await store.refreshAssets() }
@@ -56,6 +58,8 @@ struct MacAssetsPanel: View {
 struct MacAssetDetailPanel: View {
     let asset: MacRanchAsset
     @ObservedObject var store: MaintenanceStore
+    var onDeactivated: (() -> Void)? = nil
+    @State private var entryMode: MacMeterEntryMode = .absolute
     @State private var valueText = ""
     @State private var note = ""
     @State private var pendingPreview: MacLowerReadingPreview?
@@ -63,11 +67,51 @@ struct MacAssetDetailPanel: View {
     @State private var readings: [MacMeterReading] = []
     @State private var message: String?
     @State private var isActivating = false
+    @State private var isDeactivating = false
+    @State private var showDeactivateConfirm = false
+
+    private enum MacMeterEntryMode: String, CaseIterable, Identifiable {
+        case absolute
+        case add
+
+        var id: String { rawValue }
+
+        func title(for meterType: String?) -> String {
+            switch self {
+            case .absolute: return "Absolute"
+            case .add:
+                switch meterType {
+                case "mileage": return "Add miles"
+                case "cycles": return "Add cycles"
+                default: return "Add hours"
+                }
+            }
+        }
+
+        func fieldLabel(for meterType: String?) -> String {
+            switch self {
+            case .absolute: return "Meter reading"
+            case .add:
+                switch meterType {
+                case "mileage": return "Miles since last"
+                case "cycles": return "Cycles since last"
+                default: return "Hours since last"
+                }
+            }
+        }
+    }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                Text(asset.name).font(.title3.bold())
+                HStack(alignment: .firstTextBaseline) {
+                    Text(asset.name).font(.title3.bold())
+                    Spacer()
+                    Button("Deactivate", role: .destructive) {
+                        showDeactivateConfirm = true
+                    }
+                    .disabled(isDeactivating)
+                }
 
                 if asset.meterNeedsActivation {
                     GroupBox("Proposed meter") {
@@ -84,10 +128,20 @@ struct MacAssetDetailPanel: View {
                 if let meter = asset.meter, meter.hasMeter {
                     Text("\(format(meter.currentValue)) \(meter.unit)")
                         .font(.system(size: 36, weight: .bold))
+                    Text("Current total (cumulative)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
 
                 GroupBox("New reading") {
-                    TextField("Value", text: $valueText)
+                    Picker("Mode", selection: $entryMode) {
+                        ForEach(MacMeterEntryMode.allCases) { mode in
+                            Text(mode.title(for: asset.meter?.meterType)).tag(mode)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .disabled(pendingPreview != nil)
+                    TextField(entryMode.fieldLabel(for: asset.meter?.meterType), text: $valueText)
                     TextField("Note", text: $note)
                     if let preview = pendingPreview {
                         if let prev = preview.previousValue, let proposed = preview.proposedValue {
@@ -128,6 +182,18 @@ struct MacAssetDetailPanel: View {
             }
             .padding()
         }
+        .confirmationDialog(
+            "Deactivate \(asset.name)?",
+            isPresented: $showDeactivateConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Deactivate", role: .destructive) {
+                Task { await deactivate() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This hides the asset from lists. Meter history is kept and it can be reactivated later from the API or a future Reactivate UI.")
+        }
         .task { await loadReadings() }
     }
 
@@ -140,7 +206,11 @@ struct MacAssetDetailPanel: View {
     }
 
     private func saveReading() async {
-        guard let value = Double(valueText.replacingOccurrences(of: ",", with: ".")) else { return }
+        guard let amount = Double(valueText.replacingOccurrences(of: ",", with: ".")) else { return }
+        if entryMode == .add, amount <= 0 {
+            message = "Enter a positive amount since last reading."
+            return
+        }
         do {
             if let preview = pendingPreview {
                 _ = try await store.apiClient.confirmMeterReading(
@@ -151,10 +221,17 @@ struct MacAssetDetailPanel: View {
                 )
                 message = "Confirmed."
                 pendingPreview = nil
+            } else if entryMode == .add {
+                _ = try await store.apiClient.submitMeterReading(
+                    assetId: asset.id,
+                    delta: amount,
+                    note: note.isEmpty ? nil : note
+                )
+                message = "Added \(format(amount))."
             } else {
                 _ = try await store.apiClient.submitMeterReading(
                     assetId: asset.id,
-                    value: value,
+                    value: amount,
                     note: note.isEmpty ? nil : note
                 )
                 message = "Saved."
@@ -176,6 +253,19 @@ struct MacAssetDetailPanel: View {
             _ = try await store.apiClient.activateMeter(assetId: asset.id)
             message = "Meter activated."
             await store.refreshAssets()
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    private func deactivate() async {
+        isDeactivating = true
+        defer { isDeactivating = false }
+        do {
+            try await store.apiClient.deactivateAsset(id: asset.id)
+            message = "Deactivated."
+            await store.refreshAssets()
+            onDeactivated?()
         } catch {
             message = error.localizedDescription
         }

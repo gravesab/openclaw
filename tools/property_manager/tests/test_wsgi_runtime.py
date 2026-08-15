@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+"""Unit tests for PropertyManager Gunicorn / WSGI runtime configuration."""
+
+from __future__ import annotations
+
+import importlib.util
+import os
+import unittest
+from pathlib import Path
+from unittest import mock
+
+API_DIR = Path(__file__).resolve().parents[1] / "api"
+ROOT = Path(__file__).resolve().parents[3]
+CONFIG_PATH = API_DIR / "gunicorn.conf.py"
+WSGI_PATH = API_DIR / "wsgi.py"
+UNIT_PATH = Path(__file__).resolve().parents[1] / "deploy" / "propertymanager-api.service"
+DEV_RUNNER_PATH = API_DIR / "run_wsgi.sh"
+
+
+def load_config():
+    spec = importlib.util.spec_from_file_location("pm_gunicorn_config", CONFIG_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class PropertyManagerWsgiConfigurationTests(unittest.TestCase):
+    def test_reliable_default_worker_configuration(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            # Clear overrides that may be set in the shell.
+            for key in (
+                "PROPERTYMANAGER_API_BIND",
+                "PROPERTYMANAGER_API_PORT",
+                "PROPERTYMANAGER_API_WORKERS",
+                "PROPERTYMANAGER_API_TIMEOUT",
+                "PROPERTYMANAGER_API_GRACEFUL_TIMEOUT",
+            ):
+                os.environ.pop(key, None)
+            config = load_config()
+
+        self.assertEqual(config.bind, "0.0.0.0:5062")
+        self.assertEqual(config.workers, 2)
+        self.assertEqual(config.worker_class, "sync")
+        self.assertEqual(config.timeout, 120)
+        self.assertEqual(config.graceful_timeout, 90)
+        self.assertFalse(config.reload)
+        self.assertFalse(config.preload_app)
+        self.assertGreater(config.max_requests, 0)
+        self.assertTrue(str(config.pidfile).endswith("propertymanager-api.pid"))
+
+    def test_runtime_settings_can_be_overridden_without_code_changes(self):
+        environment = {
+            "PROPERTYMANAGER_API_BIND": "127.0.0.1:15062",
+            "PROPERTYMANAGER_API_WORKERS": "3",
+            "PROPERTYMANAGER_API_TIMEOUT": "90",
+            "PROPERTYMANAGER_API_GRACEFUL_TIMEOUT": "15",
+            "PROPERTYMANAGER_PID_DIR": "/tmp/pm-dev-test",
+        }
+        with mock.patch.dict(os.environ, environment, clear=False):
+            config = load_config()
+
+        self.assertEqual(config.bind, "127.0.0.1:15062")
+        self.assertEqual(config.workers, 3)
+        self.assertEqual(config.timeout, 90)
+        self.assertEqual(config.graceful_timeout, 15)
+        self.assertIn("pm-dev-test", config.pidfile)
+
+    def test_wsgi_module_exports_application_without_starting_server(self):
+        spec = importlib.util.spec_from_file_location("pm_wsgi", WSGI_PATH)
+        assert spec is not None
+        assert spec.loader is not None
+        # Import via file location with api dir on sys.path (same as gunicorn chdir).
+        import sys
+
+        sys.path.insert(0, str(API_DIR))
+        try:
+            module = importlib.util.module_from_spec(spec)
+            with mock.patch("propertymanager_api.app.run") as run_mock:
+                # Loading wsgi imports propertymanager_api; ensure no app.run side effect.
+                spec.loader.exec_module(module)
+                self.assertTrue(hasattr(module, "application"))
+                self.assertIs(module.application, module.application)
+                run_mock.assert_not_called()
+
+                # Verify the health contract without contacting PostgreSQL.
+                api_module = sys.modules["propertymanager_api"]
+                with mock.patch.object(
+                    api_module, "_probe_postgres_and_schema", return_value=(True, True)
+                ):
+                    response = module.application.test_client().get("/health")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_json()["service"], "propertymanager-api")
+        finally:
+            if str(API_DIR) in sys.path:
+                sys.path.remove(str(API_DIR))
+
+    def test_systemd_unit_uses_gunicorn_and_restart_protection(self):
+        unit = UNIT_PATH.read_text(encoding="utf-8")
+        self.assertIn("Type=simple", unit)
+        self.assertIn("run_api.sh", unit)
+        self.assertIn("Gunicorn", unit)
+        self.assertIn("ExecReload=/bin/kill -s HUP $MAINPID", unit)
+        self.assertIn("KillSignal=SIGTERM", unit)
+        self.assertIn("KillMode=mixed", unit)
+        self.assertIn("TimeoutStopSec=120", unit)
+        self.assertIn("Restart=on-failure", unit)
+        self.assertIn("openclaw-cursor-propertymanager", unit)
+        self.assertNotIn("propertymanager_api.py", unit)
+        self.assertIn("development vm", unit.lower())
+
+    def test_gunicorn_config_defines_worker_exit_drain_hook(self):
+        config = load_config()
+        self.assertTrue(callable(getattr(config, "worker_exit", None)))
+        source = CONFIG_PATH.read_text(encoding="utf-8")
+        self.assertIn("wait_inflight_docker_execs", source)
+
+    def test_run_api_starts_gunicorn_not_flask(self):
+        script = (API_DIR / "run_api.sh").read_text(encoding="utf-8")
+        self.assertIn("gunicorn", script)
+        self.assertIn("wsgi:application", script)
+        self.assertIn("gunicorn.conf.py", script)
+        self.assertNotIn("propertymanager_api.py", script)
+
+    def test_development_runner_refuses_non_development_database(self):
+        script = DEV_RUNNER_PATH.read_text(encoding="utf-8")
+        self.assertIn('OPENCLAW_ENVIRONMENT:-development', script)
+        self.assertIn('PROPERTYMANAGER_DB_NAME:-openclaw_dev', script)
+        self.assertIn('PROPERTYMANAGER_DB_NAME" != *_dev', script)
+        self.assertIn("Refusing to start development PropertyManager", script)
+        self.assertIn("exit 78", script)
+
+
+if __name__ == "__main__":
+    unittest.main()

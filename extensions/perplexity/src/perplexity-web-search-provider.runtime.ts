@@ -1,5 +1,7 @@
+import { readProviderJsonResponse } from "openclaw/plugin-sdk/provider-http";
+// Perplexity provider module implements model/runtime integration.
 import {
-  readNumberParam,
+  readPositiveIntegerParam,
   readStringArrayParam,
   readStringParam,
 } from "openclaw/plugin-sdk/provider-web-search";
@@ -7,6 +9,7 @@ import {
   buildSearchCacheKey,
   DEFAULT_SEARCH_COUNT,
   isoToPerplexityDate,
+  MAX_SEARCH_COUNT,
   normalizeFreshness,
   normalizeToIsoDate,
   readCachedSearchPayload,
@@ -22,7 +25,7 @@ import {
   wrapWebContent,
   writeCachedSearchPayload,
 } from "openclaw/plugin-sdk/provider-web-search";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { normalizeOptionalString, uniqueStrings } from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   DEFAULT_PERPLEXITY_BASE_URL,
   inferPerplexityBaseUrlFromApiKey,
@@ -78,7 +81,7 @@ function resolvePerplexityApiKey(perplexity?: PerplexityConfig): {
 } {
   const fromConfig = readConfiguredSecretString(
     perplexity?.apiKey,
-    "tools.web.search.perplexity.apiKey",
+    "plugins.entries.perplexity.config.webSearch.apiKey",
   );
   if (fromConfig) {
     return { apiKey: fromConfig, source: "config" };
@@ -140,11 +143,7 @@ function buildPerplexityRequestHeaders(apiKey: string, acceptJson = false): Reco
 }
 
 async function readPerplexityJsonResponse<T>(response: Response, label: string): Promise<T> {
-  try {
-    return (await response.json()) as T;
-  } catch (cause) {
-    throw new Error(`${label}: malformed JSON response`, { cause });
-  }
+  return await readProviderJsonResponse<T>(response, label);
 }
 
 function resolvePerplexityTransport(perplexity?: PerplexityConfig): {
@@ -174,7 +173,7 @@ function extractPerplexityCitations(data: PerplexitySearchResponse): string[] {
     Boolean(normalizeOptionalString(url)),
   );
   if (topLevel.length > 0) {
-    return [...new Set(topLevel)];
+    return uniqueStrings(topLevel);
   }
   const citations: string[] = [];
   for (const choice of data.choices ?? []) {
@@ -194,7 +193,7 @@ function extractPerplexityCitations(data: PerplexitySearchResponse): string[] {
       }
     }
   }
-  return [...new Set(citations)];
+  return uniqueStrings(citations);
 }
 
 async function runPerplexitySearchApi(params: {
@@ -202,6 +201,7 @@ async function runPerplexitySearchApi(params: {
   apiKey: string;
   count: number;
   timeoutSeconds: number;
+  signal?: AbortSignal;
   country?: string;
   searchDomainFilter?: string[];
   searchRecencyFilter?: string;
@@ -228,10 +228,10 @@ async function runPerplexitySearchApi(params: {
     body.search_language_filter = params.searchLanguageFilter;
   }
   if (params.searchAfterDate) {
-    body.search_after_date = params.searchAfterDate;
+    body.search_after_date_filter = params.searchAfterDate;
   }
   if (params.searchBeforeDate) {
-    body.search_before_date = params.searchBeforeDate;
+    body.search_before_date_filter = params.searchBeforeDate;
   }
   if (params.maxTokens !== undefined) {
     body.max_tokens = params.maxTokens;
@@ -244,6 +244,7 @@ async function runPerplexitySearchApi(params: {
     {
       url: PERPLEXITY_SEARCH_ENDPOINT,
       timeoutSeconds: params.timeoutSeconds,
+      signal: params.signal,
       init: {
         method: "POST",
         headers: buildPerplexityRequestHeaders(params.apiKey, true),
@@ -275,6 +276,7 @@ async function runPerplexitySearch(params: {
   baseUrl: string;
   model: string;
   timeoutSeconds: number;
+  signal?: AbortSignal;
   freshness?: string;
 }): Promise<{ content: string; citations: string[] }> {
   const endpoint = `${params.baseUrl.trim().replace(/\/$/, "")}/chat/completions`;
@@ -290,6 +292,7 @@ async function runPerplexitySearch(params: {
     {
       url: endpoint,
       timeoutSeconds: params.timeoutSeconds,
+      signal: params.signal,
       init: {
         method: "POST",
         headers: buildPerplexityRequestHeaders(params.apiKey),
@@ -312,6 +315,7 @@ async function runPerplexitySearch(params: {
 export async function executePerplexitySearch(
   args: Record<string, unknown>,
   searchConfig?: SearchConfigRecord,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const perplexityConfig = resolvePerplexityConfig(searchConfig);
   const runtime = resolvePerplexityTransport(perplexityConfig);
@@ -319,14 +323,19 @@ export async function executePerplexitySearch(
     return {
       error: "missing_perplexity_api_key",
       message:
-        "web_search (perplexity) needs an API key. Set PERPLEXITY_API_KEY or OPENROUTER_API_KEY in the Gateway environment, or configure tools.web.search.perplexity.apiKey. If you do not want to configure a search API key, use web_fetch for a specific URL or the browser tool for interactive pages.",
+        "web_search (perplexity) needs an API key. Set PERPLEXITY_API_KEY or OPENROUTER_API_KEY in the Gateway environment, or configure plugins.entries.perplexity.config.webSearch.apiKey. If you do not want to configure a search API key, use web_fetch for a specific URL or the browser tool for interactive pages.",
       docs: "https://docs.openclaw.ai/tools/web",
     };
   }
 
   const query = readStringParam(args, "query", { required: true });
   const count =
-    readNumberParam(args, "count", { integer: true }) ?? searchConfig?.maxResults ?? undefined;
+    readPositiveIntegerParam(args, "count", {
+      max: MAX_SEARCH_COUNT,
+      message: `count must be an integer from 1 to ${MAX_SEARCH_COUNT}.`,
+    }) ??
+    searchConfig?.maxResults ??
+    undefined;
   const rawFreshness = readStringParam(args, "freshness");
   const freshness = rawFreshness ? normalizeFreshness(rawFreshness, "perplexity") : undefined;
   if (rawFreshness && !freshness) {
@@ -343,8 +352,13 @@ export async function executePerplexitySearch(
   const rawDateAfter = readStringParam(args, "date_after");
   const rawDateBefore = readStringParam(args, "date_before");
   const domainFilter = readStringArrayParam(args, "domain_filter");
-  const maxTokens = readNumberParam(args, "max_tokens", { integer: true });
-  const maxTokensPerPage = readNumberParam(args, "max_tokens_per_page", { integer: true });
+  const maxTokens = readPositiveIntegerParam(args, "max_tokens", {
+    max: 1_000_000,
+    message: "max_tokens must be a positive integer.",
+  });
+  const maxTokensPerPage = readPositiveIntegerParam(args, "max_tokens_per_page", {
+    message: "max_tokens_per_page must be a positive integer.",
+  });
 
   if (!structured) {
     if (country) {
@@ -490,6 +504,7 @@ export async function executePerplexitySearch(
               baseUrl: runtime.baseUrl,
               model: runtime.model,
               timeoutSeconds,
+              signal,
               freshness,
             });
             return {
@@ -514,6 +529,7 @@ export async function executePerplexitySearch(
             apiKey: runtime.apiKey,
             count: resolveSearchCount(count, DEFAULT_SEARCH_COUNT),
             timeoutSeconds,
+            signal,
             country: country ?? undefined,
             searchDomainFilter: domainFilter,
             searchRecencyFilter: freshness,
@@ -532,19 +548,17 @@ export async function executePerplexitySearch(
     (payload as { tookMs: number }).tookMs = Date.now() - start;
   }
 
+  signal?.throwIfAborted();
   writeCachedSearchPayload(cacheKey, payload, resolveSearchCacheTtlMs(searchConfig));
   return payload;
 }
 
-export const __testing = {
+export const testing = {
   inferPerplexityBaseUrlFromApiKey,
   resolvePerplexityBaseUrl,
   resolvePerplexityModel,
   resolvePerplexityTransport,
-  isDirectPerplexityBaseUrl,
   resolvePerplexityRequestModel,
   resolvePerplexityApiKey,
   readPerplexityJsonResponse,
-  normalizeToIsoDate,
-  isoToPerplexityDate,
 } as const;

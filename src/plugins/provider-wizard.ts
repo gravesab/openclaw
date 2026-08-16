@@ -1,13 +1,15 @@
-import { DEFAULT_PROVIDER } from "../agents/defaults.js";
-import { normalizeProviderId } from "../agents/model-selection.js";
-import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { expectDefined } from "@openclaw/normalization-core";
+/** Provider setup wizard helpers shared by provider plugins and CLI setup flows. */
 import {
   normalizeOptionalLowercaseString,
   normalizeOptionalString,
-} from "../shared/string-coerce.js";
+} from "@openclaw/normalization-core/string-coerce";
+import { DEFAULT_PROVIDER } from "../agents/defaults.js";
+import { normalizeProviderId } from "../agents/model-selection.js";
+import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { WizardPrompter } from "../wizard/prompts.js";
-import { resolvePluginProviders } from "./providers.runtime.js";
-import { resolvePluginSetupProvider } from "./setup-registry.js";
+import { resolvePluginProvidersCore } from "./providers.runtime.js";
+import { resolvePluginSetupProviderCore } from "./setup-registry.js";
 import type {
   ProviderAuthMethod,
   ProviderPlugin,
@@ -17,7 +19,7 @@ import type {
 
 const PROVIDER_PLUGIN_CHOICE_PREFIX = "provider-plugin:";
 
-export type ProviderWizardOption = {
+type ProviderWizardOption = {
   value: string;
   label: string;
   hint?: string;
@@ -136,7 +138,7 @@ function resolveProviderWizardProviders(params: {
   if (providerWizardProvidersResolverForTest) {
     return providerWizardProvidersResolverForTest(params);
   }
-  return resolvePluginProviders({
+  return resolvePluginProvidersCore({
     config: params.config,
     workspaceDir: params.workspaceDir,
     env: params.env,
@@ -238,7 +240,7 @@ export function resolveProviderModelPickerEntries(params: {
   return entries;
 }
 
-export function resolveProviderPluginChoice(params: {
+export function resolveProviderPluginChoiceCore(params: {
   providers: ProviderPlugin[];
   choice: string;
 }): {
@@ -289,14 +291,17 @@ export function resolveProviderPluginChoice(params: {
       normalizeProviderId(provider.id) === normalizeProviderId(choice) &&
       provider.auth.length > 0
     ) {
-      return { provider, method: provider.auth[0] };
+      return {
+        provider,
+        method: expectDefined(provider.auth[0], "auth entry at 0"),
+      };
     }
   }
 
   return null;
 }
 
-export async function runProviderModelSelectedHook(params: {
+export async function runProviderModelSelectedHookCore(params: {
   config: OpenClawConfig;
   model: string;
   prompter: WizardPrompter;
@@ -317,7 +322,7 @@ export async function runProviderModelSelectedHook(params: {
     return;
   }
 
-  const setupProvider = resolvePluginSetupProvider({
+  const setupProvider = resolvePluginSetupProviderCore({
     provider: selectedProviderId,
     config: params.config,
     workspaceDir: params.workspaceDir,

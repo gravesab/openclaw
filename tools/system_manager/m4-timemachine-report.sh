@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 PULL="$BASE/tools/system_manager/pull-m4-timemachine-status.sh"
 JSON="$BASE/reports/system_manager/m4_timemachine_status.json"
 

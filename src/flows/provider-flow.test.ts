@@ -1,3 +1,4 @@
+// Provider flow tests cover provider setup prompts and config mutations.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 type ResolveProviderInstallCatalogEntries =
@@ -9,7 +10,7 @@ type ResolveProviderWizardOptions =
 type ResolveProviderModelPickerEntries =
   typeof import("../plugins/provider-wizard.js").resolveProviderModelPickerEntries;
 type ResolvePluginProviders =
-  typeof import("../plugins/providers.runtime.js").resolvePluginProviders;
+  typeof import("../plugins/providers.runtime.js").resolvePluginProvidersCore;
 type ResolveProviderSetupFlowContributions =
   typeof import("./provider-flow.js").resolveProviderSetupFlowContributions;
 type ResolveProviderModelPickerFlowContributions =
@@ -40,9 +41,9 @@ vi.mock("../plugins/provider-wizard.js", () => ({
   resolveProviderModelPickerEntries,
 }));
 
-const resolvePluginProviders = vi.hoisted(() => vi.fn<ResolvePluginProviders>(() => []));
+const resolvePluginProvidersCore = vi.hoisted(() => vi.fn<ResolvePluginProviders>(() => []));
 vi.mock("../plugins/providers.runtime.js", () => ({
-  resolvePluginProviders,
+  resolvePluginProvidersCore,
 }));
 
 let resolveProviderSetupFlowContributions: ResolveProviderSetupFlowContributions;
@@ -67,8 +68,8 @@ describe("provider flow install catalog contributions", () => {
     resolveProviderWizardOptions.mockReturnValue([]);
     resolveProviderModelPickerEntries.mockReset();
     resolveProviderModelPickerEntries.mockReturnValue([]);
-    resolvePluginProviders.mockReset();
-    resolvePluginProviders.mockReturnValue([]);
+    resolvePluginProvidersCore.mockReset();
+    resolvePluginProvidersCore.mockReturnValue([]);
     ({ resolveProviderSetupFlowContributions } = await import("./provider-flow.js"));
     ({ resolveProviderModelPickerFlowContributions } = await import("./provider-flow.runtime.js"));
   });
@@ -124,7 +125,7 @@ describe("provider flow install catalog contributions", () => {
         .includeUntrustedWorkspacePlugins,
     ).toBe(false);
     expect(resolveProviderWizardOptions).not.toHaveBeenCalled();
-    expect(resolvePluginProviders).not.toHaveBeenCalled();
+    expect(resolvePluginProvidersCore).not.toHaveBeenCalled();
   });
 
   it("prefers manifest setup contributions over duplicate install-catalog entries", () => {
@@ -360,11 +361,11 @@ describe("provider flow install catalog contributions", () => {
       },
     ]);
     expect(resolveProviderWizardOptions).not.toHaveBeenCalled();
-    expect(resolvePluginProviders).not.toHaveBeenCalled();
+    expect(resolvePluginProvidersCore).not.toHaveBeenCalled();
   });
 
   it("keeps docs attached to runtime model-picker contributions", () => {
-    resolvePluginProviders.mockReturnValue([
+    resolvePluginProvidersCore.mockReturnValue([
       {
         id: "openai",
         label: "OpenAI",

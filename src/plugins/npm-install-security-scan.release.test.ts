@@ -1,10 +1,12 @@
+/** Release-lane coverage for npm plugin install security scanning. */
 import { execFile, spawnSync } from "node:child_process";
 import fs, { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { afterEach, describe, expect, it } from "vitest";
-import { isScannable, scanDirectoryWithSummary } from "../security/skill-scanner.js";
+import { beforeAll, describe, expect, it, test } from "vitest";
+import { resolveNpmJsonEntries } from "../infra/npm-registry-spec.js";
+import { isScannable, scanDirectoryWithSummary } from "../skills/security/scanner.js";
 import { expectNoReaddirSyncDuring } from "../test-utils/fs-scan-assertions.js";
 import { listGitTrackedFiles, toRepoPath, toRepoRelativePath } from "../test-utils/repo-files.js";
 
@@ -22,44 +24,44 @@ type PublishablePluginPackage = {
 };
 
 const execFileAsync = promisify(execFile);
-const PACKAGE_SCAN_CONCURRENCY = 12;
-
-const REQUIRED_REVIEWED_PUBLISHABLE_CRITICAL_FINDINGS = new Set([
-  "@openclaw/acpx:dangerous-exec:src/codex-auth-bridge.ts",
-  "@openclaw/acpx:dangerous-exec:src/runtime-internals/mcp-proxy.mjs",
-  "@openclaw/codex:dangerous-exec:src/app-server/transport-stdio.ts",
-  "@openclaw/codex:dangerous-exec:src/node-cli-sessions.ts",
-  "@openclaw/google-meet:dangerous-exec:src/node-host.ts",
-  "@openclaw/google-meet:dangerous-exec:src/realtime.ts",
-  "@openclaw/matrix:dangerous-exec:src/matrix/deps.ts",
-  "@openclaw/voice-call:dangerous-exec:src/tunnel.ts",
-  "@openclaw/voice-call:dangerous-exec:src/webhook/tailscale.ts",
+const REQUIRED_REVIEWED_PUBLISHABLE_CRITICAL_FINDING_COUNTS = new Map<string, number>([
+  ["@openclaw/acpx:dangerous-exec:src/codex-auth-bridge.ts", 1],
+  ["@openclaw/acpx:dangerous-exec:src/runtime-internals/mcp-proxy.mjs", 1],
+  ["@openclaw/codex:dangerous-exec:src/app-server/sandbox-exec-server/http.ts", 1],
+  ["@openclaw/codex:dangerous-exec:src/app-server/sandbox-exec-server/processes.ts", 1],
+  ["@openclaw/codex:dangerous-exec:src/app-server/transport-stdio.ts", 1],
+  ["@openclaw/codex:dangerous-exec:src/node-cli-sessions.ts", 1],
+  ["@openclaw/discord:dangerous-exec:src/voice/audio.ts", 1],
+  ["@openclaw/google-meet:dangerous-exec:src/node-host.ts", 1],
+  ["@openclaw/imessage:dangerous-exec:src/client.ts", 1],
+  ["@openclaw/mxc-sandbox:dangerous-exec:src/readiness.ts", 2],
+  ["@openclaw/opencode-provider:dangerous-exec:session-catalog.ts", 1],
+  ["@openclaw/raft:dangerous-exec:src/gateway.ts", 1],
+  ["@openclaw/signal:dangerous-exec:src/daemon.ts", 1],
+  ["@openclaw/voice-call:dangerous-exec:src/tunnel.ts", 1],
 ]);
 
-const OPTIONAL_REVIEWED_PUBLISHABLE_DIST_CRITICAL_FINDINGS = new Set([
-  "@openclaw/acpx:dangerous-exec:dist/mcp-proxy.mjs",
-  "@openclaw/acpx:dangerous-exec:dist/service-<hash>.js",
-  "@openclaw/codex:dangerous-exec:dist/client-<hash>.js",
-  "@openclaw/google-meet:dangerous-exec:dist/index.js",
-  "@openclaw/slack:dynamic-code-execution:dist/outbound-payload.test-harness-<hash>.js",
-  "@openclaw/voice-call:dangerous-exec:dist/runtime-entry-<hash>.js",
+// Generated chunks can contain multiple reviewed execution sites. Counts are
+// part of the contract so an added or missing site fails the release scan.
+const OPTIONAL_REVIEWED_PUBLISHABLE_DIST_CRITICAL_FINDING_COUNTS = new Map<string, number>([
+  ["@openclaw/acpx:dangerous-exec:dist/mcp-proxy.mjs", 1],
+  ["@openclaw/acpx:dangerous-exec:dist/service-<hash>.js", 1],
+  ["@openclaw/codex:dangerous-exec:dist/run-attempt-<hash>.js", 2],
+  ["@openclaw/codex:dangerous-exec:dist/session-catalog-<hash>.js", 1],
+  ["@openclaw/codex:dangerous-exec:dist/transport-stdio-<hash>.js", 1],
+  ["@openclaw/google-meet:dangerous-exec:dist/index.js", 1],
+  ["@openclaw/slack:dynamic-code-execution:dist/outbound-payload.test-harness-<hash>.js", 1],
+  ["@openclaw/voice-call:dangerous-exec:dist/runtime-entry-<hash>.js", 1],
 ]);
-
-const tempDirs: string[] = [];
-
-afterEach(() => {
-  for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
 
 function parseNpmPackFiles(raw: string, packageName: string): string[] {
   const parsed = JSON.parse(raw) as unknown;
-  if (!Array.isArray(parsed) || parsed.length !== 1) {
+  const entries = resolveNpmJsonEntries(parsed);
+  if (entries.length !== 1) {
     throw new Error(`${packageName}: npm pack --dry-run did not return one package result.`);
   }
 
-  const result = parsed[0] as NpmPackResult;
+  const result = entries[0] as NpmPackResult;
   if (!Array.isArray(result.files)) {
     throw new Error(`${packageName}: npm pack --dry-run did not return a files list.`);
   }
@@ -93,7 +95,14 @@ function isScannerWalkedPackedPath(packedPath: string): boolean {
 }
 
 function normalizePackedFindingPath(packedPath: string): string {
-  for (const prefix of ["client", "outbound-payload.test-harness", "runtime-entry", "service"]) {
+  for (const prefix of [
+    "outbound-payload.test-harness",
+    "run-attempt",
+    "runtime-entry",
+    "service",
+    "session-catalog",
+    "transport-stdio",
+  ]) {
     if (packedPath.startsWith(`dist/${prefix}-`) && packedPath.endsWith(".js")) {
       return `dist/${prefix}-<hash>.js`;
     }
@@ -106,8 +115,12 @@ function expectedOptionalReviewedFindingsForPackedPath(
   packedPath: string,
 ): string[] {
   const normalizedPath = normalizePackedFindingPath(packedPath);
-  return [...OPTIONAL_REVIEWED_PUBLISHABLE_DIST_CRITICAL_FINDINGS].filter(
-    (key) => key.startsWith(`${packageName}:`) && key.endsWith(`:${normalizedPath}`),
+  const keyPrefix = `${packageName}:`;
+  const keySuffix = `:${normalizedPath}`;
+  return [...OPTIONAL_REVIEWED_PUBLISHABLE_DIST_CRITICAL_FINDING_COUNTS].flatMap(([key, count]) =>
+    key.startsWith(keyPrefix) && key.endsWith(keySuffix)
+      ? Array.from({ length: count }, () => key)
+      : [],
   );
 }
 
@@ -116,7 +129,6 @@ function stageScannerRelevantPackedFiles(
   packedFiles: readonly string[],
 ): string {
   const stageDir = mkdtempSync(join(tmpdir(), "openclaw-plugin-npm-scan-"));
-  tempDirs.push(stageDir);
 
   for (const packedPath of packedFiles) {
     if (!isScannerWalkedPackedPath(packedPath)) {
@@ -212,27 +224,6 @@ function collectPublishablePluginPackages(): PublishablePluginPackage[] {
     .toSorted((left, right) => left.packageName.localeCompare(right.packageName));
 }
 
-async function mapWithConcurrency<T, U>(
-  items: readonly T[],
-  concurrency: number,
-  fn: (item: T) => Promise<U>,
-): Promise<U[]> {
-  const results: U[] = [];
-  results.length = items.length;
-  let nextIndex = 0;
-  const workerCount = Math.min(concurrency, items.length);
-  await Promise.all(
-    Array.from({ length: workerCount }, async () => {
-      while (nextIndex < items.length) {
-        const index = nextIndex;
-        nextIndex += 1;
-        results[index] = await fn(items[index]);
-      }
-    }),
-  );
-  return results;
-}
-
 async function scanPublishablePluginPackage(plugin: PublishablePluginPackage): Promise<{
   reviewedCriticalFindings: string[];
   expectedReviewedCriticalFindings: string[];
@@ -251,10 +242,15 @@ async function scanPublishablePluginPackage(plugin: PublishablePluginPackage): P
     }
   }
   const stageDir = stageScannerRelevantPackedFiles(plugin.packageDir, packedFiles);
-  const summary = await scanDirectoryWithSummary(stageDir, {
-    excludeTestFiles: true,
-    maxFiles: 10_000,
-  });
+  let summary: Awaited<ReturnType<typeof scanDirectoryWithSummary>>;
+  try {
+    summary = await scanDirectoryWithSummary(stageDir, {
+      excludeTestFiles: true,
+      maxFiles: 10_000,
+    });
+  } finally {
+    rmSync(stageDir, { recursive: true, force: true });
+  }
 
   for (const finding of summary.findings) {
     if (finding.severity !== "critical") {
@@ -263,8 +259,8 @@ async function scanPublishablePluginPackage(plugin: PublishablePluginPackage): P
     const packedPath = normalizePackedFindingPath(toRepoPath(relative(stageDir, finding.file)));
     const key = `${plugin.packageName}:${finding.ruleId}:${packedPath}`;
     if (
-      REQUIRED_REVIEWED_PUBLISHABLE_CRITICAL_FINDINGS.has(key) ||
-      OPTIONAL_REVIEWED_PUBLISHABLE_DIST_CRITICAL_FINDINGS.has(key)
+      REQUIRED_REVIEWED_PUBLISHABLE_CRITICAL_FINDING_COUNTS.has(key) ||
+      OPTIONAL_REVIEWED_PUBLISHABLE_DIST_CRITICAL_FINDING_COUNTS.has(key)
     ) {
       reviewedCriticalFindings.push(key);
       continue;
@@ -280,6 +276,39 @@ async function scanPublishablePluginPackage(plugin: PublishablePluginPackage): P
 }
 
 describe("publishable plugin npm package install security scan", () => {
+  const publishablePluginPackages = collectPublishablePluginPackages();
+  const scanResultsByPackageName = new Map<
+    string,
+    Awaited<ReturnType<typeof scanPublishablePluginPackage>>
+  >();
+
+  beforeAll(async () => {
+    const results = await Promise.all(
+      publishablePluginPackages.map(async (plugin) => ({
+        packageName: plugin.packageName,
+        result: await scanPublishablePluginPackage(plugin),
+      })),
+    );
+    for (const { packageName, result } of results) {
+      scanResultsByPackageName.set(packageName, result);
+    }
+  });
+
+  it("covers every package with required reviewed critical findings", () => {
+    const publishablePackageNames = new Set(
+      publishablePluginPackages.map((plugin) => plugin.packageName),
+    );
+    const missingPackages = [
+      ...new Set(
+        [...REQUIRED_REVIEWED_PUBLISHABLE_CRITICAL_FINDING_COUNTS.keys()].map((key) =>
+          key.slice(0, key.indexOf(":")),
+        ),
+      ),
+    ].filter((packageName) => !publishablePackageNames.has(packageName));
+
+    expect(missingPackages.toSorted()).toStrictEqual([]);
+  });
+
   it("lists publishable plugin packages without scanning extension directories in-process", () => {
     expectNoReaddirSyncDuring(() => {
       const packages = collectPublishablePluginPackages();
@@ -291,31 +320,53 @@ describe("publishable plugin npm package install security scan", () => {
     });
   });
 
-  it("keeps npm-published plugin files clear of unexpected critical hits", async () => {
-    const unexpectedCriticalFindings: string[] = [];
-    const reviewedCriticalFindings = new Set<string>();
-    const expectedReviewedCriticalFindings = new Set(
-      REQUIRED_REVIEWED_PUBLISHABLE_CRITICAL_FINDINGS,
-    );
+  it("does not review unknown Codex dist chunk names", () => {
+    const packedPath = "dist/future-exec-unknown.js";
 
-    const packageResults = await mapWithConcurrency(
-      collectPublishablePluginPackages(),
-      PACKAGE_SCAN_CONCURRENCY,
-      scanPublishablePluginPackage,
-    );
-    for (const result of packageResults) {
-      for (const key of result.expectedReviewedCriticalFindings) {
-        expectedReviewedCriticalFindings.add(key);
-      }
-      for (const key of result.reviewedCriticalFindings) {
-        reviewedCriticalFindings.add(key);
-      }
-      unexpectedCriticalFindings.push(...result.unexpectedCriticalFindings);
-    }
-
-    expect(unexpectedCriticalFindings.toSorted()).toStrictEqual([]);
-    expect([...reviewedCriticalFindings].toSorted()).toEqual(
-      [...expectedReviewedCriticalFindings].toSorted(),
+    expect(normalizePackedFindingPath(packedPath)).toBe(packedPath);
+    expect(expectedOptionalReviewedFindingsForPackedPath("@openclaw/codex", packedPath)).toEqual(
+      [],
     );
   });
+
+  it("requires exact occurrence counts for reviewed Codex dist chunks", () => {
+    const runAttemptKey = "@openclaw/codex:dangerous-exec:dist/run-attempt-<hash>.js";
+
+    expect(
+      expectedOptionalReviewedFindingsForPackedPath(
+        "@openclaw/codex",
+        "dist/run-attempt-current.js",
+      ),
+    ).toEqual([runAttemptKey, runAttemptKey]);
+    expect(
+      expectedOptionalReviewedFindingsForPackedPath(
+        "@openclaw/codex",
+        "dist/session-catalog-current.js",
+      ),
+    ).toEqual(["@openclaw/codex:dangerous-exec:dist/session-catalog-<hash>.js"]);
+    expect(
+      expectedOptionalReviewedFindingsForPackedPath("@openclaw/codex", "dist/client-retired.js"),
+    ).toEqual([]);
+  });
+
+  test.concurrent.each(publishablePluginPackages)(
+    "keeps $packageName files clear of unexpected critical hits",
+    async (plugin) => {
+      const result = scanResultsByPackageName.get(plugin.packageName);
+      if (!result) {
+        throw new Error(`Missing package scan result for ${plugin.packageName}`);
+      }
+      const expectedReviewedCriticalFindings = [
+        ...[...REQUIRED_REVIEWED_PUBLISHABLE_CRITICAL_FINDING_COUNTS].flatMap(([key, count]) =>
+          key.startsWith(`${plugin.packageName}:`) ? Array.from({ length: count }, () => key) : [],
+        ),
+        ...result.expectedReviewedCriticalFindings,
+      ];
+
+      expect(result.unexpectedCriticalFindings.toSorted()).toStrictEqual([]);
+      expect(result.reviewedCriticalFindings.toSorted()).toEqual(
+        expectedReviewedCriticalFindings.toSorted(),
+      );
+    },
+  );
 });

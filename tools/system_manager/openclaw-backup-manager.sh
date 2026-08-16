@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BACKUP_DIR="/mnt/ai-storage/openclaw-backups"
 MAX_AGE_DAYS="${MAX_AGE_DAYS:-2}"
 
@@ -94,7 +94,7 @@ create_backup() {
     --exclude="$BASE/.cache" \
     --exclude="$BASE/**/__pycache__" \
     "$BASE" \
-    "/home/gravesab/.openclaw" \
+    "${OPENCLAW_STATE_DIR:-$HOME/.openclaw}" \
     2>"$status_file"
 
   checksum_file="${file}.sha256"

@@ -1,5 +1,25 @@
+// Browser origin tests document same-origin, private-network, loopback, forwarded
+// host, and explicit allowlist decisions for gateway browser surfaces.
+import type { IncomingMessage } from "node:http";
 import { describe, expect, it } from "vitest";
-import { checkBrowserOrigin } from "./origin-check.js";
+import {
+  checkBrowserOrigin,
+  isGatewayHostBrowserOrigin,
+  normalizeChromeExtensionOrigin,
+  resolveAcceptedBrowserOrigin,
+} from "./origin-check.js";
+
+describe("isGatewayHostBrowserOrigin", () => {
+  it.each([
+    ["same host", "claw.example:18789", "https://claw.example:18789", true],
+    ["normalized host", "CLAW.EXAMPLE:18789", "https://claw.example:18789/", true],
+    ["separate host", "gateway.example:18789", "https://ui.example", false],
+    ["local dev port", "127.0.0.1:18789", "http://127.0.0.1:5173", false],
+    ["missing origin", "127.0.0.1:18789", undefined, false],
+  ])("classifies %s", (_name, requestHost, origin, expected) => {
+    expect(isGatewayHostBrowserOrigin({ requestHost, origin })).toBe(expected);
+  });
+});
 
 describe("checkBrowserOrigin", () => {
   it.each([
@@ -141,5 +161,66 @@ describe("checkBrowserOrigin", () => {
     },
   ])("$name", ({ input, expected }) => {
     expect(checkBrowserOrigin(input)).toEqual(expected);
+  });
+
+  it.each([
+    "chrome-extension://abcdefghijklmnop",
+    "tauri://localhost",
+    "electron://localhost",
+    "app://desktop",
+  ])("accepts an exactly allowlisted hosted app origin: %s", (origin) => {
+    expect(checkBrowserOrigin({ origin, allowedOrigins: [origin] })).toEqual({
+      ok: true,
+      matchedBy: "allowlist",
+    });
+  });
+
+  it.each([
+    "tauri://localhost/path",
+    "tauri://localhost/admin/..",
+    "tauri://localhost/%2e",
+    "https://control.example.com\\admin",
+    "tauri://localhost?mode=admin",
+    "tauri://localhost#admin",
+    "tauri://user@localhost",
+    "file:///tmp/openclaw.html",
+    "data:text/plain,hello",
+  ])("rejects a non-origin URL value: %s", (origin) => {
+    expect(checkBrowserOrigin({ origin, allowedOrigins: [origin] })).toEqual({
+      ok: false,
+      reason: "origin missing or invalid",
+    });
+  });
+
+  it("recognizes only canonical Chrome extension origins", () => {
+    expect(
+      normalizeChromeExtensionOrigin("chrome-extension://abcdefghijklmnopabcdefghijklmnop"),
+    ).toBe("chrome-extension://abcdefghijklmnopabcdefghijklmnop");
+    expect(normalizeChromeExtensionOrigin("chrome-extension://abc")).toBeUndefined();
+    expect(
+      normalizeChromeExtensionOrigin("https://abcdefghijklmnopabcdefghijklmnop"),
+    ).toBeUndefined();
+  });
+});
+
+describe("resolveAcceptedBrowserOrigin", () => {
+  it("applies the configured Host-header fallback through the canonical request resolver", () => {
+    const origin = "https://gateway.example.com:18789";
+    const req = {
+      headers: { host: "gateway.example.com:18789", origin },
+      socket: { remoteAddress: "203.0.113.10" },
+    } as IncomingMessage;
+
+    expect(
+      resolveAcceptedBrowserOrigin({
+        req,
+        cfg: {
+          gateway: {
+            controlUi: { dangerouslyAllowHostHeaderOriginFallback: true },
+          },
+        },
+      }),
+    ).toBe(origin);
+    expect(resolveAcceptedBrowserOrigin({ req, cfg: {} })).toBeUndefined();
   });
 });

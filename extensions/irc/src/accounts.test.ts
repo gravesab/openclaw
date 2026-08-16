@@ -1,3 +1,4 @@
+// Irc tests cover accounts plugin behavior.
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -28,6 +29,27 @@ describe("listIrcAccountIds", () => {
     });
 
     expect(listIrcAccountIds(cfg)).toEqual(["ops-team", "work"]);
+  });
+
+  it("keeps the implicit default account when named accounts are added to top-level connection config", () => {
+    const cfg = asConfig({
+      channels: {
+        irc: {
+          host: "irc.example.com",
+          nick: "claw",
+          accounts: {
+            work: {
+              enabled: false,
+              host: "irc-work.example.com",
+              nick: "claw-work",
+            },
+          },
+        },
+      },
+    });
+
+    expect(listIrcAccountIds(cfg)).toEqual(["default", "work"]);
+    expect(resolveDefaultIrcAccountId(cfg)).toBe("default");
   });
 });
 
@@ -125,7 +147,7 @@ describe("resolveIrcAccount", () => {
     }
   });
 
-  it.runIf(process.platform !== "win32")("rejects symlinked password files", () => {
+  it.runIf(process.platform !== "win32")("isolates symlinked password files", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-irc-account-"));
     const passwordFile = path.join(dir, "password.txt");
     const passwordLink = path.join(dir, "password-link.txt");
@@ -144,7 +166,77 @@ describe("resolveIrcAccount", () => {
 
     const account = resolveIrcAccount({ cfg });
     expect(account.password).toBe("");
-    expect(account.passwordSource).toBe("none");
+    expect(account.passwordSource).toBe("passwordFile");
+    expect(account.tokenStatus).toBe("configured_unavailable");
+    expect(account.credentialDiagnostics).toEqual([
+      {
+        code: "CREDENTIAL_FILE_UNAVAILABLE",
+        path: "channels.irc.accounts.default.passwordFile",
+        reason: "symlink",
+      },
+    ]);
+    expect(JSON.stringify(account.credentialDiagnostics)).not.toContain(passwordLink);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.runIf(process.platform !== "win32")("isolates symlinked NickServ password files", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-irc-nickserv-"));
+    const passwordFile = path.join(dir, "nickserv-password.txt");
+    const passwordLink = path.join(dir, "nickserv-password-link.txt");
+    fs.writeFileSync(passwordFile, "nickserv-pass\n", "utf8");
+    fs.symlinkSync(passwordFile, passwordLink);
+
+    const cfg = asConfig({
+      channels: {
+        irc: {
+          host: "irc.example.com",
+          nick: "claw",
+          nickserv: {
+            passwordFile: passwordLink,
+          },
+        },
+      },
+    });
+
+    const account = resolveIrcAccount({ cfg });
+    expect(account.config.nickserv?.password).toBeUndefined();
+    expect(account.tokenStatus).toBe("configured_unavailable");
+    expect(account.credentialDiagnostics).toEqual([
+      {
+        code: "CREDENTIAL_FILE_UNAVAILABLE",
+        path: "channels.irc.accounts.default.nickserv.passwordFile",
+        reason: "symlink",
+      },
+    ]);
+    expect(JSON.stringify(account.credentialDiagnostics)).not.toContain(passwordLink);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("does not fall through from a missing explicit password file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-irc-missing-"));
+    const passwordFile = path.join(dir, "missing-password.txt");
+    const account = resolveIrcAccount({
+      cfg: asConfig({
+        channels: {
+          irc: {
+            accounts: {
+              work: {
+                host: "irc.example.com",
+                nick: "claw",
+                password: "test-password",
+                passwordFile,
+              },
+            },
+          },
+        },
+      }),
+      accountId: "work",
+    });
+
+    expect(account.password).toBe("");
+    expect(account.passwordSource).toBe("passwordFile");
+    expect(account.tokenStatus).toBe("configured_unavailable");
+    expect(JSON.stringify(account.credentialDiagnostics)).not.toContain(passwordFile);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 

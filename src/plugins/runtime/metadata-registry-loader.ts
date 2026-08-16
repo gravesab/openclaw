@@ -1,5 +1,6 @@
+// Metadata registry loader builds plugin metadata registries without activating runtime barrels.
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
-import { loadOpenClawPlugins } from "../loader.js";
+import { loadPluginRegistryHandle } from "../loader.js";
 import type { PluginManifestRegistry } from "../manifest-registry.js";
 import { hasExplicitPluginIdScope } from "../plugin-scope.js";
 import type { PluginRegistry } from "../registry.js";
@@ -10,6 +11,7 @@ import {
   type PluginRuntimeLoadContext,
 } from "./load-context.js";
 
+/** Loads a non-activated plugin metadata registry snapshot for validation/status callers. */
 export function loadPluginMetadataRegistrySnapshot(options?: {
   config?: OpenClawConfig;
   activationSourceConfig?: OpenClawConfig;
@@ -22,11 +24,9 @@ export function loadPluginMetadataRegistrySnapshot(options?: {
   runtimeContext?: PluginRuntimeLoadContext;
 }): PluginRegistry {
   const context = options?.runtimeContext ?? resolvePluginRuntimeLoadContext(options);
-  const loadValues =
-    options?.manifestRegistry === undefined ? { ...context, manifestRegistry: undefined } : context;
 
-  return loadOpenClawPlugins(
-    buildPluginRuntimeLoadOptions(loadValues, {
+  return loadPluginRegistryHandle(
+    buildPluginRuntimeLoadOptions(context, {
       ...(options?.config !== undefined ? { config: options.config } : {}),
       ...(options?.activationSourceConfig !== undefined
         ? { activationSourceConfig: options.activationSourceConfig }
@@ -36,7 +36,6 @@ export function loadPluginMetadataRegistrySnapshot(options?: {
       ...(options?.logger !== undefined ? { logger: options.logger } : {}),
       throwOnLoadError: true,
       cache: false,
-      activate: false,
       mode: "validate",
       loadModules: options?.loadModules,
       ...(hasExplicitPluginIdScope(options?.onlyPluginIds)

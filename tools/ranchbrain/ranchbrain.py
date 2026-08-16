@@ -12,7 +12,7 @@ import psycopg2
 import requests
 
 
-BASE = Path("/home/gravesab/ai/projects/openclaw")
+BASE = Path(os.environ.get("OPENCLAW_BASE", Path(__file__).resolve().parents[2])).resolve()
 ENV_FILE = Path(
     "/home/gravesab/.openclaw/credentials/chat-agent.env"
 )

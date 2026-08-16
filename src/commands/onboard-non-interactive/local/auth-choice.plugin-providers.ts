@@ -1,15 +1,20 @@
-import {
-  resolveAgentDir,
-  resolveDefaultAgentId,
-  resolveAgentWorkspaceDir,
-} from "../../../agents/agent-scope.js";
+/**
+ * Applies non-interactive setup for provider plugins.
+ *
+ * This path resolves trusted plugin providers, delegates setup to their
+ * non-interactive method, and installs runtime plugins required by the model.
+ */
 import type { ApiKeyCredential } from "../../../agents/auth-profiles/types.js";
-import { resolveDefaultAgentWorkspaceDir } from "../../../agents/workspace.js";
+import { applyAutoLocalModelLean } from "../../../config/local-model-lean-auto.js";
 import { resolveAgentModelPrimaryValue } from "../../../config/model-input.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import { enablePluginInConfig } from "../../../plugins/enable.js";
 import { resolvePreferredProviderForAuthChoice } from "../../../plugins/provider-auth-choice-preference.js";
 import { resolveManifestProviderAuthChoice } from "../../../plugins/provider-auth-choices.js";
+import {
+  resolveDeprecatedProviderInstallCatalogEntry,
+  resolveProviderInstallCatalogEntry,
+} from "../../../plugins/provider-install-catalog.js";
 import type {
   ProviderAuthOptionBag,
   ProviderNonInteractiveApiKeyCredentialParams,
@@ -17,11 +22,13 @@ import type {
 } from "../../../plugins/types.js";
 import type { RuntimeEnv } from "../../../runtime.js";
 import { createLazyRuntimeSurface } from "../../../shared/lazy-runtime.js";
-import type { WizardPrompter } from "../../../wizard/prompts.js";
 import {
   CODEX_RUNTIME_PLUGIN_ID,
   ensureCodexRuntimePluginForModelSelection,
 } from "../../codex-runtime-plugin-install.js";
+import { ensureCopilotRuntimePluginForModelSelection } from "../../copilot-runtime-plugin-install.js";
+import { createNonInteractiveLoggingPrompter } from "../../non-interactive-prompter.js";
+import type { OnboardingAgentTarget } from "../../onboard-agent-target.js";
 import type { OnboardOptions } from "../../onboard-types.js";
 
 const PROVIDER_PLUGIN_CHOICE_PREFIX = "provider-plugin:";
@@ -35,53 +42,14 @@ const loadAuthChoicePluginProvidersRuntime = createLazyRuntimeSurface(
   ({ authChoicePluginProvidersRuntime }) => authChoicePluginProvidersRuntime,
 );
 
-function createNonInteractivePluginInstallPrompter(runtime: RuntimeEnv): WizardPrompter {
-  const unavailable = <T>(message: string): Promise<T> =>
-    Promise.reject(new Error(`Non-interactive setup cannot prompt for plugin install: ${message}`));
-  return {
-    async intro(title) {
-      runtime.log(title);
-    },
-    async outro(message) {
-      runtime.log(message);
-    },
-    async note(message, title) {
-      runtime.log(title ? `${title}\n${message}` : message);
-    },
-    async select(params) {
-      return unavailable(params.message);
-    },
-    async multiselect(params) {
-      return unavailable(params.message);
-    },
-    async text(params) {
-      return unavailable(params.message);
-    },
-    async confirm(params) {
-      return unavailable(params.message);
-    },
-    progress(label) {
-      runtime.log(label);
-      return {
-        update(message) {
-          runtime.log(message);
-        },
-        stop(message) {
-          if (message) {
-            runtime.log(message);
-          }
-        },
-      };
-    },
-  };
-}
-
+/** Applies a plugin-defined auth choice, or returns undefined when it is not plugin-backed. */
 export async function applyNonInteractivePluginProviderChoice(params: {
   nextConfig: OpenClawConfig;
   authChoice: string;
   opts: OnboardOptions;
   runtime: RuntimeEnv;
   baseConfig: OpenClawConfig;
+  target: OnboardingAgentTarget;
   resolveApiKey: (input: ProviderResolveNonInteractiveApiKeyParams) => Promise<{
     key: string;
     source: "profile" | "env" | "flag";
@@ -91,10 +59,8 @@ export async function applyNonInteractivePluginProviderChoice(params: {
     input: ProviderNonInteractiveApiKeyCredentialParams,
   ) => ApiKeyCredential | null;
 }): Promise<OpenClawConfig | null | undefined> {
-  const agentId = resolveDefaultAgentId(params.nextConfig);
-  const agentDir = resolveAgentDir(params.nextConfig, agentId);
-  const workspaceDir =
-    resolveAgentWorkspaceDir(params.nextConfig, agentId) ?? resolveDefaultAgentWorkspaceDir();
+  const { agentDir, workspaceDir } = params.target;
+  let nextConfig = params.nextConfig;
   const prefixedProviderId = params.authChoice.startsWith(PROVIDER_PLUGIN_CHOICE_PREFIX)
     ? params.authChoice.slice(PROVIDER_PLUGIN_CHOICE_PREFIX.length).split(":", 1)[0]?.trim()
     : undefined;
@@ -102,22 +68,27 @@ export async function applyNonInteractivePluginProviderChoice(params: {
     prefixedProviderId ||
     (await resolvePreferredProviderForAuthChoice({
       choice: params.authChoice,
-      config: params.nextConfig,
+      config: nextConfig,
       workspaceDir,
       includeUntrustedWorkspacePlugins: false,
     }));
-  const { resolveOwningPluginIdsForProvider, resolveProviderPluginChoice, resolvePluginProviders } =
-    await loadAuthChoicePluginProvidersRuntime();
+  // Provider discovery is lazy so non-plugin auth choices do not pull plugin
+  // runtime code into the basic non-interactive setup path.
+  const {
+    resolveOwningPluginIdsForProviderRef,
+    resolveProviderPluginChoice,
+    resolvePluginProviders,
+  } = await loadAuthChoicePluginProvidersRuntime();
   const owningPluginIds = preferredProviderId
-    ? resolveOwningPluginIdsForProvider({
+    ? resolveOwningPluginIdsForProviderRef({
         provider: preferredProviderId,
-        config: params.nextConfig,
+        config: nextConfig,
         workspaceDir,
       })
     : undefined;
-  const providerChoice = resolveProviderPluginChoice({
+  let providerChoice = resolveProviderPluginChoice({
     providers: resolvePluginProviders({
-      config: params.nextConfig,
+      config: nextConfig,
       workspaceDir,
       onlyPluginIds: owningPluginIds,
       mode: "setup",
@@ -127,6 +98,8 @@ export async function applyNonInteractivePluginProviderChoice(params: {
   });
   if (!providerChoice) {
     if (prefixedProviderId) {
+      // Explicit provider-plugin choices are user intent; fail closed if the
+      // target provider is unavailable rather than falling back to core auth.
       params.runtime.error(
         [
           `Auth choice "${params.authChoice}" was not matched to a trusted provider plugin.`,
@@ -138,18 +111,20 @@ export async function applyNonInteractivePluginProviderChoice(params: {
     }
     // Keep mismatch diagnostics metadata-only so untrusted workspace plugins are not loaded.
     const trustedManifestMatch = resolveManifestProviderAuthChoice(params.authChoice, {
-      config: params.nextConfig,
+      config: nextConfig,
       workspaceDir,
       includeUntrustedWorkspacePlugins: false,
     });
     const untrustedOnlyManifestMatch =
       !trustedManifestMatch &&
       resolveManifestProviderAuthChoice(params.authChoice, {
-        config: params.nextConfig,
+        config: nextConfig,
         workspaceDir,
         includeUntrustedWorkspacePlugins: true,
       });
     if (untrustedOnlyManifestMatch) {
+      // Manifest metadata can identify untrusted matches without loading the
+      // plugin implementation, preserving workspace trust boundaries.
       params.runtime.error(
         [
           `Auth choice "${params.authChoice}" matched a provider plugin that is not trusted or enabled for setup.`,
@@ -159,11 +134,77 @@ export async function applyNonInteractivePluginProviderChoice(params: {
       params.runtime.exit(1);
       return null;
     }
-    return undefined;
+    const installCatalogParams = {
+      config: nextConfig,
+      workspaceDir,
+      includeUntrustedWorkspacePlugins: false,
+    };
+    const deprecatedInstallCatalogEntry = resolveDeprecatedProviderInstallCatalogEntry(
+      params.authChoice,
+      installCatalogParams,
+    );
+    if (deprecatedInstallCatalogEntry) {
+      params.runtime.error(
+        `${JSON.stringify(params.authChoice)} is no longer supported. Use --auth-choice ${JSON.stringify(deprecatedInstallCatalogEntry.choiceId)} instead.`,
+      );
+      params.runtime.exit(1);
+      return null;
+    }
+    const installCatalogEntry = resolveProviderInstallCatalogEntry(
+      params.authChoice,
+      installCatalogParams,
+    );
+    if (!installCatalogEntry) {
+      return undefined;
+    }
+    const { ensureOnboardingPluginInstalled } = await import("../../onboarding-plugin-install.js");
+    const installResult = await ensureOnboardingPluginInstalled({
+      cfg: nextConfig,
+      entry: {
+        pluginId: installCatalogEntry.pluginId,
+        label: installCatalogEntry.label,
+        install: installCatalogEntry.install,
+        ...(installCatalogEntry.origin === "bundled"
+          ? { trustedSourceLinkedOfficialInstall: true }
+          : {}),
+      },
+      prompter: createNonInteractiveLoggingPrompter(
+        params.runtime,
+        (message) => `Non-interactive setup cannot prompt for plugin install: ${message}`,
+      ),
+      runtime: params.runtime,
+      workspaceDir,
+      promptInstall: false,
+    });
+    if (!installResult.installed) {
+      params.runtime.error(
+        `Unable to install the ${installCatalogEntry.label} plugin for non-interactive setup.`,
+      );
+      params.runtime.exit(1);
+      return null;
+    }
+    nextConfig = installResult.cfg;
+    providerChoice = resolveProviderPluginChoice({
+      providers: resolvePluginProviders({
+        config: nextConfig,
+        workspaceDir,
+        onlyPluginIds: [installCatalogEntry.pluginId],
+        mode: "setup",
+        includeUntrustedWorkspacePlugins: false,
+      }),
+      choice: params.authChoice,
+    });
+    if (!providerChoice) {
+      params.runtime.error(
+        `Installed plugin "${installCatalogEntry.label}" did not expose auth choice "${params.authChoice}".`,
+      );
+      params.runtime.exit(1);
+      return null;
+    }
   }
 
   const enableResult = enablePluginInConfig(
-    params.nextConfig,
+    nextConfig,
     providerChoice.provider.pluginId ?? providerChoice.provider.id,
   );
   if (!enableResult.enabled) {
@@ -176,6 +217,8 @@ export async function applyNonInteractivePluginProviderChoice(params: {
 
   const method = providerChoice.method;
   if (!method.runNonInteractive) {
+    // Interactive-only plugin setup methods may prompt, so non-interactive
+    // setup must reject them before entering plugin code.
     params.runtime.error(
       [
         `Auth choice "${params.authChoice}" requires interactive mode.`,
@@ -204,7 +247,12 @@ export async function applyNonInteractivePluginProviderChoice(params: {
   if (!selectedModel) {
     return result;
   }
-  const nonInteractivePrompter = createNonInteractivePluginInstallPrompter(params.runtime);
+  // Model selection can imply a runtime plugin even when auth setup belonged to
+  // a provider plugin; install those runtimes before persisting the config.
+  const nonInteractivePrompter = createNonInteractiveLoggingPrompter(
+    params.runtime,
+    (message) => `Non-interactive setup cannot prompt for plugin install: ${message}`,
+  );
   const codexInstall = await ensureCodexRuntimePluginForModelSelection({
     cfg: result,
     model: selectedModel,
@@ -226,5 +274,24 @@ export async function applyNonInteractivePluginProviderChoice(params: {
       nonInteractive: true,
     });
   }
-  return codexInstall.cfg;
+  const copilotInstall = await ensureCopilotRuntimePluginForModelSelection({
+    cfg: codexInstall.cfg,
+    model: selectedModel,
+    prompter: nonInteractivePrompter,
+    runtime: params.runtime,
+    workspaceDir,
+  });
+  const previousModel = enableResult.config.agents?.defaults?.model;
+  const previousAutoModel = enableResult.config.wizard?.localModelLeanAutoModel;
+  const retainsAutoModelOwnership =
+    previousAutoModel !== undefined &&
+    previousAutoModel === resolveAgentModelPrimaryValue(previousModel) &&
+    previousAutoModel === copilotInstall.cfg.wizard?.localModelLeanAutoModel;
+
+  return applyAutoLocalModelLean({
+    config: copilotInstall.cfg,
+    providerId: providerChoice.provider.id,
+    modelRef: selectedModel,
+    ...(retainsAutoModelOwnership ? { previousModelRef: previousAutoModel } : {}),
+  }).config;
 }

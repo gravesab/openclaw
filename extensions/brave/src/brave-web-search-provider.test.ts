@@ -1,7 +1,8 @@
+// Brave tests cover brave web search provider plugin behavior.
 import fs from "node:fs";
-import { validateJsonSchemaValue } from "openclaw/plugin-sdk/config-schema";
+import { validateJsonSchemaValue } from "openclaw/plugin-sdk/json-schema-runtime";
 import { afterAll, afterEach, describe, expect, it, vi } from "vitest";
-import { __testing } from "../test-api.js";
+import { testing } from "../test-api.js";
 import { createBraveWebSearchProvider as createBraveWebSearchContractProvider } from "../web-search-contract-api.js";
 import { createBraveWebSearchProvider } from "./brave-web-search-provider.js";
 
@@ -42,23 +43,39 @@ afterAll(() => {
   vi.resetModules();
 });
 
+function jsonResponse(payload: unknown, init?: ResponseInit): Response {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { "content-type": "application/json" },
+    ...init,
+  });
+}
+
+function malformedJsonResponse(): Response {
+  return new Response("{ nope", {
+    status: 200,
+    headers: { "content-type": "application/json" },
+  });
+}
+
+function emptyWebSearchResponse(): Response {
+  return jsonResponse({ web: { results: [] } });
+}
+
 function installBraveLlmContextFetch() {
   const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) => {
-    return {
-      ok: true,
-      json: async () => ({
-        grounding: {
-          generic: [
-            {
-              url: "https://example.com/context",
-              title: "Context",
-              snippets: ["snippet"],
-            },
-          ],
-        },
-        sources: [],
-      }),
-    } as unknown as Response;
+    return jsonResponse({
+      grounding: {
+        generic: [
+          {
+            url: "https://example.com/context",
+            title: "Context",
+            snippets: ["snippet"],
+          },
+        ],
+      },
+      sources: [],
+    });
   });
   global.fetch = mockFetch as typeof global.fetch;
   return mockFetch;
@@ -88,6 +105,51 @@ function fetchRequestInit(mockFetch: { mock: { calls: Array<Array<unknown>> } },
   return fetchCall(mockFetch, index)[1];
 }
 
+function createBodyOnlyErrorResponse(params: { body: string; status: number }): Response {
+  const bytes = new TextEncoder().encode(params.body);
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(bytes);
+      controller.close();
+    },
+  });
+  return {
+    ok: false,
+    status: params.status,
+    statusText: "Too Many Requests",
+    headers: new Headers(),
+    body,
+  } as Response;
+}
+
+function createBraveTool(
+  params: {
+    webSearch?: Record<string, unknown>;
+    searchConfig?: Record<string, unknown>;
+    config?: Record<string, unknown>;
+  } = {},
+) {
+  const tool = createBraveWebSearchProvider().createTool({
+    config: {
+      ...params.config,
+      plugins: {
+        entries: {
+          brave: {
+            config: {
+              webSearch: params.webSearch ?? {},
+            },
+          },
+        },
+      },
+    },
+    searchConfig: params.searchConfig ?? {},
+  } as never);
+  if (!tool) {
+    throw new Error("Expected tool definition");
+  }
+  return tool;
+}
+
 describe("brave web search provider", () => {
   const priorFetch = global.fetch;
 
@@ -106,41 +168,9 @@ describe("brave web search provider", () => {
     );
   });
 
-  it("exposes legacy top-level apiKey as a Brave-owned compatibility fallback", () => {
-    const apiKey = { source: "env", provider: "default", id: "BRAVE_API_KEY" } as const;
-    const config = {
-      tools: {
-        web: {
-          search: {
-            apiKey,
-          },
-        },
-      },
-    };
-
-    expect(createBraveWebSearchProvider().getConfiguredCredentialValue?.(config)).toEqual(apiKey);
-    expect(createBraveWebSearchContractProvider().getConfiguredCredentialValue?.(config)).toEqual(
-      apiKey,
-    );
-    expect(createBraveWebSearchProvider().getConfiguredCredentialFallback?.(config)).toEqual({
-      path: "tools.web.search.apiKey",
-      value: apiKey,
-    });
-    expect(
-      createBraveWebSearchContractProvider().getConfiguredCredentialFallback?.(config),
-    ).toEqual({
-      path: "tools.web.search.apiKey",
-      value: apiKey,
-    });
-  });
-
   it("points missing-key users to fetch/browser alternatives", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({ config: {}, searchConfig: {} });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
+    const tool = createBraveTool();
 
     const result = await tool.execute({ query: "OpenClaw docs" });
 
@@ -152,9 +182,55 @@ describe("brave web search provider", () => {
     });
   });
 
+  it.each(["web", "llm-context"] as const)(
+    "does not start an already canceled %s search",
+    async (mode) => {
+      const fetchMock = vi.fn(async () => emptyWebSearchResponse());
+      global.fetch = fetchMock as typeof global.fetch;
+      const tool = createBraveTool({ webSearch: { apiKey: "brave-test-key", mode } });
+      const controller = new AbortController();
+      controller.abort(new Error("Brave caller canceled"));
+
+      await expect(
+        tool.execute({ query: `brave pre-canceled ${mode}` }, { signal: controller.signal }),
+      ).rejects.toThrow("Brave caller canceled");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["web", "llm-context"] as const)(
+    "aborts an in-flight %s request with the caller's reason",
+    async (mode) => {
+      const fetchMock = vi.fn(
+        async (_url: string, init?: RequestInit) =>
+          await new Promise<Response>((_resolve, reject) => {
+            const signal = init?.signal;
+            if (!signal) {
+              reject(new Error("Brave request lost caller cancellation"));
+              return;
+            }
+            signal.addEventListener("abort", () => reject(signal.reason as Error), { once: true });
+          }),
+      );
+      global.fetch = fetchMock as typeof global.fetch;
+      const tool = createBraveTool({ webSearch: { apiKey: "brave-test-key", mode } });
+      const controller = new AbortController();
+      const result = tool.execute(
+        { query: `brave in-flight cancellation ${mode}` },
+        { signal: controller.signal },
+      );
+
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      controller.abort(new Error("Brave request canceled in flight"));
+
+      await expect(result).rejects.toThrow("Brave request canceled in flight");
+      expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    },
+  );
+
   it("normalizes brave language parameters and swaps reversed ui/search inputs", () => {
     expect(
-      __testing.normalizeBraveLanguageParams({
+      testing.normalizeBraveLanguageParams({
         search_lang: "en-US",
         ui_lang: "ja",
       }),
@@ -162,43 +238,39 @@ describe("brave web search provider", () => {
       search_lang: "jp",
       ui_lang: "en-US",
     });
-    expect(__testing.normalizeBraveLanguageParams({ search_lang: "tr-TR", ui_lang: "tr" })).toEqual(
-      {
-        search_lang: "tr",
-        ui_lang: "tr-TR",
-      },
-    );
-    expect(__testing.normalizeBraveLanguageParams({ search_lang: "EN", ui_lang: "en-us" })).toEqual(
-      {
-        search_lang: "en",
-        ui_lang: "en-US",
-      },
-    );
+    expect(testing.normalizeBraveLanguageParams({ search_lang: "tr-TR", ui_lang: "tr" })).toEqual({
+      search_lang: "tr",
+      ui_lang: "tr-TR",
+    });
+    expect(testing.normalizeBraveLanguageParams({ search_lang: "EN", ui_lang: "en-us" })).toEqual({
+      search_lang: "en",
+      ui_lang: "en-US",
+    });
   });
 
   it("flags invalid brave language fields", () => {
     expect(
-      __testing.normalizeBraveLanguageParams({
+      testing.normalizeBraveLanguageParams({
         search_lang: "xx",
       }),
     ).toEqual({ invalidField: "search_lang" });
-    expect(__testing.normalizeBraveLanguageParams({ search_lang: "en-US" })).toEqual({
+    expect(testing.normalizeBraveLanguageParams({ search_lang: "en-US" })).toEqual({
       invalidField: "search_lang",
     });
-    expect(__testing.normalizeBraveLanguageParams({ ui_lang: "en" })).toEqual({
+    expect(testing.normalizeBraveLanguageParams({ ui_lang: "en" })).toEqual({
       invalidField: "ui_lang",
     });
   });
 
   it("normalizes Brave country codes and falls back unsupported values to ALL", () => {
-    expect(__testing.normalizeBraveCountry("de")).toBe("DE");
-    expect(__testing.normalizeBraveCountry(" VN ")).toBe("ALL");
-    expect(__testing.normalizeBraveCountry("")).toBeUndefined();
+    expect(testing.normalizeBraveCountry("de")).toBe("DE");
+    expect(testing.normalizeBraveCountry(" VN ")).toBe("ALL");
+    expect(testing.normalizeBraveCountry("")).toBeUndefined();
   });
 
   it("defaults brave mode to web unless llm-context is explicitly selected", () => {
-    expect(__testing.resolveBraveMode()).toBe("web");
-    expect(__testing.resolveBraveMode({ mode: "llm-context" })).toBe("llm-context");
+    expect(testing.resolveBraveMode()).toBe("web");
+    expect(testing.resolveBraveMode({ mode: "llm-context" })).toBe("llm-context");
   });
 
   it("accepts llm-context in the Brave plugin config schema", () => {
@@ -240,27 +312,17 @@ describe("brave web search provider", () => {
   it("uses configured Brave baseUrl for web search requests", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
     const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) => {
-      return {
-        ok: true,
-        json: async () => ({ web: { results: [] } }),
-      } as unknown as Response;
+      return emptyWebSearchResponse();
     });
     global.fetch = mockFetch as typeof global.fetch;
 
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
+    const tool = createBraveTool({
+      webSearch: {
         apiKey: "brave-test-key",
-        brave: {
-          baseUrl: "https://api.search.brave.com/proxy/",
-          mode: "web",
-        },
+        baseUrl: "https://api.search.brave.com/proxy/",
+        mode: "web",
       },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     await tool.execute({ query: "latest ai news" });
 
@@ -272,20 +334,13 @@ describe("brave web search provider", () => {
   it("uses configured Brave baseUrl for llm-context requests", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
     const mockFetch = installBraveLlmContextFetch();
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
+    const tool = createBraveTool({
+      webSearch: {
         apiKey: "brave-test-key",
-        brave: {
-          baseUrl: "https://api.search.brave.com/proxy",
-          mode: "llm-context",
-        },
+        baseUrl: "https://api.search.brave.com/proxy",
+        mode: "llm-context",
       },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     await tool.execute({ query: "latest ai news" });
 
@@ -296,26 +351,11 @@ describe("brave web search provider", () => {
   it("reports malformed Brave web search JSON as a provider error", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
     const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) => {
-      return {
-        ok: true,
-        json: async () => {
-          throw new SyntaxError("Unexpected token");
-        },
-      } as unknown as Response;
+      return malformedJsonResponse();
     });
     global.fetch = mockFetch as typeof global.fetch;
 
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "brave-test-key",
-        brave: { mode: "web" },
-      },
-    });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
+    const tool = createBraveTool({ webSearch: { apiKey: "brave-test-key", mode: "web" } });
 
     await expect(tool.execute({ query: "latest ai news" })).rejects.toThrow(
       "Brave Search API error: malformed JSON response",
@@ -325,66 +365,82 @@ describe("brave web search provider", () => {
   it("reports malformed Brave llm-context JSON as a provider error", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
     const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) => {
-      return {
-        ok: true,
-        json: async () => {
-          throw new SyntaxError("Unexpected token");
-        },
-      } as unknown as Response;
+      return malformedJsonResponse();
     });
     global.fetch = mockFetch as typeof global.fetch;
 
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "brave-test-key",
-        brave: { mode: "llm-context" },
-      },
+    const tool = createBraveTool({
+      webSearch: { apiKey: "brave-test-key", mode: "llm-context" },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     await expect(tool.execute({ query: "latest ai news" })).rejects.toThrow(
       "Brave LLM Context API error: malformed JSON response",
     );
   });
 
+  it("bounds Brave web error bodies without using response.text", async () => {
+    vi.stubEnv("BRAVE_API_KEY", "");
+    const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) =>
+      createBodyOnlyErrorResponse({
+        status: 429,
+        body: `${"x".repeat(24 * 1024)}tail-marker`,
+      }),
+    );
+    global.fetch = mockFetch as typeof global.fetch;
+
+    const tool = createBraveTool({ webSearch: { apiKey: "brave-test-key", mode: "web" } });
+
+    const error = await tool.execute({ query: "latest ai news" }).catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(Error);
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toContain("Brave Search API error (429):");
+    expect(message).not.toContain("tail-marker");
+    expect(message.length).toBeLessThan(700);
+  });
+
+  it("bounds Brave llm-context error bodies without using response.text", async () => {
+    vi.stubEnv("BRAVE_API_KEY", "");
+    const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) =>
+      createBodyOnlyErrorResponse({
+        status: 429,
+        body: `${"x".repeat(24 * 1024)}tail-marker`,
+      }),
+    );
+    global.fetch = mockFetch as typeof global.fetch;
+
+    const tool = createBraveTool({
+      webSearch: { apiKey: "brave-test-key", mode: "llm-context" },
+    });
+
+    const error = await tool.execute({ query: "latest ai news" }).catch((value: unknown) => value);
+    expect(error).toBeInstanceOf(Error);
+    const message = error instanceof Error ? error.message : String(error);
+    expect(message).toContain("Brave LLM Context API error (429):");
+    expect(message).not.toContain("tail-marker");
+    expect(message.length).toBeLessThan(700);
+  });
+
   it("keeps Brave cache entries isolated by baseUrl", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
     const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) => {
-      return {
-        ok: true,
-        json: async () => ({ web: { results: [] } }),
-      } as unknown as Response;
+      return emptyWebSearchResponse();
     });
     global.fetch = mockFetch as typeof global.fetch;
 
-    const provider = createBraveWebSearchProvider();
-    const firstTool = provider.createTool({
-      config: {},
-      searchConfig: {
+    const firstTool = createBraveTool({
+      webSearch: {
         apiKey: "brave-test-key",
-        brave: {
-          baseUrl: "https://api.search.brave.com/proxy-one",
-          mode: "web",
-        },
+        baseUrl: "https://api.search.brave.com/proxy-one",
+        mode: "web",
       },
     });
-    const secondTool = provider.createTool({
-      config: {},
-      searchConfig: {
+    const secondTool = createBraveTool({
+      webSearch: {
         apiKey: "brave-test-key",
-        brave: {
-          baseUrl: "https://api.search.brave.com/proxy-two",
-          mode: "web",
-        },
+        baseUrl: "https://api.search.brave.com/proxy-two",
+        mode: "web",
       },
     });
-    if (!firstTool || !secondTool) {
-      throw new Error("Expected tool definitions");
-    }
 
     await firstTool.execute({ query: "base url cache identity" });
     await secondTool.execute({ query: "base url cache identity" });
@@ -426,7 +482,7 @@ describe("brave web search provider", () => {
 
   it("maps llm-context results into wrapped source entries", () => {
     expect(
-      __testing.mapBraveLlmContextResults({
+      testing.mapBraveLlmContextResults({
         grounding: {
           generic: [
             {
@@ -449,17 +505,7 @@ describe("brave web search provider", () => {
 
   it("returns validation errors for invalid date ranges", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "BSA...",
-        brave: { apiKey: "BSA..." },
-      },
-    });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
+    const tool = createBraveTool({ webSearch: { apiKey: "BSA..." } });
 
     const result = await tool.execute({
       query: "latest gpu news",
@@ -477,17 +523,9 @@ describe("brave web search provider", () => {
   it("passes freshness to Brave llm-context endpoint", async () => {
     vi.stubEnv("BRAVE_API_KEY", "test-key");
     const mockFetch = installBraveLlmContextFetch();
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "BSA...",
-        brave: { mode: "llm-context" },
-      },
+    const tool = createBraveTool({
+      webSearch: { apiKey: "BSA...", mode: "llm-context" },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     await tool.execute({ query: "latest ai news", freshness: "week" });
 
@@ -499,24 +537,11 @@ describe("brave web search provider", () => {
   it("sends Brave web auth in the X-Subscription-Token header", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
     const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) => {
-      return {
-        ok: true,
-        json: async () => ({ web: { results: [] } }),
-      } as unknown as Response;
+      return emptyWebSearchResponse();
     });
     global.fetch = mockFetch as typeof global.fetch;
 
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "brave-test-key",
-        brave: { mode: "web" },
-      },
-    });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
+    const tool = createBraveTool({ webSearch: { apiKey: "brave-test-key", mode: "web" } });
 
     await tool.execute({ query: "latest ai news" });
 
@@ -529,17 +554,9 @@ describe("brave web search provider", () => {
   it("sends Brave llm-context auth in the X-Subscription-Token header", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
     const mockFetch = installBraveLlmContextFetch();
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "brave-test-key",
-        brave: { mode: "llm-context" },
-      },
+    const tool = createBraveTool({
+      webSearch: { apiKey: "brave-test-key", mode: "llm-context" },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     await tool.execute({ query: "latest ai news" });
 
@@ -552,17 +569,9 @@ describe("brave web search provider", () => {
   it("passes bounded date ranges to Brave llm-context endpoint", async () => {
     vi.stubEnv("BRAVE_API_KEY", "test-key");
     const mockFetch = installBraveLlmContextFetch();
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "BSA...",
-        brave: { mode: "llm-context" },
-      },
+    const tool = createBraveTool({
+      webSearch: { apiKey: "BSA...", mode: "llm-context" },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     await tool.execute({
       query: "latest ai news",
@@ -578,17 +587,9 @@ describe("brave web search provider", () => {
   it("uses today as the end date for Brave llm-context date_after-only ranges", async () => {
     vi.stubEnv("BRAVE_API_KEY", "test-key");
     const mockFetch = installBraveLlmContextFetch();
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "BSA...",
-        brave: { mode: "llm-context" },
-      },
+    const tool = createBraveTool({
+      webSearch: { apiKey: "BSA...", mode: "llm-context" },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     await tool.execute({ query: "latest ai news", date_after: "2025-01-01" });
 
@@ -601,17 +602,9 @@ describe("brave web search provider", () => {
   it("rejects future Brave llm-context date_after-only ranges before fetch", async () => {
     vi.stubEnv("BRAVE_API_KEY", "test-key");
     const mockFetch = installBraveLlmContextFetch();
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "BSA...",
-        brave: { mode: "llm-context" },
-      },
+    const tool = createBraveTool({
+      webSearch: { apiKey: "BSA...", mode: "llm-context" },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     const result = await tool.execute({
       query: "latest ai news",
@@ -629,17 +622,9 @@ describe("brave web search provider", () => {
   it("rejects Brave llm-context date_before-only ranges before fetch", async () => {
     vi.stubEnv("BRAVE_API_KEY", "test-key");
     const mockFetch = installBraveLlmContextFetch();
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "BSA...",
-        brave: { mode: "llm-context" },
-      },
+    const tool = createBraveTool({
+      webSearch: { apiKey: "BSA...", mode: "llm-context" },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     const result = await tool.execute({
       query: "latest ai news",
@@ -658,24 +643,11 @@ describe("brave web search provider", () => {
   it("falls back unsupported country values before calling Brave", async () => {
     vi.stubEnv("BRAVE_API_KEY", "test-key");
     const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) => {
-      return {
-        ok: true,
-        json: async () => ({ web: { results: [] } }),
-      } as unknown as Response;
+      return emptyWebSearchResponse();
     });
     global.fetch = mockFetch as typeof global.fetch;
 
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
-      config: {},
-      searchConfig: {
-        apiKey: "BSA...",
-        brave: { apiKey: "BSA..." },
-      },
-    });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
+    const tool = createBraveTool({ webSearch: { apiKey: "BSA..." } });
 
     await tool.execute({
       query: "latest Vietnam news",
@@ -689,35 +661,24 @@ describe("brave web search provider", () => {
   it("emits brave.http diagnostics for requests, responses, and cache events", async () => {
     vi.stubEnv("BRAVE_API_KEY", "");
     const mockFetch = vi.fn(async (_input?: unknown, _init?: unknown) => {
-      return {
-        ok: true,
-        status: 200,
-        json: async () => ({
-          web: {
-            results: [
-              {
-                title: "Diagnostics",
-                url: "https://example.com/diagnostics",
-                description: "debug details",
-              },
-            ],
-          },
-        }),
-      } as unknown as Response;
+      return jsonResponse({
+        web: {
+          results: [
+            {
+              title: "Diagnostics",
+              url: "https://example.com/diagnostics",
+              description: "debug details",
+            },
+          ],
+        },
+      });
     });
     global.fetch = mockFetch as typeof global.fetch;
 
-    const provider = createBraveWebSearchProvider();
-    const tool = provider.createTool({
+    const tool = createBraveTool({
       config: { diagnostics: { flags: ["brave.http"] } },
-      searchConfig: {
-        apiKey: "brave-test-key",
-        brave: { mode: "web" },
-      },
+      webSearch: { apiKey: "brave-test-key", mode: "web" },
     });
-    if (!tool) {
-      throw new Error("Expected tool definition");
-    }
 
     await tool.execute({ query: "unique brave diagnostics query", count: 1 });
     await tool.execute({ query: "unique brave diagnostics query", count: 1 });

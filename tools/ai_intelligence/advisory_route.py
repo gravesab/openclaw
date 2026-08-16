@@ -11,6 +11,7 @@ It does not change the production model.
 """
 
 from __future__ import annotations
+import os
 
 import hashlib
 import json
@@ -21,7 +22,7 @@ from datetime import datetime
 from pathlib import Path
 
 
-BASE = Path("/home/gravesab/ai/projects/openclaw")
+BASE = Path(os.environ.get("OPENCLAW_BASE", Path(__file__).resolve().parents[2])).resolve()
 
 RECOMMENDER = (
     BASE

@@ -1,6 +1,6 @@
 # PropertyManager API — Development Runbook (Gunicorn WSGI)
 
-Status: Development VM only  
+Status: Development VM only
 Last Updated: 2026-08-12
 Scope: PropertyManager API in an isolated Development worktree
 Do **not** apply this unit or procedure to the production Intel Mini without explicit operator approval.

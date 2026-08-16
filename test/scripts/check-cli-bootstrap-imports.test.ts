@@ -1,3 +1,4 @@
+// Check Cli Bootstrap Imports tests cover check cli bootstrap imports script behavior.
 import { mkdtempSync, mkdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -6,7 +7,7 @@ import {
   collectCliBootstrapExternalImportErrors,
   collectGatewayRunChunkBudgetErrors,
   listStaticImportSpecifiers,
-} from "../../scripts/check-cli-bootstrap-imports.mjs";
+} from "../../scripts/check-cli-bootstrap-imports.mts";
 
 const tempRoots: string[] = [];
 
@@ -30,7 +31,7 @@ function writeGatewayRunChunk(root: string, source = ""): void {
     "dist/run-gateway.js",
     [
       'import "./string-coerce.js";',
-      "const GATEWAY_RUN_VALUE_KEYS = [];",
+      "const GATEWAY_AUTH_MODES = [];",
       "function addGatewayRunCommand(cmd) { return cmd; }",
       source,
     ].join("\n"),

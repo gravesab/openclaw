@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+export OPENCLAW_BASE="$BASE"
+TELEGRAM_ENV="${OPENCLAW_TELEGRAM_ENV:-$HOME/.openclaw/credentials/telegram.env}"
 STATE_DIR="$BASE/reports/property_manager/state"
 OFFSET_FILE="$STATE_DIR/telegram_offset.txt"
 LOG_FILE="$BASE/reports/property_manager/propertymanager-telegram.log"
 
 mkdir -p "$STATE_DIR"
 
-source /home/gravesab/.openclaw/credentials/telegram.env
+source "$TELEGRAM_ENV"
 
 OFFSET="$(cat "$OFFSET_FILE" 2>/dev/null || echo 0)"
 
@@ -28,10 +30,10 @@ raw = sys.argv[1]
 offset_file = Path(sys.argv[2])
 log_file = Path(sys.argv[3])
 
-BASE = Path("/home/gravesab/ai/projects/openclaw")
+BASE = Path(__import__("os").environ["OPENCLAW_BASE"])
 COMMAND_SCRIPT = BASE / "tools/router/openclaw-router.py"
 SEND_TELEGRAM = BASE / "tools/telegram/send-telegram.sh"
-ENV_FILE = Path("/home/gravesab/.openclaw/credentials/telegram.env")
+ENV_FILE = Path(__import__("os").environ.get("OPENCLAW_TELEGRAM_ENV", Path.home() / ".openclaw/credentials/telegram.env"))
 
 def log(msg: str):
     log_file.open("a").write(f"{datetime.now()} {msg}\n")

@@ -1,27 +1,47 @@
+// Gateway node connect reconciliation.
+// Computes approved runtime surfaces and pending pairing upgrades on reconnect.
+import type { ConnectParams } from "../../packages/gateway-protocol/src/index.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type {
-  NodePairingPairedNode,
+  PairedDeviceNode,
   NodePairingRequestInput,
   RequestNodePairingResult,
-} from "../infra/node-pairing.js";
-import { normalizeArrayBackedTrimmedStringList } from "../shared/string-normalization.js";
+} from "../infra/device-pairing-node.js";
+import { normalizeNodeApprovalSurfaceList } from "../infra/node-pairing-surface.js";
+import {
+  parseComputerUseCapabilityDescriptor,
+  type ComputerUseCapabilityDescriptor,
+} from "../plugins/computer-use-contract.js";
 import {
   normalizeDeclaredNodeCommands,
-  resolveNodeCommandAllowlist,
   resolveNodePairingCommandAllowlist,
 } from "./node-command-policy.js";
-import type { ConnectParams } from "./protocol/index.js";
 
-export type NodeConnectPairingReconcileResult = {
+// Node connect reconciliation turns declared caps/commands/permissions into the
+// effective runtime surface. New or upgraded surfaces create a pending pairing
+// request while already-approved surfaces are intersected with the declaration.
+type NodeConnectPairingReconcileResult = {
   nodeId: string;
   declaredCaps: string[];
   effectiveCaps: string[];
   declaredCommands: string[];
   effectiveCommands: string[];
+  declaredComputerUse?: ComputerUseCapabilityDescriptor;
   declaredPermissions?: Record<string, boolean>;
   effectivePermissions?: Record<string, boolean>;
   pendingPairing?: RequestNodePairingResult;
+  shouldClearPendingPairings?: boolean;
 };
+
+/** Publish Computer Use metadata only after the command pair is effective for this session. */
+export function resolveEffectiveComputerUseDescriptor(params: {
+  commands: readonly string[];
+  declared?: ComputerUseCapabilityDescriptor;
+}): ComputerUseCapabilityDescriptor | undefined {
+  return params.commands.includes("computer.act") && params.commands.includes("screen.snapshot")
+    ? params.declared
+    : undefined;
+}
 
 function resolveApprovedReconnectCommands(params: {
   pairedCommands: readonly string[] | undefined;
@@ -33,27 +53,8 @@ function resolveApprovedReconnectCommands(params: {
   });
 }
 
-function normalizeApprovalSurfaceList(value: readonly string[] | undefined): string[] {
-  return normalizeArrayBackedTrimmedStringList(value) ?? [];
-}
-
-function sameApprovalSurfaceSet(
-  left: readonly string[] | undefined,
-  right: readonly string[] | undefined,
-): boolean {
-  const normalizedLeft = new Set(normalizeApprovalSurfaceList(left));
-  const normalizedRight = new Set(normalizeApprovalSurfaceList(right));
-  if (normalizedLeft.size !== normalizedRight.size) {
-    return false;
-  }
-  for (const entry of normalizedLeft) {
-    if (!normalizedRight.has(entry)) {
-      return false;
-    }
-  }
-  return true;
-}
-
+// Permissions are sorted before comparison/results so reconnects are stable
+// even when clients send JSON object keys in different orders.
 function normalizePermissionMap(
   value: Record<string, boolean> | undefined,
 ): Record<string, boolean> | undefined {
@@ -66,31 +67,12 @@ function normalizePermissionMap(
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-function samePermissions(
-  left: Record<string, boolean> | undefined,
-  right: Record<string, boolean> | undefined,
-): boolean {
-  const leftEntries = Object.entries(left ?? {}).toSorted(([leftKey], [rightKey]) =>
-    leftKey.localeCompare(rightKey),
-  );
-  const rightEntries = Object.entries(right ?? {}).toSorted(([leftKey], [rightKey]) =>
-    leftKey.localeCompare(rightKey),
-  );
-  if (leftEntries.length !== rightEntries.length) {
-    return false;
-  }
-  return leftEntries.every(([key, value], index) => {
-    const rightEntry = rightEntries[index];
-    return rightEntry !== undefined && rightEntry[0] === key && rightEntry[1] === value;
-  });
-}
-
 function intersectApprovalSurfaceList(params: {
   approved: readonly string[] | undefined;
   declared: readonly string[];
 }): string[] {
-  const approved = new Set(normalizeApprovalSurfaceList(params.approved));
-  return normalizeApprovalSurfaceList(params.declared).filter((entry) => approved.has(entry));
+  const approved = new Set(normalizeNodeApprovalSurfaceList(params.approved));
+  return normalizeNodeApprovalSurfaceList(params.declared).filter((entry) => approved.has(entry));
 }
 
 function intersectPermissionSurface(params: {
@@ -115,6 +97,15 @@ function intersectPermissionSurface(params: {
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
+function hasPermissionUpgrade(params: {
+  approved: Record<string, boolean> | undefined;
+  declared: Record<string, boolean> | undefined;
+}): boolean {
+  return Object.entries(params.declared ?? {}).some(
+    ([key, declaredValue]) => declaredValue && params.approved?.[key] !== true,
+  );
+}
+
 function buildNodePairingRequestInput(params: {
   nodeId: string;
   connectParams: ConnectParams;
@@ -122,6 +113,7 @@ function buildNodePairingRequestInput(params: {
   commands: string[];
   permissions?: Record<string, boolean>;
   remoteIp?: string;
+  silent?: boolean;
 }): NodePairingRequestInput {
   return {
     nodeId: params.nodeId,
@@ -134,15 +126,23 @@ function buildNodePairingRequestInput(params: {
     commands: params.commands,
     permissions: params.permissions,
     remoteIp: params.remoteIp,
+    ...(params.silent ? { silent: true } : {}),
   };
 }
 
+/** Reconciles a connecting node against stored approval and requests pairing when needed. */
 export async function reconcileNodePairingOnConnect(params: {
   cfg: OpenClawConfig;
   connectParams: ConnectParams;
-  pairedNode: NodePairingPairedNode | null;
+  pairedNode: PairedDeviceNode | null;
   reportedClientIp?: string;
-  requestPairing: (input: NodePairingRequestInput) => Promise<RequestNodePairingResult>;
+  /**
+   * Marks the first-surface capability request silent when device pairing was
+   * approved non-interactively; approval UIs may then auto-approve it (macOS
+   * SSH trust probe) instead of prompting. Upgrade requests stay interactive.
+   */
+  initialSurfaceSilent?: boolean;
+  requestPairing: (input: NodePairingRequestInput) => Promise<RequestNodePairingResult | null>;
 }): Promise<NodeConnectPairingReconcileResult> {
   const nodeId = params.connectParams.device?.id ?? params.connectParams.client.id;
   const policyNode = {
@@ -158,8 +158,12 @@ export async function reconcileNodePairingOnConnect(params: {
       : [],
     allowlist: pairingAllowlist,
   });
-  const declaredCaps = normalizeApprovalSurfaceList(params.connectParams.caps);
+  const declaredCaps = normalizeNodeApprovalSurfaceList(params.connectParams.caps);
   const declaredPermissions = normalizePermissionMap(params.connectParams.permissions);
+  const declaredComputerUse =
+    params.connectParams.computerUse === undefined
+      ? undefined
+      : parseComputerUseCapabilityDescriptor(params.connectParams.computerUse);
 
   if (!params.pairedNode) {
     const pendingPairing = await params.requestPairing(
@@ -170,33 +174,42 @@ export async function reconcileNodePairingOnConnect(params: {
         commands: declared,
         permissions: declaredPermissions,
         remoteIp: params.reportedClientIp,
+        silent: params.initialSurfaceSilent,
       }),
     );
+    if (!pendingPairing) {
+      throw new Error("node pairing request required");
+    }
     return {
       nodeId,
       declaredCaps,
       effectiveCaps: [],
       declaredCommands: declared,
       effectiveCommands: [],
+      ...(declaredComputerUse ? { declaredComputerUse } : {}),
       declaredPermissions,
       effectivePermissions: undefined,
       pendingPairing,
     };
   }
 
-  const runtimeAllowlist = resolveNodeCommandAllowlist(params.cfg, {
-    ...policyNode,
-    approvedCommands: params.pairedNode.commands,
-  });
+  // Approved commands reconcile against the pairing allowlist. Dangerous
+  // surfaces awaiting persistent enablement must not read as a pairing upgrade
+  // on every reconnect; invoke-time policy still applies the runtime allowlist.
   const approvedCommands = resolveApprovedReconnectCommands({
     pairedCommands: params.pairedNode.commands,
-    allowlist: runtimeAllowlist,
+    allowlist: pairingAllowlist,
   });
-  const approvedCaps = normalizeApprovalSurfaceList(params.pairedNode.caps);
+  const approvedCaps = normalizeNodeApprovalSurfaceList(params.pairedNode.caps);
   const approvedPermissions = normalizePermissionMap(params.pairedNode.permissions);
   const hasCommandUpgrade = declared.some((command) => !approvedCommands.includes(command));
-  const hasCapabilityChange = !sameApprovalSurfaceSet(params.pairedNode.caps, declaredCaps);
-  const hasPermissionChange = !samePermissions(params.pairedNode.permissions, declaredPermissions);
+  const hasCapabilityUpgrade = declaredCaps.some(
+    (capability) => !approvedCaps.includes(capability),
+  );
+  const permissionUpgrade = hasPermissionUpgrade({
+    approved: approvedPermissions,
+    declared: declaredPermissions,
+  });
   const effectiveApprovedDeclaredCaps = intersectApprovalSurfaceList({
     approved: approvedCaps,
     declared: declaredCaps,
@@ -210,14 +223,16 @@ export async function reconcileNodePairingOnConnect(params: {
     declared: declaredPermissions,
   });
 
-  if (hasCommandUpgrade || hasCapabilityChange || hasPermissionChange) {
+  // Availability and permission loss only narrow the live surface. Reapproval
+  // is required when a reconnect widens authority beyond the durable approval.
+  if (hasCommandUpgrade || hasCapabilityUpgrade || permissionUpgrade) {
     const pendingPairing = await params.requestPairing(
       buildNodePairingRequestInput({
         nodeId,
         connectParams: params.connectParams,
         caps: declaredCaps,
         commands: declared,
-        permissions: declaredPermissions ?? (hasPermissionChange ? {} : undefined),
+        permissions: declaredPermissions ?? (permissionUpgrade ? {} : undefined),
         remoteIp: params.reportedClientIp,
       }),
     );
@@ -227,9 +242,10 @@ export async function reconcileNodePairingOnConnect(params: {
       effectiveCaps: effectiveApprovedDeclaredCaps,
       declaredCommands: declared,
       effectiveCommands: effectiveApprovedDeclaredCommands,
+      ...(declaredComputerUse ? { declaredComputerUse } : {}),
       declaredPermissions,
       effectivePermissions: effectiveApprovedDeclaredPermissions,
-      pendingPairing,
+      ...(pendingPairing ? { pendingPairing } : {}),
     };
   }
 
@@ -239,7 +255,9 @@ export async function reconcileNodePairingOnConnect(params: {
     effectiveCaps: declaredCaps,
     declaredCommands: declared,
     effectiveCommands: declared,
+    ...(declaredComputerUse ? { declaredComputerUse } : {}),
     declaredPermissions,
     effectivePermissions: declaredPermissions,
+    shouldClearPendingPairings: true,
   };
 }

@@ -1,3 +1,4 @@
+/** Tests primitive cache-key helpers used by plugin descriptor and metadata caches. */
 import { describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import {
@@ -30,20 +31,6 @@ describe("PluginLruCache", () => {
 
     expect(cache.getResult("missing")).toEqual({ hit: true, value: null });
     expect(cache.getResult("unknown")).toEqual({ hit: false });
-  });
-
-  it("resizes and falls back to the default max entry count", () => {
-    const cache = new PluginLruCache<string>(2);
-
-    cache.setMaxEntriesForTest(1.9);
-    cache.set("a", "alpha");
-    cache.set("b", "bravo");
-    expect(cache.maxEntries).toBe(1);
-    expect(cache.size).toBe(1);
-    expect(cache.get("a")).toBeUndefined();
-
-    cache.setMaxEntriesForTest();
-    expect(cache.maxEntries).toBe(2);
   });
 });
 

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct TaskListView: View {
     @EnvironmentObject private var store: PropertyStore
+    @Binding var taskNavigationPath: NavigationPath
     @State private var completingTask: MaintenanceTask?
     @State private var completionNote = ""
     @State private var meterConfirmValue = ""
@@ -50,7 +51,12 @@ struct TaskListView: View {
             }
         }
         .navigationDestination(for: UUID.self) { taskID in
-            TaskDetailView(taskID: taskID)
+            TaskDetailView(
+                taskID: taskID,
+                onReturnToTasks: {
+                    taskNavigationPath = NavigationPath()
+                }
+            )
         }
         .navigationTitle("Tasks")
         .searchable(text: $store.searchText)

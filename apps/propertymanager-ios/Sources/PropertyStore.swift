@@ -65,17 +65,52 @@ final class PropertyStore: ObservableObject {
             deviceInstallID = UUID().uuidString.lowercased()
         }
 
-        if deviceLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            #if os(iOS)
-            if UIDevice.current.userInterfaceIdiom == .pad {
-                deviceLabel = "Andy’s iPad Pro"
-            } else {
-                deviceLabel = "Andy’s iPhone"
-            }
-            #else
-            deviceLabel = "Andy’s Apple Device"
-            #endif
+        let legacyOperatorIdentities = [
+            "ios-dev-operator",
+            "ios-operator"
+        ]
+
+        if operatorIdentity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || legacyOperatorIdentities.contains(operatorIdentity) {
+            operatorIdentity = PropertyManagerBuildEnvironment.operatorIdentity
         }
+
+        #if os(iOS)
+        let preferredDeviceLabel =
+            UIDevice.current.userInterfaceIdiom == .pad
+                ? "Andy’s iPad Pro"
+                : "Andy’s iPhone"
+
+        let legacyDeviceLabels = [
+            "",
+            "Andy",
+            "Andy’s Apple Device"
+        ]
+
+        if legacyDeviceLabels.contains(
+            deviceLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+        ) {
+            deviceLabel = preferredDeviceLabel
+        }
+        #else
+        if deviceLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            deviceLabel = "Andy’s Apple Device"
+        }
+        #endif
+    }
+
+    private var effectiveDeviceLabel: String {
+        #if os(iOS)
+        if PropertyManagerBuildEnvironment.isDevelopment {
+            return UIDevice.current.userInterfaceIdiom == .pad
+                ? "Andy's iPad Pro"
+                : "Andy's iPhone"
+        }
+        #endif
+
+        return deviceLabel.trimmingCharacters(
+            in: .whitespacesAndNewlines
+        )
     }
 
     var client: PropertyAPIClient {
@@ -85,7 +120,9 @@ final class PropertyStore: ObservableObject {
             operatorPIN: operatorPIN.isEmpty ? nil : operatorPIN,
             operatorIdentity: operatorIdentity.isEmpty ? nil : operatorIdentity,
             deviceInstallID: deviceInstallID.isEmpty ? nil : deviceInstallID,
-            deviceLabel: deviceLabel.isEmpty ? nil : deviceLabel,
+            deviceLabel: effectiveDeviceLabel.isEmpty
+                ? nil
+                : effectiveDeviceLabel,
             appEnvironment: PropertyManagerBuildEnvironment.appEnvironment
         )
     }
@@ -102,6 +139,10 @@ final class PropertyStore: ObservableObject {
     var filteredTasks: [MaintenanceTask] {
         tasks
             .filter { task in
+                if task.occurrenceSuppressed {
+                    return false
+                }
+
                 if !TaskAssetContext.includes(
                     taskAssetId: task.assetId,
                     selectedAssetId: selectedTaskAssetId
@@ -351,10 +392,17 @@ final class PropertyStore: ObservableObject {
                 taskID: taskID,
                 completionID: completionID
             )
+
             if let index = tasks.firstIndex(where: { $0.id == restored.id }) {
                 tasks[index] = restored
+            } else {
+                tasks.append(restored)
             }
-            await refreshAssets()
+
+            // Re-read the authoritative task state so filters, grouping,
+            // due status, and restored scheduling fields all reflect the DB.
+            await refresh()
+
             return true
         } catch {
             errorMessage = error.localizedDescription

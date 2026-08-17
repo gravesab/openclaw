@@ -409,7 +409,7 @@ class MutatingRouteAuthTests(unittest.TestCase):
             ),
         ):
             response = self.client.post(
-                f"/tasks/{task_id}/completions/{completion_id}/undo",
+                f"/tasks/{task_id}/completions/{completion_id.upper()}/undo",
                 json={},
                 headers=self._auth_headers(),
             )
@@ -417,7 +417,7 @@ class MutatingRouteAuthTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200, response.get_json())
         payload = response.get_json()
 
-        self.assertEqual(payload.get("completion_id"), completion_id)
+        self.assertEqual(payload.get("completion_id").lower(), completion_id)
         self.assertEqual(payload.get("undone_by"), "Andy Graves")
         self.assertTrue(payload.get("undone_at"))
 

@@ -120,6 +120,8 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
     var dueMeter: Bool?
     var overdueMeter: Bool?
     var isActive: Bool
+    var occurrenceSuppressed: Bool
+    var occurrenceSuppressedUntil: Date?
     var primaryPartNumber: String?
     var manufacturer: String?
     var sourceManualName: String?
@@ -150,6 +152,8 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         case dueMeter = "due_meter"
         case overdueMeter = "overdue_meter"
         case isActive = "is_active"
+        case occurrenceSuppressed = "occurrence_suppressed"
+        case occurrenceSuppressedUntil = "occurrence_suppressed_until"
         case primaryPartNumber = "primary_part_number"
         case sourceManualName = "source_manual_name"
     }
@@ -185,7 +189,18 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         dueMeter = try c.decodeIfPresent(Bool.self, forKey: .dueMeter)
         overdueMeter = try c.decodeIfPresent(Bool.self, forKey: .overdueMeter)
         isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
-        primaryPartNumber = try c.decodeIfPresent(String.self, forKey: .primaryPartNumber)
+        occurrenceSuppressed = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .occurrenceSuppressed
+        ) ?? false
+        occurrenceSuppressedUntil = try c.decodeIfPresent(
+            Date.self,
+            forKey: .occurrenceSuppressedUntil
+        )
+        primaryPartNumber = try c.decodeIfPresent(
+            String.self,
+            forKey: .primaryPartNumber
+        )
         manufacturer = try c.decodeIfPresent(String.self, forKey: .manufacturer)
         sourceManualName = try c.decodeIfPresent(String.self, forKey: .sourceManualName)
         if let decoded = try c.decodeIfPresent(TaskOrigin.self, forKey: .origin) {

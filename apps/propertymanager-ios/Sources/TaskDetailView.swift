@@ -4,6 +4,7 @@ struct TaskDetailView: View {
     @EnvironmentObject private var store: PropertyStore
     @Environment(\.dismiss) private var dismiss
     let taskID: UUID
+    let onReturnToTasks: () -> Void
 
     @State private var note = ""
     @State private var showCompleteConfirm = false
@@ -11,6 +12,7 @@ struct TaskDetailView: View {
     @State private var showEdit = false
     @State private var completionReceipt: TaskCompletionReceipt?
     @State private var isProcessingCompletionReceipt = false
+    @State private var returnToTaskListAfterReceiptDismiss = false
 
     private var task: MaintenanceTask? {
         store.tasks.first(where: { $0.id == taskID })
@@ -225,7 +227,15 @@ struct TaskDetailView: View {
                 } message: {
                     Text("This removes the task from the active list. Completion history is kept.")
                 }
-                .sheet(item: $completionReceipt) { receipt in
+                .sheet(
+                    item: $completionReceipt,
+                    onDismiss: {
+                        if returnToTaskListAfterReceiptDismiss {
+                            returnToTaskListAfterReceiptDismiss = false
+                            onReturnToTasks()
+                        }
+                    }
+                ) { receipt in
                     detailCompletionResultSheet(receipt)
                 }
             } else {
@@ -275,6 +285,10 @@ struct TaskDetailView: View {
                             isProcessingCompletionReceipt = false
 
                             if ok {
+                                // First dismiss the completion receipt.
+                                // Its onDismiss callback then pops TaskDetail,
+                                // returning to the refreshed Tasks list.
+                                returnToTaskListAfterReceiptDismiss = true
                                 completionReceipt = nil
                             }
                         }

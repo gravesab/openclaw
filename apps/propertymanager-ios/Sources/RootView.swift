@@ -4,6 +4,7 @@ struct RootView: View {
     @EnvironmentObject private var store: PropertyStore
     @AppStorage(PropertyManagerBuildEnvironment.appearanceKey)
     private var appearanceRaw: String = AppAppearance.system.rawValue
+    @State private var taskNavigationPath = NavigationPath()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,8 +37,8 @@ struct RootView: View {
             .background(.bar)
 
             TabView {
-                NavigationStack {
-                    TaskListView()
+                NavigationStack(path: $taskNavigationPath) {
+                    TaskListView(taskNavigationPath: $taskNavigationPath)
                 }
                 .tabItem {
                     Label("Tasks", systemImage: "checklist")

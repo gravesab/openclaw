@@ -5,7 +5,7 @@ import logging
 import os
 import json
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
@@ -317,6 +317,22 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
         ids,
     )
 
+    completion_rows = pm_db.execute_json(
+        f"""
+        SELECT DISTINCT ON (task_id)
+            task_id,
+            completed_at,
+            acknowledged_at,
+            undone_at
+        FROM propertymanager.maintenance_completions
+        WHERE task_id IN ({placeholders})
+          AND acknowledged_at IS NOT NULL
+          AND undone_at IS NULL
+        ORDER BY task_id, completed_at DESC, created_at DESC
+        """,
+        ids,
+    )
+
     parts_by_task: dict[str, list] = {}
     for part in parts_rows:
         parts_by_task.setdefault(str(part["task_id"]), []).append(part)
@@ -324,6 +340,11 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     photos_by_task: dict[str, list] = {}
     for photo in photos_rows:
         photos_by_task.setdefault(str(photo["task_id"]), []).append(photo)
+
+    acknowledged_by_task = {
+        str(row["task_id"]): row
+        for row in completion_rows
+    }
 
     enriched = []
     for row in rows:
@@ -342,6 +363,66 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
             if meter_row:
                 current_meter = ms._as_decimal(meter_row.get("current_value"))
             item = ms.enrich_task_meter_fields(item, current_meter)
+
+        item["occurrence_suppressed"] = False
+        item["occurrence_suppressed_until"] = None
+
+        acknowledgement = acknowledged_by_task.get(task_id)
+        if acknowledgement is not None:
+            completed_at = acknowledgement.get("completed_at")
+            last_done = item.get("last_done")
+
+            if completed_at is not None and str(completed_at) == str(last_done):
+                schedule_kind = str(
+                    item.get("schedule_kind") or "calendar"
+                ).lower()
+
+                meter_due = bool(
+                    item.get("due_meter") or item.get("overdue_meter")
+                )
+
+                next_due = item.get("next_due")
+                warning_days = max(int(item.get("warning_days") or 0), 0)
+
+                calendar_relevant = True
+                relevant_at = None
+
+                if next_due is not None:
+                    try:
+                        parsed_next_due = (
+                            next_due
+                            if isinstance(next_due, datetime)
+                            else datetime.fromisoformat(
+                                str(next_due).replace("Z", "+00:00")
+                            )
+                        )
+                        # An acknowledged completion represents a finished
+                        # occurrence. Keep it out of the active Tasks display
+                        # until the actual next occurrence is due.
+                        relevant_at = parsed_next_due
+                        calendar_relevant = (
+                            datetime.now(timezone.utc) >= relevant_at
+                        )
+                    except (TypeError, ValueError):
+                        calendar_relevant = True
+
+                if schedule_kind == "meter":
+                    suppressed = not meter_due
+                elif schedule_kind == "both":
+                    suppressed = (
+                        not calendar_relevant
+                        and not meter_due
+                    )
+                else:
+                    suppressed = not calendar_relevant
+
+                item["occurrence_suppressed"] = suppressed
+
+                if suppressed and relevant_at is not None:
+                    item["occurrence_suppressed_until"] = (
+                        relevant_at.isoformat()
+                    )
+
         enriched.append(item)
     return enriched
 
@@ -1542,7 +1623,21 @@ def undo_completion(task_id: str, completion_id: str):
         """,
         (task_id,),
     )
-    if latest is None or str(latest.get("id")) != completion_id:
+    try:
+        requested_completion_id = str(UUID(completion_id))
+        latest_completion_id = (
+            str(UUID(str(latest.get("id"))))
+            if latest is not None and latest.get("id") is not None
+            else None
+        )
+    except (TypeError, ValueError, AttributeError):
+        return error_response(
+            "COMPLETION_NOT_LATEST",
+            "Only the latest active completion can be undone",
+            status=409,
+        )
+
+    if latest_completion_id != requested_completion_id:
         return error_response(
             "COMPLETION_NOT_LATEST",
             "Only the latest active completion can be undone",

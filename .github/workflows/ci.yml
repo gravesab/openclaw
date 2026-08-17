@@ -1146,7 +1146,7 @@ jobs:
     runs-on: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid') && 'ubuntu-24.04' || github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04') }}
     timeout-minutes: 20
     steps:
-      - &linux_node_checkout_step
+      -
         name: Checkout
         shell: bash
         env:
@@ -1221,7 +1221,56 @@ jobs:
       gateway-watch-result: ${{ steps.built_artifact_checks.outputs['gateway-watch-result'] }}
       tui-pty-result: ${{ steps.built_artifact_checks.outputs['tui-pty-result'] }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Ensure secrets base commit (PR fast path)
         if: github.event_name == 'pull_request'
         uses: ./.github/actions/ensure-base-commit
@@ -1499,7 +1548,56 @@ jobs:
     runs-on: ${{ vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'ubuntu-24.04' || (vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' && github.run_attempt > 1) && 'ubuntu-24.04' || github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'blacksmith-8vcpu-ubuntu-2404' || 'ubuntu-24.04') }}
     timeout-minutes: 20
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -1577,7 +1675,56 @@ jobs:
     env:
       COMPATIBILITY_TARGET: ${{ needs.preflight.outputs.compatibility_target }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -1589,7 +1736,7 @@ jobs:
           use-actions-cache: ${{ vars.OPENCLAW_CI_RUNNER_BACKEND != 'github' && vars.OPENCLAW_CI_RUNNER_BACKEND != 'hybrid' && github.event_name != 'workflow_dispatch' && github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'false' || 'true' }}
           restore-test-caches: ${{ vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'true' || 'false' }}
 
-      - &cache_playwright_chromium
+      -
         name: Cache Playwright Chromium
         if: needs.preflight.outputs.compatibility_target != 'true'
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
@@ -1597,7 +1744,7 @@ jobs:
           path: ~/.cache/ms-playwright
           key: ${{ runner.os }}-playwright-chromium-1.62.1
 
-      - &install_playwright_chromium
+      -
         name: Install Playwright Chromium
         env:
           FROZEN_TARGET: ${{ needs.preflight.outputs.frozen_target }}
@@ -1652,7 +1799,56 @@ jobs:
       max-parallel: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid') && 10 || 4 }}
       matrix: ${{ fromJson(needs.preflight.outputs.ui_e2e_matrix) }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -1664,8 +1860,32 @@ jobs:
           use-actions-cache: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'true' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'false' || 'true') }}
           restore-test-caches: ${{ vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' && 'true' || 'false' }}
 
-      - *cache_playwright_chromium
-      - *install_playwright_chromium
+      -
+        name: Cache Playwright Chromium
+        if: needs.preflight.outputs.compatibility_target != 'true'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-1.62.1
+
+      -
+        name: Install Playwright Chromium
+        env:
+          FROZEN_TARGET: ${{ needs.preflight.outputs.frozen_target }}
+        run: |
+          if [[ "${COMPATIBILITY_TARGET:-false}" == "true" ]]; then
+            # Legacy Vitest configs cannot pass a discovered system browser to Playwright.
+            # Install the managed browser revision pinned by the selected target instead.
+            pnpm --dir ui exec playwright install chromium
+          elif [[ -f scripts/ensure-playwright-chromium.mts ]]; then
+            node --import tsx scripts/ensure-playwright-chromium.mts
+          elif [[ "$FROZEN_TARGET" == "true" && -f scripts/ensure-playwright-chromium.mjs ]]; then
+            node scripts/ensure-playwright-chromium.mjs
+          else
+            echo "Target does not provide a supported Playwright Chromium installer." >&2
+            exit 1
+          fi
+
 
       - name: Test Control UI end-to-end
         if: matrix.task == 'control-ui'
@@ -1705,7 +1925,56 @@ jobs:
     runs-on: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid') && 'ubuntu-24.04' || (github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'blacksmith-16vcpu-ubuntu-2404' || 'ubuntu-24.04') }}
     timeout-minutes: 20
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -1716,8 +1985,32 @@ jobs:
           dependency-cache: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'false' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'true' || 'false') }}
           use-actions-cache: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.run_attempt > 1)) && 'true' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'false' || 'true') }}
 
-      - *cache_playwright_chromium
-      - *install_playwright_chromium
+      -
+        name: Cache Playwright Chromium
+        if: needs.preflight.outputs.compatibility_target != 'true'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-playwright-chromium-1.62.1
+
+      -
+        name: Install Playwright Chromium
+        env:
+          FROZEN_TARGET: ${{ needs.preflight.outputs.frozen_target }}
+        run: |
+          if [[ "${COMPATIBILITY_TARGET:-false}" == "true" ]]; then
+            # Legacy Vitest configs cannot pass a discovered system browser to Playwright.
+            # Install the managed browser revision pinned by the selected target instead.
+            pnpm --dir ui exec playwright install chromium
+          elif [[ -f scripts/ensure-playwright-chromium.mts ]]; then
+            node --import tsx scripts/ensure-playwright-chromium.mts
+          elif [[ "$FROZEN_TARGET" == "true" && -f scripts/ensure-playwright-chromium.mjs ]]; then
+            node scripts/ensure-playwright-chromium.mjs
+          else
+            echo "Target does not provide a supported Playwright Chromium installer." >&2
+            exit 1
+          fi
+
 
       - name: Test MCP app conformance with a real Gateway
         run: >-
@@ -1744,7 +2037,56 @@ jobs:
     env:
       COMPATIBILITY_TARGET: ${{ needs.preflight.outputs.compatibility_target }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -1788,7 +2130,56 @@ jobs:
     env:
       CHECKOUT_BASE_SHA: ${{ matrix.task == 'max-lines-ratchet' && needs.preflight.outputs.diff_base_revision || '' }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Prepare release-gate max-lines merge tree
         if: matrix.task == 'max-lines-ratchet' && github.event_name == 'workflow_dispatch' && inputs.release_gate
         env:
@@ -1928,7 +2319,56 @@ jobs:
       max-parallel: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid') && 6 || 4 }}
       matrix: ${{ fromJson(needs.preflight.outputs.qa_smoke_ci_matrix) }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -2110,7 +2550,56 @@ jobs:
       max-parallel: 12
       matrix: ${{ fromJson(needs.preflight.outputs.plugin_contracts_matrix) }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -2153,7 +2642,56 @@ jobs:
       max-parallel: 12
       matrix: ${{ fromJson(needs.preflight.outputs.channel_contracts_matrix) }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -2193,7 +2731,56 @@ jobs:
     runs-on: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid') && 'ubuntu-24.04' || github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04') }}
     timeout-minutes: 60
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -2229,7 +2816,56 @@ jobs:
       max-parallel: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid') && 96 || 28 }}
       matrix: ${{ fromJson(needs.preflight.outputs.checks_node_core_nondist_matrix) }}
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -2368,7 +3004,56 @@ jobs:
             # PR critical path for roughly the same billed core-minutes.
             runner: blacksmith-16vcpu-ubuntu-2404
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -2664,7 +3349,56 @@ jobs:
       matrix:
         stripe: [1, 2, 3, 4, 5]
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -2701,7 +3435,56 @@ jobs:
       matrix:
         stripe: [1, 2, 3, 4]
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -2778,7 +3561,56 @@ jobs:
             # class keeps this off the hybrid critical path.
             runner: blacksmith-8vcpu-ubuntu-2404
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Ensure Plugin SDK API diff base commit
         if: matrix.group == 'plugin-sdk-api-diff'
         uses: ./.github/actions/ensure-base-commit
@@ -3084,7 +3916,56 @@ jobs:
     runs-on: ${{ (vars.OPENCLAW_CI_RUNNER_BACKEND == 'github' || vars.OPENCLAW_CI_RUNNER_BACKEND == 'hybrid') && 'ubuntu-24.04' || github.event_name == 'workflow_dispatch' && 'ubuntu-24.04' || (github.repository == 'openclaw/openclaw' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == 'openclaw/openclaw') && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-24.04') }}
     timeout-minutes: 20
     steps:
-      - *linux_node_checkout_step
+      -
+        name: Checkout
+        shell: bash
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+
+          workdir="$GITHUB_WORKSPACE"
+          reset_checkout_dir() {
+            mkdir -p "$workdir"
+            find "$workdir" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          }
+
+          checkout_attempt() {
+            local attempt="$1"
+
+            reset_checkout_dir
+            git init "$workdir" >/dev/null
+            git config --global --add safe.directory "$workdir"
+            git -C "$workdir" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+            git -C "$workdir" config gc.auto 0
+
+            fetch_refs=("+${CHECKOUT_SHA}:refs/remotes/origin/ci-target")
+            if [ -n "${CHECKOUT_BASE_SHA:-}" ]; then
+              fetch_refs+=("+${CHECKOUT_BASE_SHA}:refs/remotes/origin/ci-max-lines-base")
+            fi
+
+            timeout --signal=TERM --kill-after=10s 120s git -C "$workdir" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "${fetch_refs[@]}" || return 1
+
+            git -C "$workdir" checkout --force --detach "$CHECKOUT_SHA" || return 1
+            test -f "$workdir/.github/actions/setup-node-env/action.yml" || return 1
+            echo "checkout attempt ${attempt}/5 succeeded"
+          }
+
+          for attempt in 1 2 3 4 5; do
+            if checkout_attempt "$attempt"; then
+              exit 0
+            fi
+            echo "checkout attempt ${attempt}/5 failed"
+            sleep $((attempt * 5))
+          done
+
+          echo "checkout failed after 5 attempts" >&2
+          exit 1
+
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
         with:
@@ -3220,7 +4101,7 @@ jobs:
       max-parallel: 3
       matrix: ${{ fromJson(needs.preflight.outputs.checks_windows_matrix) }}
     steps:
-      - &platform_checkout_step
+      -
         name: Checkout
         env:
           CHECKOUT_REPO: ${{ github.repository }}
@@ -3366,7 +4247,55 @@ jobs:
       fail-fast: false
       matrix: ${{ fromJson(needs.preflight.outputs.macos_node_matrix) }}
     steps:
-      - *platform_checkout_step
+      -
+        name: Checkout
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" config gc.auto 0
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+          fetch_timeout_seconds=90
+          fetch_checkout_ref_once() {
+            git -C "$GITHUB_WORKSPACE" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "+${CHECKOUT_SHA}:refs/remotes/origin/checkout" &
+            local fetch_pid="$!"
+            local elapsed=0
+            while kill -0 "$fetch_pid" 2>/dev/null; do
+              if [ "$elapsed" -ge "$fetch_timeout_seconds" ]; then
+                kill -TERM "$fetch_pid" 2>/dev/null || true
+                sleep 10
+                kill -KILL "$fetch_pid" 2>/dev/null || true
+                wait "$fetch_pid" || true
+                return 124
+              fi
+              sleep 1
+              elapsed=$((elapsed + 1))
+            done
+            wait "$fetch_pid"
+          }
+          fetch_checkout_ref() {
+            local fetch_status
+            for attempt in 1 2 3; do
+              fetch_checkout_ref_once && return 0
+              fetch_status="$?"
+              if [ "$fetch_status" != "124" ] && [ "$fetch_status" != "137" ]; then
+                return "$fetch_status"
+              fi
+              if [ "$attempt" = "3" ]; then
+                return "$fetch_status"
+              fi
+              echo "::warning::checkout fetch for '$CHECKOUT_SHA' timed out on attempt $attempt; retrying"
+              sleep 5
+            done
+          }
+          fetch_checkout_ref
+          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+
 
       - name: Setup Node environment
         uses: ./.github/actions/setup-node-env
@@ -3408,7 +4337,55 @@ jobs:
       HISTORICAL_TARGET: ${{ needs.preflight.outputs.compatibility_target }}
       SWIFT_TEST_EXECUTION: ${{ (github.event_name == 'workflow_dispatch' || github.run_attempt > 1) && 'serial' || 'parallel' }}
     steps:
-      - *platform_checkout_step
+      -
+        name: Checkout
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" config gc.auto 0
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+          fetch_timeout_seconds=90
+          fetch_checkout_ref_once() {
+            git -C "$GITHUB_WORKSPACE" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "+${CHECKOUT_SHA}:refs/remotes/origin/checkout" &
+            local fetch_pid="$!"
+            local elapsed=0
+            while kill -0 "$fetch_pid" 2>/dev/null; do
+              if [ "$elapsed" -ge "$fetch_timeout_seconds" ]; then
+                kill -TERM "$fetch_pid" 2>/dev/null || true
+                sleep 10
+                kill -KILL "$fetch_pid" 2>/dev/null || true
+                wait "$fetch_pid" || true
+                return 124
+              fi
+              sleep 1
+              elapsed=$((elapsed + 1))
+            done
+            wait "$fetch_pid"
+          }
+          fetch_checkout_ref() {
+            local fetch_status
+            for attempt in 1 2 3; do
+              fetch_checkout_ref_once && return 0
+              fetch_status="$?"
+              if [ "$fetch_status" != "124" ] && [ "$fetch_status" != "137" ]; then
+                return "$fetch_status"
+              fi
+              if [ "$attempt" = "3" ]; then
+                return "$fetch_status"
+              fi
+              echo "::warning::checkout fetch for '$CHECKOUT_SHA' timed out on attempt $attempt; retrying"
+              sleep 5
+            done
+          }
+          fetch_checkout_ref
+          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+
 
       - name: Install XcodeGen / SwiftLint / SwiftFormat
         run: |
@@ -3625,7 +4602,55 @@ jobs:
     env:
       HISTORICAL_TARGET: ${{ needs.preflight.outputs.compatibility_target }}
     steps:
-      - *platform_checkout_step
+      -
+        name: Checkout
+        env:
+          CHECKOUT_REPO: ${{ github.repository }}
+          CHECKOUT_SHA: ${{ needs.preflight.outputs.checkout_revision }}
+        run: |
+          set -euo pipefail
+          git init "$GITHUB_WORKSPACE"
+          git -C "$GITHUB_WORKSPACE" config gc.auto 0
+          git -C "$GITHUB_WORKSPACE" remote add origin "https://github.com/${CHECKOUT_REPO}.git"
+          fetch_timeout_seconds=90
+          fetch_checkout_ref_once() {
+            git -C "$GITHUB_WORKSPACE" \
+              -c protocol.version=2 \
+              fetch --no-tags --prune --no-recurse-submodules --depth=1 origin \
+              "+${CHECKOUT_SHA}:refs/remotes/origin/checkout" &
+            local fetch_pid="$!"
+            local elapsed=0
+            while kill -0 "$fetch_pid" 2>/dev/null; do
+              if [ "$elapsed" -ge "$fetch_timeout_seconds" ]; then
+                kill -TERM "$fetch_pid" 2>/dev/null || true
+                sleep 10
+                kill -KILL "$fetch_pid" 2>/dev/null || true
+                wait "$fetch_pid" || true
+                return 124
+              fi
+              sleep 1
+              elapsed=$((elapsed + 1))
+            done
+            wait "$fetch_pid"
+          }
+          fetch_checkout_ref() {
+            local fetch_status
+            for attempt in 1 2 3; do
+              fetch_checkout_ref_once && return 0
+              fetch_status="$?"
+              if [ "$fetch_status" != "124" ] && [ "$fetch_status" != "137" ]; then
+                return "$fetch_status"
+              fi
+              if [ "$attempt" = "3" ]; then
+                return "$fetch_status"
+              fi
+              echo "::warning::checkout fetch for '$CHECKOUT_SHA' timed out on attempt $attempt; retrying"
+              sleep 5
+            done
+          }
+          fetch_checkout_ref
+          git -C "$GITHUB_WORKSPACE" checkout --detach refs/remotes/origin/checkout
+
 
       - name: Select Xcode 26
         run: |

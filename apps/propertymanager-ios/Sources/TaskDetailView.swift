@@ -9,6 +9,8 @@ struct TaskDetailView: View {
     @State private var showCompleteConfirm = false
     @State private var showDeleteConfirm = false
     @State private var showEdit = false
+    @State private var completionReceipt: TaskCompletionReceipt?
+    @State private var isProcessingCompletionReceipt = false
 
     private var task: MaintenanceTask? {
         store.tasks.first(where: { $0.id == taskID })
@@ -195,8 +197,13 @@ struct TaskDetailView: View {
                 ) {
                     Button("Mark Done", role: .none) {
                         Task {
-                            _ = await store.complete(task: task, note: note)
-                            note = ""
+                            if let receipt = await store.completeWithReceipt(
+                                task: task,
+                                note: note
+                            ) {
+                                note = ""
+                                completionReceipt = receipt
+                            }
                         }
                     }
                     Button("Cancel", role: .cancel) {}
@@ -218,6 +225,9 @@ struct TaskDetailView: View {
                 } message: {
                     Text("This removes the task from the active list. Completion history is kept.")
                 }
+                .sheet(item: $completionReceipt) { receipt in
+                    detailCompletionResultSheet(receipt)
+                }
             } else {
                 ContentUnavailableView(
                     "Task unavailable",
@@ -226,5 +236,93 @@ struct TaskDetailView: View {
                 )
             }
         }
+    }
+
+    @ViewBuilder
+    private func detailCompletionResultSheet(
+        _ receipt: TaskCompletionReceipt
+    ) -> some View {
+        NavigationStack {
+            Form {
+                Section {
+                    Label("Task Completed", systemImage: "checkmark.circle.fill")
+                        .font(.title3.weight(.semibold))
+
+                    Text(receipt.task.item)
+                        .font(.headline)
+                }
+
+                Section("Completion") {
+                    LabeledContent("Completed by", value: receipt.completedBy)
+                    LabeledContent("Device", value: receipt.deviceLabel)
+                    LabeledContent(
+                        "Completed",
+                        value: detailCompletionTimestamp(receipt.completedAt)
+                    )
+                }
+            }
+            .navigationTitle("Task Completed")
+            .interactiveDismissDisabled(isProcessingCompletionReceipt)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Undo") {
+                        Task {
+                            isProcessingCompletionReceipt = true
+                            let ok = await store.undoCompletion(
+                                taskID: receipt.task.id,
+                                completionID: receipt.completionID
+                            )
+                            isProcessingCompletionReceipt = false
+
+                            if ok {
+                                completionReceipt = nil
+                            }
+                        }
+                    }
+                    .disabled(isProcessingCompletionReceipt)
+                }
+
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Continue") {
+                        Task {
+                            isProcessingCompletionReceipt = true
+                            let ok = await store.acknowledgeCompletion(
+                                taskID: receipt.task.id,
+                                completionID: receipt.completionID
+                            )
+                            isProcessingCompletionReceipt = false
+
+                            if ok {
+                                store.removeCompletedTaskFromCurrentDisplay(
+                                    taskID: receipt.task.id
+                                )
+                                completionReceipt = nil
+                                dismiss()
+                            }
+                        }
+                    }
+                    .disabled(isProcessingCompletionReceipt)
+                }
+            }
+        }
+    }
+
+    private func detailCompletionTimestamp(_ raw: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+
+        let date =
+            formatter.date(from: raw)
+            ?? {
+                formatter.formatOptions = [.withInternetDateTime]
+                return formatter.date(from: raw)
+            }()
+
+        guard let date else { return raw }
+
+        return date.formatted(
+            date: .long,
+            time: .shortened
+        )
     }
 }

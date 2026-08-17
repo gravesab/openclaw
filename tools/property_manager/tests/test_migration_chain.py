@@ -23,8 +23,9 @@ MIGRATIONS = (
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
+    "010_action_journal_and_completion_undo.sql",
 )
-EXPECTED_VERSION = "009"
+EXPECTED_VERSION = "010"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -147,6 +148,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
 
     @classmethod
     def _wait_until_ready(cls) -> None:
+        """Wait until the exact disposable database exists and accepts SQL."""
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             result = _run(
@@ -154,18 +156,24 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                     "docker",
                     "exec",
                     cls.container_id,
-                    "pg_isready",
+                    "psql",
+                    "-X",
+                    "-v",
+                    "ON_ERROR_STOP=1",
                     "-U",
                     cls.database_user,
                     "-d",
                     cls.database_name,
+                    "-At",
+                    "-c",
+                    "SELECT 1;",
                 ],
                 check=False,
             )
-            if result.returncode == 0:
+            if result.returncode == 0 and result.stdout.decode().strip() == "1":
                 return
             time.sleep(0.25)
-        raise AssertionError("isolated PostgreSQL did not become ready")
+        raise AssertionError("isolated PostgreSQL database did not become ready")
 
     @classmethod
     def _psql(cls, sql: str) -> str:
@@ -206,10 +214,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             migration = (MIGRATION_DIR / filename).read_bytes()
             self._psql(migration.decode())
             applied.append(filename[:3])
-        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009"])
+        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010"])
         self.assertEqual(applied[-1], EXPECTED_VERSION)
 
-        # The 005/006/009 rollout contract explicitly describes these migrations as
+        # The 005/006/009/010 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.
         for filename in MIGRATIONS[4:]:
             self._psql((MIGRATION_DIR / filename).read_text())
@@ -226,6 +234,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "asset_meter",
                 "asset_meter_reading",
                 "asset_task_mapping_proposals",
+                "action_journal",
                 "assets",
                 "maintenance_categories",
                 "maintenance_completions",
@@ -250,7 +259,44 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "meter_epoch",
                 "corrects_reading_id",
             },
-            "maintenance_completions": {"meter_value_at_completion", "meter_reading_id"},
+            "maintenance_completions": {
+                "meter_value_at_completion",
+                "meter_reading_id",
+                "operator_identity",
+                "device_install_id",
+                "device_label",
+                "app_environment",
+                "previous_last_done",
+                "previous_next_due",
+                "previous_last_done_meter_value",
+                "previous_next_due_meter_value",
+                "previous_result_notes",
+                "acknowledged_at",
+                "acknowledged_by",
+                "acknowledged_device_install_id",
+                "acknowledged_device_label",
+                "acknowledged_app_environment",
+                "undone_at",
+                "undone_by",
+                "undone_device_install_id",
+                "undone_device_label",
+                "undone_app_environment",
+            },
+            "action_journal": {
+                "id",
+                "action",
+                "actor_identity",
+                "device_install_id",
+                "device_label",
+                "app_environment",
+                "task_id",
+                "completion_id",
+                "occurred_at",
+                "before_state",
+                "after_state",
+                "metadata",
+                "reversal_of",
+            },
             "maintenance_task_parts": {"quantity", "vendor", "notes"},
             "maintenance_tasks": {
                 "kind",
@@ -296,6 +342,11 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "maintenance_tasks_kind_check",
                 "maintenance_tasks_origin_check",
                 "maintenance_tasks_schedule_kind_check",
+                "maintenance_completions_app_environment_check",
+                "action_journal_environment_check",
+                "action_journal_before_state_check",
+                "action_journal_after_state_check",
+                "action_journal_metadata_check",
             }
             <= constraints
         )

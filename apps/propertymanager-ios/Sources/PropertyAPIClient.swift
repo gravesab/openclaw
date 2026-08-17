@@ -24,6 +24,9 @@ final class PropertyAPIClient {
     var apiKey: String?
     var operatorPIN: String?
     var operatorIdentity: String?
+    var deviceInstallID: String?
+    var deviceLabel: String?
+    var appEnvironment: String?
 
     /// Shared by AssetAPIClient / task fetch extensions in other files.
     let decoder: JSONDecoder = {
@@ -32,11 +35,22 @@ final class PropertyAPIClient {
         return d
     }()
 
-    init(baseURLString: String, apiKey: String? = nil, operatorPIN: String? = nil, operatorIdentity: String? = nil) {
+    init(
+        baseURLString: String,
+        apiKey: String? = nil,
+        operatorPIN: String? = nil,
+        operatorIdentity: String? = nil,
+        deviceInstallID: String? = nil,
+        deviceLabel: String? = nil,
+        appEnvironment: String? = nil
+    ) {
         self.baseURLString = baseURLString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.apiKey = apiKey
         self.operatorPIN = operatorPIN
         self.operatorIdentity = operatorIdentity
+        self.deviceInstallID = deviceInstallID
+        self.deviceLabel = deviceLabel
+        self.appEnvironment = appEnvironment
     }
 
     func makeURL(_ path: String, versioned: Bool = false) throws -> URL {
@@ -58,6 +72,15 @@ final class PropertyAPIClient {
         }
         if let operatorIdentity, !operatorIdentity.isEmpty {
             request.setValue(operatorIdentity, forHTTPHeaderField: "X-Operator-Identity")
+        }
+        if let deviceInstallID, !deviceInstallID.isEmpty {
+            request.setValue(deviceInstallID, forHTTPHeaderField: "X-Device-Install-ID")
+        }
+        if let deviceLabel, !deviceLabel.isEmpty {
+            request.setValue(deviceLabel, forHTTPHeaderField: "X-Device-Label")
+        }
+        if let appEnvironment, !appEnvironment.isEmpty {
+            request.setValue(appEnvironment, forHTTPHeaderField: "X-App-Environment")
         }
     }
 
@@ -176,6 +199,124 @@ final class PropertyAPIClient {
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response, data: data)
         return try decoder.decode(MaintenanceTask.self, from: data)
+    }
+
+
+    func completeTaskWithReceipt(
+        id: UUID,
+        note: String?,
+        meterValueAtCompletion: Double? = nil,
+        confirmCurrentMeter: Bool = false
+    ) async throws -> TaskCompletionReceipt {
+        let url = try makeURL("/tasks/\(id.uuidString)/complete")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+
+        var body: [String: Any] = ["note": note ?? ""]
+        if let meterValueAtCompletion {
+            body["meter_value_at_completion"] = meterValueAtCompletion
+        } else if confirmCurrentMeter {
+            body["confirm_current_meter"] = true
+        }
+
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+
+        let task = try decoder.decode(MaintenanceTask.self, from: data)
+        let metadata = try decoder.decode(TaskCompletionReceiptMetadata.self, from: data)
+
+        return TaskCompletionReceipt(
+            task: task,
+            completionID: metadata.completionID,
+            completedAt: metadata.completedAt,
+            completedBy: metadata.completedBy,
+            deviceInstallID: metadata.deviceInstallID,
+            deviceLabel: metadata.deviceLabel,
+            appEnvironment: metadata.appEnvironment
+        )
+    }
+
+    func acknowledgeCompletion(
+        taskID: UUID,
+        completionID: UUID
+    ) async throws -> CompletionAcknowledgement {
+        let url = try makeURL(
+            "/tasks/\(taskID.uuidString)/completions/\(completionID.uuidString)/acknowledge"
+        )
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [:])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(CompletionAcknowledgement.self, from: data)
+    }
+
+    func undoCompletion(
+        taskID: UUID,
+        completionID: UUID
+    ) async throws -> MaintenanceTask {
+        let url = try makeURL(
+            "/tasks/\(taskID.uuidString)/completions/\(completionID.uuidString)/undo"
+        )
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [:])
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(MaintenanceTask.self, from: data)
+    }
+}
+
+struct TaskCompletionReceipt: Identifiable {
+    var id: UUID { completionID }
+
+    let task: MaintenanceTask
+    let completionID: UUID
+    let completedAt: String
+    let completedBy: String
+    let deviceInstallID: String
+    let deviceLabel: String
+    let appEnvironment: String
+}
+
+private struct TaskCompletionReceiptMetadata: Decodable {
+    let completionID: UUID
+    let completedAt: String
+    let completedBy: String
+    let deviceInstallID: String
+    let deviceLabel: String
+    let appEnvironment: String
+
+    enum CodingKeys: String, CodingKey {
+        case completionID = "completion_id"
+        case completedAt = "completed_at"
+        case completedBy = "completed_by"
+        case deviceInstallID = "device_install_id"
+        case deviceLabel = "device_label"
+        case appEnvironment = "app_environment"
+    }
+}
+
+struct CompletionAcknowledgement: Decodable {
+    let completionID: UUID
+    let taskID: UUID
+    let acknowledgedAt: String
+    let acknowledgedBy: String?
+
+    enum CodingKeys: String, CodingKey {
+        case completionID = "completion_id"
+        case taskID = "task_id"
+        case acknowledgedAt = "acknowledged_at"
+        case acknowledgedBy = "acknowledged_by"
     }
 }
 

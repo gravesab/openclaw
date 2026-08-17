@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 import db as pm_db
@@ -88,6 +88,48 @@ PART_COLUMNS = """
     id, task_id, name, oem_part_number, part_number, buy_url, cost, quantity,
     vendor, notes, sort_order, created_at, updated_at
 """
+
+APP_ENVIRONMENTS = {"development", "production"}
+
+
+def mutation_attribution():
+    operator_identity = str(getattr(g, "operator_identity", "") or "").strip()
+    device_install_id = str(request.headers.get("X-Device-Install-ID") or "").strip()
+    device_label = str(request.headers.get("X-Device-Label") or "").strip()
+    app_environment = str(request.headers.get("X-App-Environment") or "").strip().lower()
+
+    if not operator_identity:
+        return None, validation_error(
+            "X-Operator-Identity is required",
+            field="operator_identity",
+        )
+    if not device_install_id:
+        return None, validation_error(
+            "X-Device-Install-ID is required",
+            field="device_install_id",
+        )
+    if not device_label:
+        return None, validation_error(
+            "X-Device-Label is required",
+            field="device_label",
+        )
+    if app_environment not in APP_ENVIRONMENTS:
+        return None, validation_error(
+            "X-App-Environment must be development or production",
+            field="app_environment",
+        )
+
+    return {
+        "operator_identity": operator_identity,
+        "device_install_id": device_install_id,
+        "device_label": device_label,
+        "app_environment": app_environment,
+    }, None
+
+
+def json_object(value) -> str:
+    return json.dumps(value, default=str, separators=(",", ":"), sort_keys=True)
+
 
 PART_UPSERT_FIELDS = {
     "name",
@@ -313,7 +355,8 @@ def _probe_postgres_and_schema() -> tuple[bool, bool]:
                 to_regclass('propertymanager.assets')::text AS assets_table,
                 to_regclass('propertymanager.asset_meter')::text AS meter_table,
                 to_regclass('propertymanager.maintenance_tasks')::text AS tasks_table,
-                to_regclass('propertymanager.maintenance_proposals')::text AS proposals_table
+                to_regclass('propertymanager.maintenance_proposals')::text AS proposals_table,
+                to_regclass('propertymanager.action_journal')::text AS journal_table
             """
         )
         if row is None:
@@ -323,6 +366,7 @@ def _probe_postgres_and_schema() -> tuple[bool, bool]:
             and row.get("meter_table")
             and row.get("tasks_table")
             and row.get("proposals_table")
+            and row.get("journal_table")
         )
         return True, schema_ok
     except Exception:
@@ -342,7 +386,7 @@ def health():
         "postgres_reachable": postgres_reachable,
         "schema_available": schema_available,
         "db_mode": "docker_exec" if pm_db.use_docker() else "tcp",
-        "schema_version": "009",
+        "schema_version": "010",
         "attachments_root": ATTACHMENTS_ROOT,
         "max_content_length": MAX_UPLOAD_BYTES,
         **auth_status(),
@@ -1098,15 +1142,22 @@ def create_task_part(task_id: str):
 @app.post("/tasks/<task_id>/complete")
 @auth_required()
 def complete_task(task_id: str):
-    from flask import g
-
     payload = request.get_json(silent=True) or {}
     note = str(payload.get("note") or "").strip() or None
+
+    attribution, attribution_error = mutation_attribution()
+    if attribution_error is not None:
+        return attribution_error
+
     completed_at = datetime.now(timezone.utc)
 
     task = pm_db.execute_one_json(
         """
-        SELECT id, warning_days, asset_id, schedule_kind
+        SELECT
+            id, warning_days, asset_id, schedule_kind,
+            last_done, next_due,
+            last_done_meter_value, next_due_meter_value,
+            result_notes
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
         """,
@@ -1115,10 +1166,6 @@ def complete_task(task_id: str):
     if task is None:
         return error_response("NOT_FOUND", "Task not found", status=404)
 
-    # Calendar next_due on complete: completed_at + warning_days (legacy CSV-era
-    # interval). Mac Recalculate Next Due uses Frequency instead (lastDone +
-    # Daily/Weekly/…/Yearly). Do not change this prod formula without an
-    # explicit migration — Mac Recalculate is local until Save.
     warning_days = int(task.get("warning_days") or 0)
     next_due = completed_at + timedelta(days=max(warning_days, 1))
 
@@ -1126,9 +1173,15 @@ def complete_task(task_id: str):
     meter_value_raw = payload.get("meter_value_at_completion")
     if meter_value_raw is not None and meter_value_raw != "":
         try:
-            meter_value = parse_decimal(meter_value_raw, field="meter_value_at_completion")
+            meter_value = parse_decimal(
+                meter_value_raw,
+                field="meter_value_at_completion",
+            )
         except ValueError as exc:
-            return validation_error(str(exc), field="meter_value_at_completion")
+            return validation_error(
+                str(exc),
+                field="meter_value_at_completion",
+            )
 
     confirm_current = bool(payload.get("confirm_current_meter"))
 
@@ -1139,25 +1192,70 @@ def complete_task(task_id: str):
             note=note,
             meter_value_at_completion=meter_value,
             confirm_current_meter=confirm_current,
-            operator_identity=getattr(g, "operator_identity", None),
+            operator_identity=attribution["operator_identity"],
             integration_identity=getattr(g, "integration_identity", None),
         )
     except ValueError as exc:
         return validation_error(str(exc))
 
     completion_id = str(uuid4())
+    journal_id = str(uuid4())
+
     meter_val_db = None
     if meter_result and meter_result.get("meter_value_decimal") is not None:
         meter_val_db = decimal_to_db(meter_result["meter_value_decimal"])
     elif meter_value is not None:
         meter_val_db = decimal_to_db(meter_value)
 
+    applied_meter = bool(meter_result and meter_result.get("applied_meter"))
+
+    before_state = {
+        "last_done": task.get("last_done"),
+        "next_due": task.get("next_due"),
+        "last_done_meter_value": task.get("last_done_meter_value"),
+        "next_due_meter_value": task.get("next_due_meter_value"),
+        "result_notes": task.get("result_notes"),
+    }
+
+    after_state = {
+        "last_done": completed_at,
+        "next_due": next_due,
+        "last_done_meter_value": (
+            meter_val_db if applied_meter
+            else task.get("last_done_meter_value")
+        ),
+        "next_due_meter_value": (
+            meter_result.get("next_due_meter_value")
+            if applied_meter
+            else task.get("next_due_meter_value")
+        ),
+        "result_notes": note or task.get("result_notes"),
+    }
+
     statements: list[tuple] = [
         (
             """
             INSERT INTO propertymanager.maintenance_completions
-                (id, task_id, completed_at, note, meter_value_at_completion, meter_reading_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
+                (
+                    id, task_id, completed_at, note,
+                    meter_value_at_completion, meter_reading_id,
+                    operator_identity, device_install_id,
+                    device_label, app_environment,
+                    previous_last_done, previous_next_due,
+                    previous_last_done_meter_value,
+                    previous_next_due_meter_value,
+                    previous_result_notes
+                )
+            VALUES
+                (
+                    %s, %s, %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s, %s,
+                    %s
+                )
             """,
             (
                 completion_id,
@@ -1166,11 +1264,20 @@ def complete_task(task_id: str):
                 note,
                 meter_val_db,
                 (meter_result or {}).get("meter_reading_id"),
+                attribution["operator_identity"],
+                attribution["device_install_id"],
+                attribution["device_label"],
+                attribution["app_environment"],
+                task.get("last_done"),
+                task.get("next_due"),
+                task.get("last_done_meter_value"),
+                task.get("next_due_meter_value"),
+                task.get("result_notes"),
             ),
         ),
     ]
 
-    if meter_result and meter_result.get("applied_meter"):
+    if applied_meter:
         statements.append(
             (
                 """
@@ -1208,6 +1315,47 @@ def complete_task(task_id: str):
             )
         )
 
+    statements.append(
+        (
+            """
+            INSERT INTO propertymanager.action_journal
+                (
+                    id, action, actor_identity,
+                    device_install_id, device_label, app_environment,
+                    task_id, completion_id,
+                    occurred_at, before_state, after_state, metadata
+                )
+            VALUES
+                (
+                    %s, 'task_completed', %s,
+                    %s, %s, %s,
+                    %s, %s,
+                    %s, %s::jsonb, %s::jsonb, %s::jsonb
+                )
+            """,
+            (
+                journal_id,
+                attribution["operator_identity"],
+                attribution["device_install_id"],
+                attribution["device_label"],
+                attribution["app_environment"],
+                task_id,
+                completion_id,
+                completed_at,
+                json_object(before_state),
+                json_object(after_state),
+                json_object(
+                    {
+                        "meter_reading_id": (
+                            meter_result or {}
+                        ).get("meter_reading_id"),
+                        "note_present": bool(note),
+                    }
+                ),
+            ),
+        )
+    )
+
     try:
         pm_db.execute_script(statements)
     except RuntimeError as exc:
@@ -1224,7 +1372,367 @@ def complete_task(task_id: str):
     )
     if updated is None:
         return jsonify({"error": "Task not found"}), 404
-    return jsonify(enrich_tasks([updated])[0])
+
+    response_body = enrich_tasks([updated])[0]
+
+    # Backward compatible: existing clients can continue decoding this
+    # response as MaintenanceTask because these receipt fields are additive.
+    response_body.update(
+        {
+            "completion_id": completion_id,
+            "completed_at": completed_at.isoformat(),
+            "completed_by": attribution["operator_identity"],
+            "device_install_id": attribution["device_install_id"],
+            "device_label": attribution["device_label"],
+            "app_environment": attribution["app_environment"],
+        }
+    )
+
+    return jsonify(response_body)
+
+
+@app.post("/tasks/<task_id>/completions/<completion_id>/acknowledge")
+@auth_required()
+def acknowledge_completion(task_id: str, completion_id: str):
+    attribution, attribution_error = mutation_attribution()
+    if attribution_error is not None:
+        return attribution_error
+
+    acknowledged_at = datetime.now(timezone.utc)
+    journal_id = str(uuid4())
+
+    completion = pm_db.execute_one_json(
+        """
+        SELECT id, task_id, completed_at, undone_at, acknowledged_at
+        FROM propertymanager.maintenance_completions
+        WHERE id = %s AND task_id = %s
+        """,
+        (completion_id, task_id),
+    )
+    if completion is None:
+        return error_response("NOT_FOUND", "Completion not found", status=404)
+
+    if completion.get("undone_at") is not None:
+        return error_response(
+            "COMPLETION_ALREADY_UNDONE",
+            "Cannot acknowledge an undone completion",
+            status=409,
+        )
+
+    if completion.get("acknowledged_at") is not None:
+        return jsonify(
+            {
+                "completion_id": completion_id,
+                "task_id": task_id,
+                "acknowledged_at": str(completion["acknowledged_at"]),
+                "already_acknowledged": True,
+            }
+        )
+
+    statements = [
+        (
+            """
+            UPDATE propertymanager.maintenance_completions
+            SET acknowledged_at = %s,
+                acknowledged_by = %s,
+                acknowledged_device_install_id = %s,
+                acknowledged_device_label = %s,
+                acknowledged_app_environment = %s
+            WHERE id = %s AND task_id = %s AND acknowledged_at IS NULL
+            """,
+            (
+                acknowledged_at,
+                attribution["operator_identity"],
+                attribution["device_install_id"],
+                attribution["device_label"],
+                attribution["app_environment"],
+                completion_id,
+                task_id,
+            ),
+        ),
+        (
+            """
+            INSERT INTO propertymanager.action_journal
+                (
+                    id, action, actor_identity,
+                    device_install_id, device_label, app_environment,
+                    task_id, completion_id,
+                    occurred_at, metadata
+                )
+            VALUES
+                (
+                    %s, 'completion_acknowledged', %s,
+                    %s, %s, %s,
+                    %s, %s,
+                    %s, %s::jsonb
+                )
+            """,
+            (
+                journal_id,
+                attribution["operator_identity"],
+                attribution["device_install_id"],
+                attribution["device_label"],
+                attribution["app_environment"],
+                task_id,
+                completion_id,
+                acknowledged_at,
+                json_object({}),
+            ),
+        ),
+    ]
+
+    try:
+        pm_db.execute_script(statements)
+    except RuntimeError as exc:
+        return error_response("DB_ERROR", str(exc), status=500)
+
+    return jsonify(
+        {
+            "completion_id": completion_id,
+            "task_id": task_id,
+            "acknowledged_at": acknowledged_at.isoformat(),
+            "acknowledged_by": attribution["operator_identity"],
+        }
+    )
+
+
+@app.post("/tasks/<task_id>/completions/<completion_id>/undo")
+@auth_required()
+def undo_completion(task_id: str, completion_id: str):
+    attribution, attribution_error = mutation_attribution()
+    if attribution_error is not None:
+        return attribution_error
+
+    undone_at = datetime.now(timezone.utc)
+
+    completion = pm_db.execute_one_json(
+        """
+        SELECT
+            id, task_id, completed_at,
+            meter_reading_id,
+            previous_last_done,
+            previous_next_due,
+            previous_last_done_meter_value,
+            previous_next_due_meter_value,
+            previous_result_notes,
+            undone_at
+        FROM propertymanager.maintenance_completions
+        WHERE id = %s AND task_id = %s
+        """,
+        (completion_id, task_id),
+    )
+    if completion is None:
+        return error_response("NOT_FOUND", "Completion not found", status=404)
+
+    if completion.get("undone_at") is not None:
+        return error_response(
+            "COMPLETION_ALREADY_UNDONE",
+            "Completion has already been undone",
+            status=409,
+        )
+
+    latest = pm_db.execute_one_json(
+        """
+        SELECT id
+        FROM propertymanager.maintenance_completions
+        WHERE task_id = %s
+          AND undone_at IS NULL
+        ORDER BY completed_at DESC, created_at DESC
+        LIMIT 1
+        """,
+        (task_id,),
+    )
+    if latest is None or str(latest.get("id")) != completion_id:
+        return error_response(
+            "COMPLETION_NOT_LATEST",
+            "Only the latest active completion can be undone",
+            status=409,
+        )
+
+    task = pm_db.execute_one_json(
+        """
+        SELECT
+            id, asset_id,
+            last_done, next_due,
+            last_done_meter_value, next_due_meter_value,
+            result_notes
+        FROM propertymanager.maintenance_tasks
+        WHERE id = %s
+        """,
+        (task_id,),
+    )
+    if task is None:
+        return error_response("NOT_FOUND", "Task not found", status=404)
+
+    before_state = {
+        "last_done": task.get("last_done"),
+        "next_due": task.get("next_due"),
+        "last_done_meter_value": task.get("last_done_meter_value"),
+        "next_due_meter_value": task.get("next_due_meter_value"),
+        "result_notes": task.get("result_notes"),
+    }
+
+    restored_state = {
+        "last_done": completion.get("previous_last_done"),
+        "next_due": completion.get("previous_next_due"),
+        "last_done_meter_value": completion.get("previous_last_done_meter_value"),
+        "next_due_meter_value": completion.get("previous_next_due_meter_value"),
+        "result_notes": completion.get("previous_result_notes"),
+    }
+
+    completion_journal = pm_db.execute_one_json(
+        """
+        SELECT id
+        FROM propertymanager.action_journal
+        WHERE completion_id = %s
+          AND action = 'task_completed'
+        ORDER BY occurred_at DESC
+        LIMIT 1
+        """,
+        (completion_id,),
+    )
+
+    journal_id = str(uuid4())
+    meter_reading_id = completion.get("meter_reading_id")
+
+    statements = [
+        (
+            """
+            UPDATE propertymanager.maintenance_tasks
+            SET last_done = %s,
+                next_due = %s,
+                last_done_meter_value = %s,
+                next_due_meter_value = %s,
+                result_notes = %s,
+                updated_at = now()
+            WHERE id = %s
+            """,
+            (
+                completion.get("previous_last_done"),
+                completion.get("previous_next_due"),
+                completion.get("previous_last_done_meter_value"),
+                completion.get("previous_next_due_meter_value"),
+                completion.get("previous_result_notes"),
+                task_id,
+            ),
+        ),
+        (
+            """
+            UPDATE propertymanager.maintenance_completions
+            SET undone_at = %s,
+                undone_by = %s,
+                undone_device_install_id = %s,
+                undone_device_label = %s,
+                undone_app_environment = %s
+            WHERE id = %s AND task_id = %s AND undone_at IS NULL
+            """,
+            (
+                undone_at,
+                attribution["operator_identity"],
+                attribution["device_install_id"],
+                attribution["device_label"],
+                attribution["app_environment"],
+                completion_id,
+                task_id,
+            ),
+        ),
+    ]
+
+    if meter_reading_id:
+        statements.append(
+            (
+                """
+                UPDATE propertymanager.asset_meter_reading
+                SET status = 'rejected'
+                WHERE id = %s
+                  AND status = 'accepted'
+                  AND entry_method = 'completion'
+                """,
+                (meter_reading_id,),
+            )
+        )
+
+    statements.append(
+        (
+            """
+            INSERT INTO propertymanager.action_journal
+                (
+                    id, action, actor_identity,
+                    device_install_id, device_label, app_environment,
+                    task_id, completion_id,
+                    occurred_at, before_state, after_state,
+                    metadata, reversal_of
+                )
+            VALUES
+                (
+                    %s, 'completion_undone', %s,
+                    %s, %s, %s,
+                    %s, %s,
+                    %s, %s::jsonb, %s::jsonb,
+                    %s::jsonb, %s
+                )
+            """,
+            (
+                journal_id,
+                attribution["operator_identity"],
+                attribution["device_install_id"],
+                attribution["device_label"],
+                attribution["app_environment"],
+                task_id,
+                completion_id,
+                undone_at,
+                json_object(before_state),
+                json_object(restored_state),
+                json_object({"meter_reading_id": meter_reading_id}),
+                (
+                    str(completion_journal["id"])
+                    if completion_journal is not None
+                    else None
+                ),
+            ),
+        )
+    )
+
+    try:
+        pm_db.execute_script(statements)
+    except RuntimeError as exc:
+        return error_response("DB_ERROR", str(exc), status=500)
+
+    if meter_reading_id and task.get("asset_id"):
+        reading = pm_db.execute_one_json(
+            """
+            SELECT meter_epoch
+            FROM propertymanager.asset_meter_reading
+            WHERE id = %s
+            """,
+            (meter_reading_id,),
+        )
+        if reading is not None:
+            epoch = int(reading.get("meter_epoch") or 1)
+            ms.recalc_usage_for_epoch(str(task["asset_id"]), epoch)
+            ms.update_current_meter_from_latest(str(task["asset_id"]), epoch)
+
+    updated = pm_db.execute_one_json(
+        f"""
+        SELECT
+            {TASK_COLUMNS}
+        FROM propertymanager.maintenance_tasks
+        WHERE id = %s
+        """,
+        (task_id,),
+    )
+    if updated is None:
+        return error_response("NOT_FOUND", "Task not found", status=404)
+
+    response_body = enrich_tasks([updated])[0]
+    response_body.update(
+        {
+            "completion_id": completion_id,
+            "undone_at": undone_at.isoformat(),
+            "undone_by": attribution["operator_identity"],
+        }
+    )
+    return jsonify(response_body)
 
 
 register_asset_routes(app)

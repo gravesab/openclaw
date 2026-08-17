@@ -8,13 +8,14 @@
     {"version": "004", "order": 4, "filename": "004_task_origin.sql", "sha256": "1e9a03e9cc383928c992638685df922a3bc6a28a4a54a8a8f18b98be0da6c40c", "reapplication_permitted": false},
     {"version": "005", "order": 5, "filename": "005_assets_and_meters.sql", "sha256": "f90a39cdc6234d72a431d4caba23720d98aa7b4dff1a83f15845ecb936ff0147", "reapplication_permitted": true},
     {"version": "006", "order": 6, "filename": "006_phase1_meter_audit.sql", "sha256": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0", "reapplication_permitted": true},
-    {"version": "009", "order": 7, "filename": "009_maintenance_proposals.sql", "sha256": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a", "reapplication_permitted": true}
+    {"version": "009", "order": 7, "filename": "009_maintenance_proposals.sql", "sha256": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a", "reapplication_permitted": true},
+    {"version": "010", "order": 8, "filename": "010_action_journal_and_completion_undo.sql", "sha256": "8b8db0042dce655bd1aaaa9f68b3f81acd2a011a6c4f13009d81892e349e1d3a", "reapplication_permitted": true}
   ],
   "reserved_versions": [
     {"version": "007", "status": "noncanonical_forbidden", "reason": "Reserved because a noncanonical migration was published in branch history; never restore, rename, reuse, or adopt."},
     {"version": "008", "status": "noncanonical_forbidden", "reason": "Reserved because mutable noncanonical migrations were published in branch history; never restore, rename, reuse, or adopt."}
   ],
-  "next_canonical_version": "010",
+  "next_canonical_version": "011",
   "schema_contract": {
     "normalization_version": 1,
     "comparison": {
@@ -32,6 +33,39 @@
       "canonical_data": []
     },
     "tables": {
+      "action_journal": {
+        "columns": [
+          {"name": "id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "action", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "actor_identity", "type": "text", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "device_install_id", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "device_label", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "app_environment", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "task_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "completion_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "occurred_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
+          {"name": "before_state", "type": "jsonb", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "after_state", "type": "jsonb", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "metadata", "type": "jsonb", "nullable": false, "default": "'{}'::jsonb", "precision": null, "scale": null, "generated": null},
+          {"name": "reversal_of", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null}
+        ],
+        "constraints": [
+          {"name": "action_journal_after_state_check", "kind": "check", "columns": ["after_state"], "definition": "CHECK (after_state IS NULL OR jsonb_typeof(after_state) = 'object')", "references": null, "on_update": null, "on_delete": null},
+          {"name": "action_journal_before_state_check", "kind": "check", "columns": ["before_state"], "definition": "CHECK (before_state IS NULL OR jsonb_typeof(before_state) = 'object')", "references": null, "on_update": null, "on_delete": null},
+          {"name": "action_journal_completion_id_fkey", "kind": "foreign_key", "columns": ["completion_id"], "definition": "FOREIGN KEY (completion_id) REFERENCES propertymanager.maintenance_completions (id)", "references": {"table": "maintenance_completions", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"},
+          {"name": "action_journal_environment_check", "kind": "check", "columns": ["app_environment"], "definition": "CHECK (app_environment IS NULL OR app_environment IN ('development', 'production'))", "references": null, "on_update": null, "on_delete": null},
+          {"name": "action_journal_metadata_check", "kind": "check", "columns": ["metadata"], "definition": "CHECK (jsonb_typeof(metadata) = 'object')", "references": null, "on_update": null, "on_delete": null},
+          {"name": "action_journal_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
+          {"name": "action_journal_reversal_of_fkey", "kind": "foreign_key", "columns": ["reversal_of"], "definition": "FOREIGN KEY (reversal_of) REFERENCES propertymanager.action_journal (id)", "references": {"table": "action_journal", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"},
+          {"name": "action_journal_task_id_fkey", "kind": "foreign_key", "columns": ["task_id"], "definition": "FOREIGN KEY (task_id) REFERENCES propertymanager.maintenance_tasks (id)", "references": {"table": "maintenance_tasks", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"}
+        ],
+        "indexes": [
+          {"name": "action_journal_actor_time_idx", "unique": false, "method": "btree", "keys": [{"expression": "actor_identity", "order": "ASC"}, {"expression": "occurred_at", "order": "DESC"}], "predicate": null},
+          {"name": "action_journal_completion_time_idx", "unique": false, "method": "btree", "keys": [{"expression": "completion_id", "order": "ASC"}, {"expression": "occurred_at", "order": "DESC"}], "predicate": null},
+          {"name": "action_journal_pkey", "unique": true, "method": "btree", "keys": [{"expression": "id", "order": "ASC"}], "predicate": null},
+          {"name": "action_journal_task_time_idx", "unique": false, "method": "btree", "keys": [{"expression": "task_id", "order": "ASC"}, {"expression": "occurred_at", "order": "DESC"}], "predicate": null}
+        ]
+      },
       "asset_meter": {
         "columns": [
           {"name": "asset_id", "type": "uuid", "nullable": false, "default": null, "precision": null, "scale": null, "generated": null},
@@ -176,9 +210,29 @@
           {"name": "note", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
           {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "default": "now()", "precision": null, "scale": null, "generated": null},
           {"name": "meter_value_at_completion", "type": "numeric", "nullable": true, "default": null, "precision": 14, "scale": 3, "generated": null},
-          {"name": "meter_reading_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null}
+          {"name": "meter_reading_id", "type": "uuid", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "operator_identity", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "device_install_id", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "device_label", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "app_environment", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "previous_last_done", "type": "timestamp with time zone", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "previous_next_due", "type": "timestamp with time zone", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "previous_last_done_meter_value", "type": "numeric", "nullable": true, "default": null, "precision": 14, "scale": 3, "generated": null},
+          {"name": "previous_next_due_meter_value", "type": "numeric", "nullable": true, "default": null, "precision": 14, "scale": 3, "generated": null},
+          {"name": "previous_result_notes", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "acknowledged_at", "type": "timestamp with time zone", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "acknowledged_by", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "acknowledged_device_install_id", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "acknowledged_device_label", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "acknowledged_app_environment", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "undone_at", "type": "timestamp with time zone", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "undone_by", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "undone_device_install_id", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "undone_device_label", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null},
+          {"name": "undone_app_environment", "type": "text", "nullable": true, "default": null, "precision": null, "scale": null, "generated": null}
         ],
         "constraints": [
+          {"name": "maintenance_completions_app_environment_check", "kind": "check", "columns": ["app_environment"], "definition": "CHECK (app_environment IS NULL OR app_environment IN ('development', 'production'))", "references": null, "on_update": null, "on_delete": null},
           {"name": "maintenance_completions_meter_reading_id_fkey", "kind": "foreign_key", "columns": ["meter_reading_id"], "definition": "FOREIGN KEY (meter_reading_id) REFERENCES propertymanager.asset_meter_reading (id)", "references": {"table": "asset_meter_reading", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "SET NULL"},
           {"name": "maintenance_completions_pkey", "kind": "primary_key", "columns": ["id"], "definition": "PRIMARY KEY (id)", "references": null, "on_update": null, "on_delete": null},
           {"name": "maintenance_completions_task_id_fkey", "kind": "foreign_key", "columns": ["task_id"], "definition": "FOREIGN KEY (task_id) REFERENCES propertymanager.maintenance_tasks (id)", "references": {"table": "maintenance_tasks", "columns": ["id"]}, "on_update": "NO ACTION", "on_delete": "CASCADE"}

@@ -9,7 +9,10 @@ enum PropertyManagerBuildEnvironment {
     static let apiKeyKey = "propertyManager.dev.apiKey"
     static let operatorPINKey = "propertyManager.dev.operatorPIN"
     static let operatorIdentityKey = "propertyManager.dev.operatorIdentity"
-    static let operatorIdentity = "ios-dev-operator"
+    static let operatorIdentity = "Andy Graves"
+    static let deviceInstallIDKey = "propertyManager.dev.deviceInstallID"
+    static let deviceLabelKey = "propertyManager.dev.deviceLabel"
+    static let appEnvironment = "development"
     static let appearanceKey = "propertyManager.dev.appearance"
 #else
     static let isDevelopment = false
@@ -18,7 +21,10 @@ enum PropertyManagerBuildEnvironment {
     static let apiKeyKey = "propertyManager.apiKey"
     static let operatorPINKey = "propertyManager.operatorPIN"
     static let operatorIdentityKey = "propertyManager.operatorIdentity"
-    static let operatorIdentity = "ios-operator"
+    static let operatorIdentity = "Andy Graves"
+    static let deviceInstallIDKey = "propertyManager.deviceInstallID"
+    static let deviceLabelKey = "propertyManager.deviceLabel"
+    static let appEnvironment = "production"
     static let appearanceKey = "propertyManager.appearance"
 #endif
 }
@@ -33,6 +39,10 @@ final class PropertyStore: ObservableObject {
     var operatorPIN: String = ""
     @AppStorage(PropertyManagerBuildEnvironment.operatorIdentityKey)
     var operatorIdentity: String = PropertyManagerBuildEnvironment.operatorIdentity
+    @AppStorage(PropertyManagerBuildEnvironment.deviceInstallIDKey)
+    var deviceInstallID: String = ""
+    @AppStorage(PropertyManagerBuildEnvironment.deviceLabelKey)
+    var deviceLabel: String = ""
 
     @Published var categories: [MaintenanceCategory] = []
     @Published var tasks: [MaintenanceTask] = []
@@ -50,12 +60,33 @@ final class PropertyStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var statusMessage: String?
 
+    init() {
+        if deviceInstallID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            deviceInstallID = UUID().uuidString.lowercased()
+        }
+
+        if deviceLabel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            #if os(iOS)
+            if UIDevice.current.userInterfaceIdiom == .pad {
+                deviceLabel = "Andy’s iPad Pro"
+            } else {
+                deviceLabel = "Andy’s iPhone"
+            }
+            #else
+            deviceLabel = "Andy’s Apple Device"
+            #endif
+        }
+    }
+
     var client: PropertyAPIClient {
         PropertyAPIClient(
             baseURLString: apiBaseURL,
             apiKey: apiKey.isEmpty ? nil : apiKey,
             operatorPIN: operatorPIN.isEmpty ? nil : operatorPIN,
-            operatorIdentity: operatorIdentity.isEmpty ? nil : operatorIdentity
+            operatorIdentity: operatorIdentity.isEmpty ? nil : operatorIdentity,
+            deviceInstallID: deviceInstallID.isEmpty ? nil : deviceInstallID,
+            deviceLabel: deviceLabel.isEmpty ? nil : deviceLabel,
+            appEnvironment: PropertyManagerBuildEnvironment.appEnvironment
         )
     }
 
@@ -252,33 +283,87 @@ final class PropertyStore: ObservableObject {
         }
     }
 
+    func completeWithReceipt(
+        task: MaintenanceTask,
+        note: String?,
+        meterValue: Double? = nil,
+        confirmCurrentMeter: Bool = false
+    ) async -> TaskCompletionReceipt? {
+        isCompleting = true
+        errorMessage = nil
+        defer { isCompleting = false }
+
+        do {
+            let receipt = try await client.completeTaskWithReceipt(
+                id: task.id,
+                note: note,
+                meterValueAtCompletion: meterValue,
+                confirmCurrentMeter: confirmCurrentMeter
+            )
+            if let index = tasks.firstIndex(where: { $0.id == receipt.task.id }) {
+                tasks[index] = receipt.task
+            }
+            statusMessage = "Marked \(receipt.task.area) / \(receipt.task.item) done"
+            await refreshAssets()
+            return receipt
+        } catch {
+            errorMessage = error.localizedDescription
+            return nil
+        }
+    }
+
     func complete(
         task: MaintenanceTask,
         note: String?,
         meterValue: Double? = nil,
         confirmCurrentMeter: Bool = false
     ) async -> Bool {
-        isCompleting = true
-        errorMessage = nil
-        defer { isCompleting = false }
+        await completeWithReceipt(
+            task: task,
+            note: note,
+            meterValue: meterValue,
+            confirmCurrentMeter: confirmCurrentMeter
+        ) != nil
+    }
 
+    func acknowledgeCompletion(
+        taskID: UUID,
+        completionID: UUID
+    ) async -> Bool {
         do {
-            let updated = try await client.completeTask(
-                id: task.id,
-                note: note,
-                meterValueAtCompletion: meterValue,
-                confirmCurrentMeter: confirmCurrentMeter
+            _ = try await client.acknowledgeCompletion(
+                taskID: taskID,
+                completionID: completionID
             )
-            if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
-                tasks[index] = updated
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func undoCompletion(
+        taskID: UUID,
+        completionID: UUID
+    ) async -> Bool {
+        do {
+            let restored = try await client.undoCompletion(
+                taskID: taskID,
+                completionID: completionID
+            )
+            if let index = tasks.firstIndex(where: { $0.id == restored.id }) {
+                tasks[index] = restored
             }
-            statusMessage = "Marked \(updated.area) / \(updated.item) done"
             await refreshAssets()
             return true
         } catch {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+
+    func removeCompletedTaskFromCurrentDisplay(taskID: UUID) {
+        tasks.removeAll { $0.id == taskID }
     }
 
     func saveEdits(taskID: UUID, fields: [String: Any], parts: [[String: Any]]? = nil) async -> Bool {

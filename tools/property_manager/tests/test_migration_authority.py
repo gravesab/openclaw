@@ -32,8 +32,9 @@ APPROVED_HASHES = {
     "005_assets_and_meters.sql": "f90a39cdc6234d72a431d4caba23720d98aa7b4dff1a83f15845ecb936ff0147",
     "006_phase1_meter_audit.sql": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0",
     "009_maintenance_proposals.sql": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a",
+    "010_action_journal_and_completion_undo.sql": "8b8db0042dce655bd1aaaa9f68b3f81acd2a011a6c4f13009d81892e349e1d3a",
 }
-APPROVED_CONTRACT_HASH = "63063adf5396817e8fa8607a5ccb108cdc3d79a4f9c6a046e6068ee1a6f59a52"
+APPROVED_CONTRACT_HASH = "f2ee2286a63dda4736b3554493388afe68e12fa9dafe1003acf23b32f3d7b588"
 APPROVED_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 APPROVED_RESOURCE_LIMITS = {
     "MAX_MANIFEST_BYTES": 1 * 1024 * 1024,
@@ -53,8 +54,10 @@ APPROVED_REAPPLICATION = {
     "005": True,
     "006": True,
     "009": True,
+    "010": True,
 }
 APPROVED_TABLES = (
+    "action_journal",
     "asset_meter",
     "asset_meter_reading",
     "asset_task_mapping_proposals",
@@ -142,7 +145,7 @@ def index(name, unique_value, *keys, predicate=None):
 
 
 # Hand-maintained oracle derived directly from 001_initial_schema.sql through
-# 009_maintenance_proposals.sql. It must never be populated from the manifest.
+# 010_action_journal_and_completion_undo.sql. It must never be populated from the manifest.
 EXPECTED_SCHEMA_ORACLE = {
     "normalization_version": 1,
     "comparison": {
@@ -156,6 +159,39 @@ EXPECTED_SCHEMA_ORACLE = {
         "tables": [], "columns": [], "constraints": [], "indexes": [], "canonical_data": [],
     },
     "tables": {
+        "action_journal": {
+            "columns": [
+                column("id", "uuid", False),
+                column("action", "text", False),
+                column("actor_identity", "text", False),
+                column("device_install_id", "text", True),
+                column("device_label", "text", True),
+                column("app_environment", "text", True),
+                column("task_id", "uuid", True),
+                column("completion_id", "uuid", True),
+                column("occurred_at", "timestamp with time zone", False, "now()"),
+                column("before_state", "jsonb", True),
+                column("after_state", "jsonb", True),
+                column("metadata", "jsonb", False, "'{}'::jsonb"),
+                column("reversal_of", "uuid", True),
+            ],
+            "constraints": [
+                check("action_journal_after_state_check", ("after_state",), "CHECK (after_state IS NULL OR jsonb_typeof(after_state) = 'object')"),
+                check("action_journal_before_state_check", ("before_state",), "CHECK (before_state IS NULL OR jsonb_typeof(before_state) = 'object')"),
+                foreign("action_journal_completion_id_fkey", ("completion_id",), "maintenance_completions", ("id",), "SET NULL"),
+                check("action_journal_environment_check", ("app_environment",), "CHECK (app_environment IS NULL OR app_environment IN ('development', 'production'))"),
+                check("action_journal_metadata_check", ("metadata",), "CHECK (jsonb_typeof(metadata) = 'object')"),
+                primary("action_journal_pkey", "id"),
+                foreign("action_journal_reversal_of_fkey", ("reversal_of",), "action_journal", ("id",), "SET NULL"),
+                foreign("action_journal_task_id_fkey", ("task_id",), "maintenance_tasks", ("id",), "SET NULL"),
+            ],
+            "indexes": [
+                index("action_journal_actor_time_idx", False, ("actor_identity", "ASC"), ("occurred_at", "DESC")),
+                index("action_journal_completion_time_idx", False, ("completion_id", "ASC"), ("occurred_at", "DESC")),
+                index("action_journal_pkey", True, ("id", "ASC")),
+                index("action_journal_task_time_idx", False, ("task_id", "ASC"), ("occurred_at", "DESC")),
+            ],
+        },
         "asset_meter": {
             "columns": [
                 column("asset_id", "uuid", False),
@@ -284,8 +320,28 @@ EXPECTED_SCHEMA_ORACLE = {
                 column("created_at", "timestamp with time zone", False, "now()"),
                 column("meter_value_at_completion", "numeric", True, None, 14, 3),
                 column("meter_reading_id", "uuid", True),
+                column("operator_identity", "text", True),
+                column("device_install_id", "text", True),
+                column("device_label", "text", True),
+                column("app_environment", "text", True),
+                column("previous_last_done", "timestamp with time zone", True),
+                column("previous_next_due", "timestamp with time zone", True),
+                column("previous_last_done_meter_value", "numeric", True, None, 14, 3),
+                column("previous_next_due_meter_value", "numeric", True, None, 14, 3),
+                column("previous_result_notes", "text", True),
+                column("acknowledged_at", "timestamp with time zone", True),
+                column("acknowledged_by", "text", True),
+                column("acknowledged_device_install_id", "text", True),
+                column("acknowledged_device_label", "text", True),
+                column("acknowledged_app_environment", "text", True),
+                column("undone_at", "timestamp with time zone", True),
+                column("undone_by", "text", True),
+                column("undone_device_install_id", "text", True),
+                column("undone_device_label", "text", True),
+                column("undone_app_environment", "text", True),
             ],
             "constraints": [
+                check("maintenance_completions_app_environment_check", ("app_environment",), "CHECK (app_environment IS NULL OR app_environment IN ('development', 'production'))"),
                 foreign("maintenance_completions_meter_reading_id_fkey", ("meter_reading_id",), "asset_meter_reading", ("id",), "SET NULL"),
                 primary("maintenance_completions_pkey", "id"),
                 foreign("maintenance_completions_task_id_fkey", ("task_id",), "maintenance_tasks", ("id",), "CASCADE"),
@@ -487,7 +543,7 @@ class AuthorityFixture(unittest.TestCase):
                 for spec in self.manifest.canonical
             ]
         return {
-            "declared_version": "009",
+            "declared_version": "010",
             "concurrent_migration_activity": False,
             "unexplained_schema_objects": False,
             "identity": {
@@ -525,7 +581,7 @@ class ManifestFingerprintTests(AuthorityFixture):
             APPROVED_REAPPLICATION,
         )
         self.assertEqual(self.manifest.reserved_versions, ("007", "008"))
-        self.assertEqual(self.manifest.next_canonical_version, "010")
+        self.assertEqual(self.manifest.next_canonical_version, "011")
         self.assertNotIn("007", {spec.version for spec in self.manifest.canonical})
         self.assertNotIn("008", {spec.version for spec in self.manifest.canonical})
 
@@ -533,9 +589,9 @@ class ManifestFingerprintTests(AuthorityFixture):
         self.assertEqual(self.manifest.schema_contract, EXPECTED_SCHEMA_ORACLE)
         tables = EXPECTED_SCHEMA_ORACLE["tables"]
         self.assertEqual(tuple(tables), APPROVED_TABLES)
-        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 143)
-        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 39)
-        self.assertEqual(sum(len(table["indexes"]) for table in tables.values()), 28)
+        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 175)
+        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 48)
+        self.assertEqual(sum(len(table["indexes"]) for table in tables.values()), 32)
         self.assertEqual(
             len(EXPECTED_SCHEMA_ORACLE["canonical_data"]["maintenance_categories"]["rows"]),
             8,
@@ -584,9 +640,9 @@ class ManifestFingerprintTests(AuthorityFixture):
         )
         contract = raw["schema_contract"]
         self.assertEqual(tuple(contract["tables"]), APPROVED_TABLES)
-        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 143)
-        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 39)
-        self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 28)
+        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 175)
+        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 48)
+        self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 32)
         migration_created_indexes = {
             "maintenance_task_parts_task_id_idx", "maintenance_task_photos_task_id_idx",
             "assets_external_id_idx", "assets_qr_token_idx", "assets_name_lower_idx",
@@ -1272,7 +1328,7 @@ class MetadataAndLedgerTests(AuthorityFixture):
                 metadata["declared_version"] = value
             self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
         lower, higher = self.metadata(), self.metadata()
-        lower["declared_version"], higher["declared_version"] = "006", "010"
+        lower["declared_version"], higher["declared_version"] = "006", "011"
         self.assertEqual(self.snapshot(lower).status, authority.AuditStatus.SNAPSHOT_PARTIAL)
         self.assertEqual(self.snapshot(higher).status, authority.AuditStatus.SNAPSHOT_LATER)
 
@@ -1465,7 +1521,7 @@ class MetadataAndLedgerTests(AuthorityFixture):
         for metadata in mutations:
             self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.LEDGER_INCONSISTENT)
         later = copy.deepcopy(valid)
-        later["ledger"]["entries"].append({"order": 8, "version": "010", "filename": "010.sql", "sha256": "0" * 64})
+        later["ledger"]["entries"].append({"order": 9, "version": "011", "filename": "011.sql", "sha256": "0" * 64})
         self.assertEqual(self.snapshot(later).status, authority.AuditStatus.SNAPSHOT_LATER)
 
     def test_malformed_ledger_entries_never_escape(self):
@@ -1641,7 +1697,7 @@ class RedactionAndStatusTests(unittest.TestCase):
     def test_unsafe_or_contradictory_result_fields_are_rejected(self):
         with self.assertRaises(TypeError):
             authority.AuditResult(
-                authority.AuditStatus.SNAPSHOT_CONSISTENT, (), (), "009",
+                authority.AuditStatus.SNAPSHOT_CONSISTENT, (), (), "010",
                 identity_assurance="not_applicable",
             )
         with self.assertRaises(TypeError):

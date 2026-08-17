@@ -22,12 +22,6 @@ systemctl --user --no-pager --lines=15 status openclaw-gateway.service || true
 echo
 
 echo "=============================="
-echo "Voice Service"
-echo "=============================="
-systemctl --user --no-pager --lines=15 status openclaw-voice.service || true
-echo
-
-echo "=============================="
 echo "Dashboard"
 echo "=============================="
 systemctl --user --no-pager --lines=15 status openclaw-dashboard.service || true
@@ -42,19 +36,51 @@ echo
 echo "=============================="
 echo "M4 Ollama"
 echo "=============================="
-~/ai/projects/openclaw/tools/ollama/ollama_status.sh || true
+
+OLLAMA_BASE_URL="${OPENCLAW_OLLAMA_BASE_URL:-http://192.168.50.117:11434}"
+OLLAMA_TAGS_FILE="$(mktemp)"
+
+if curl -fsS --max-time 8   "$OLLAMA_BASE_URL/api/tags"   -o "$OLLAMA_TAGS_FILE"
+then
+  python3 - "$OLLAMA_BASE_URL" "$OLLAMA_TAGS_FILE" <<'PY_OLLAMA'
+import json
+import sys
+from pathlib import Path
+
+base_url = sys.argv[1]
+data = json.loads(Path(sys.argv[2]).read_text())
+models = sorted(
+    str(item.get("name") or item.get("model") or "unknown")
+    for item in data.get("models", [])
+)
+
+print(f"Ollama URL: {base_url}")
+print("Status: online")
+print(f"Model count: {len(models)}")
+print("Models:")
+for model in models:
+    print(model)
+PY_OLLAMA
+else
+  echo "Ollama URL: $OLLAMA_BASE_URL"
+  echo "Status: offline"
+fi
+
+rm -f "$OLLAMA_TAGS_FILE"
 echo
 
 echo "=============================="
 echo "AI Benchmark"
 echo "=============================="
-~/ai/projects/openclaw/tools/ollama/ollama_benchmark.sh || true
+echo "Status: deferred"
+echo "Reason: legacy Ollama benchmark retired during beta migration."
+echo "Replacement: AI Intelligence benchmark framework."
 echo
 
 echo "=============================="
 echo "Scrypted"
 echo "=============================="
-~/ai/projects/openclaw/tools/scrypted/scrypted_status.sh || true
+"${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}/tools/scrypted/scrypted_status.sh" || true
 echo
 
 echo "=============================="

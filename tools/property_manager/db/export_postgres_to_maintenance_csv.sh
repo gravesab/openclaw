@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 OUT="$BASE/tools/property_manager/maintenance_log.csv"
 BACKUP_DIR="$BASE/tools/property_manager/backups"
 STAMP="$(date +%Y%m%d-%H%M%S)"

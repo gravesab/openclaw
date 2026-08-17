@@ -1,8 +1,8 @@
 # Phase 2F — Runtime AI Router Architecture
 
 **Status:** Implementation complete; Gateway activation proved; usage/failover telemetry implemented
-**Project:** OpenClaw AI Intelligence Layer  
-**Environment:** Development first  
+**Project:** OpenClaw AI Intelligence Layer
+**Environment:** Development first
 **Core requirement:** Automatic failover is mandatory
 
 ## 1. Purpose

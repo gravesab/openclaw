@@ -1,31 +1,25 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+// Covers compaction sanitization for toolResult details and runtime context.
+import type { AgentMessage } from "openclaw/plugin-sdk/agent-core";
+import type { AssistantMessage, ToolResultMessage } from "openclaw/plugin-sdk/llm";
+import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeAgentAssistantMessage } from "./test-helpers/agent-message-fixtures.js";
 
-const piCodingAgentMocks = vi.hoisted(() => ({
+const agentSessionMocks = vi.hoisted(() => ({
   generateSummary: vi.fn(async () => "summary"),
   estimateTokens: vi.fn((_message: unknown) => 1),
 }));
 
-vi.mock("@earendil-works/pi-coding-agent", async () => {
-  const actual = await vi.importActual<typeof import("@earendil-works/pi-coding-agent")>(
-    "@earendil-works/pi-coding-agent",
-  );
+vi.mock("./sessions/index.js", async () => {
+  const actual = await vi.importActual<typeof import("./sessions/index.js")>("./sessions/index.js");
   return {
     ...actual,
-    generateSummary: piCodingAgentMocks.generateSummary,
-    estimateTokens: piCodingAgentMocks.estimateTokens,
+    generateSummary: agentSessionMocks.generateSummary,
+    estimateTokens: agentSessionMocks.estimateTokens,
   };
 });
 
 let isOversizedForSummary: typeof import("./compaction.js").isOversizedForSummary;
-let summarizeWithFallback: typeof import("./compaction.js").summarizeWithFallback;
-
-async function loadFreshCompactionModuleForTest() {
-  vi.resetModules();
-  ({ isOversizedForSummary, summarizeWithFallback } = await import("./compaction.js"));
-}
+let summarizeWithFallback: typeof import("./compaction.test-support.js").summarizeWithFallback;
 
 function makeAssistantToolCall(timestamp: number): AssistantMessage {
   return makeAgentAssistantMessage({
@@ -37,6 +31,8 @@ function makeAssistantToolCall(timestamp: number): AssistantMessage {
 }
 
 function makeToolResultWithDetails(timestamp: number): ToolResultMessage<{ raw: string }> {
+  // The raw detail intentionally looks prompt-like; it must never reach summary
+  // generation or token oversize checks.
   return {
     role: "toolResult",
     toolCallId: "call_1",
@@ -49,12 +45,16 @@ function makeToolResultWithDetails(timestamp: number): ToolResultMessage<{ raw: 
 }
 
 describe("compaction toolResult details stripping", () => {
-  beforeEach(async () => {
-    await loadFreshCompactionModuleForTest();
-    piCodingAgentMocks.generateSummary.mockReset();
-    piCodingAgentMocks.generateSummary.mockResolvedValue("summary");
-    piCodingAgentMocks.estimateTokens.mockReset();
-    piCodingAgentMocks.estimateTokens.mockImplementation((_message: unknown) => 1);
+  beforeAll(async () => {
+    ({ isOversizedForSummary } = await import("./compaction.js"));
+    ({ summarizeWithFallback } = await import("./compaction.test-support.js"));
+  });
+
+  beforeEach(() => {
+    agentSessionMocks.generateSummary.mockReset();
+    agentSessionMocks.generateSummary.mockResolvedValue("summary");
+    agentSessionMocks.estimateTokens.mockReset();
+    agentSessionMocks.estimateTokens.mockImplementation((_message: unknown) => 1);
   });
 
   it("does not pass toolResult.details into generateSummary", async () => {
@@ -72,10 +72,12 @@ describe("compaction toolResult details stripping", () => {
     });
 
     expect(summary).toBe("summary");
-    expect(piCodingAgentMocks.generateSummary).toHaveBeenCalledTimes(1);
+    expect(agentSessionMocks.generateSummary).toHaveBeenCalledTimes(1);
 
+    // Summary generation receives only model-visible fields. Raw detail payloads
+    // are diagnostics, not transcript content.
     const chunk = (
-      piCodingAgentMocks.generateSummary.mock.calls as unknown as Array<[AgentMessage[]]>
+      agentSessionMocks.generateSummary.mock.calls as unknown as Array<[AgentMessage[]]>
     )[0]?.[0];
     expect(chunk).toStrictEqual([
       {
@@ -141,9 +143,9 @@ describe("compaction toolResult details stripping", () => {
       contextWindow: 10000,
     });
 
-    expect(piCodingAgentMocks.generateSummary).toHaveBeenCalledTimes(1);
+    expect(agentSessionMocks.generateSummary).toHaveBeenCalledTimes(1);
     const chunk = (
-      piCodingAgentMocks.generateSummary.mock.calls as unknown as Array<[AgentMessage[]]>
+      agentSessionMocks.generateSummary.mock.calls as unknown as Array<[AgentMessage[]]>
     )[0]?.[0];
     expect(chunk).toStrictEqual([
       { role: "user", content: "visible ask", timestamp: 1 },
@@ -156,7 +158,7 @@ describe("compaction toolResult details stripping", () => {
   });
 
   it("ignores toolResult.details when evaluating oversized messages", () => {
-    piCodingAgentMocks.estimateTokens.mockImplementation((message: unknown) => {
+    agentSessionMocks.estimateTokens.mockImplementation((message: unknown) => {
       const record = message as { details?: unknown };
       return record.details ? 10_000 : 10;
     });

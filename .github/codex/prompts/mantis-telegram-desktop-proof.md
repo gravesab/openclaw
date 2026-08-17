@@ -16,8 +16,15 @@ Hard limits:
 - Do not finish with tiny, cropped-wrong, off-bottom, or sidebar-heavy GIFs.
 - Do not invent a generic proof. The proof must match the PR behavior.
 - Do not force GIFs for internal-only, workflow-only, test-only, docs-only, or
-  otherwise non-visual PRs. A no-visual-proof manifest is a successful outcome
-  when GIFs would be misleading.
+  otherwise non-visual PRs. A no-visual-proof manifest is a successful workflow
+  outcome when GIFs would be misleading, but it is not proof that the PR passed.
+- Do not skip Telegram-visible PRs just because the proof needs a specific
+  message, mock response, media attachment, command, button, reaction, stop
+  timing, approval prompt, or progress/final delivery sequence. First write a
+  concrete proof plan and try the standard harness path.
+- Keep public-facing manifest summaries short and user-domain. Do not mention
+  harness internals, mock-provider limits, secret/trust boundaries, local paths,
+  transcript seeding, or workflow implementation details in the summary.
 
 Inputs are provided as environment variables:
 
@@ -39,12 +46,21 @@ Required workflow:
 2. Inspect the PR with `gh pr view "$MANTIS_PR_NUMBER"` and
    `gh pr diff "$MANTIS_PR_NUMBER"`.
 3. Decide whether the PR has a visibly reproducible Telegram Desktop
-   before/after. If it does not, write
+   before/after. Treat these as visible until proven otherwise: message text
+   formatting/content, progress drafts, native drafts, final delivery, media or
+   document delivery, inline buttons, approval prompts, stop/abort behavior,
+   reactions/status indicators, guest/inline responses, TTS/voice/audio
+   delivery, and routing changes whose result is visible in the chat. For those
+   PRs, define the exact Telegram stimulus and expected main/PR visual delta
+   before deciding to skip.
+
+   If the PR does not have a Telegram-visible before/after, write
    `${MANTIS_OUTPUT_DIR}/mantis-evidence.json` with `comparison.pass: true`, no
    artifacts, and a summary that starts with
-   `Mantis did not generate before/after GIFs because`. Include the concrete
-   reason in the summary. Use this manifest shape and do not create worktrees
-   or start Crabbox for this case:
+   `Mantis did not generate before/after GIFs because`. Include a short
+   public reason, such as `the PR changes internal session bookkeeping rather
+than Telegram-visible behavior`. Use this manifest shape and do not create
+   worktrees or start Crabbox for this case:
 
    ```json
    {
@@ -73,43 +89,81 @@ Required workflow:
    }
    ```
 
+   If the PR appears visual but proof is blocked by Telegram Desktop session
+   state, authorization, credentials, Crabbox, missing Telegram client support,
+   unavailable media/provider setup, or another capture-infrastructure issue,
+   do not describe it as a no-visual PR. Write a manifest with
+   `comparison.pass: false`, skipped lanes, no artifacts, and a summary that
+   starts with `Mantis could not capture Telegram Desktop proof because`. The
+   publisher will keep that out of PR comments so the failure stays in the
+   workflow logs and artifacts.
+
 4. Decide what Telegram message, mock model response, command, callback, button,
    media, or sequence best proves the PR. Use `MANTIS_INSTRUCTIONS` as extra
    maintainer guidance, not as a replacement for reading the PR.
-5. Create detached worktrees under
-   `.artifacts/qa-e2e/mantis/telegram-desktop-proof-worktrees/baseline` and
-   `.artifacts/qa-e2e/mantis/telegram-desktop-proof-worktrees/candidate`, then
-   install and build each worktree with the repo's normal `pnpm` commands.
+   MCP App Funnel proof is not supported by the container-isolated Mantis path.
+   If that is the required scenario, write the capture-infrastructure failure
+   manifest described above without leasing credentials or starting Crabbox;
+   do not pass `--mcp-app-fixture` or weaken the container boundary.
+5. Use the workflow-prepared detached worktrees named by
+   `MANTIS_BASELINE_ROOT` and `MANTIS_CANDIDATE_ROOT`.
+   The workflow already verified their `HEAD`s and then made the worktree root
+   inaccessible to the agent. Do not read, enter, execute, create, install,
+   rebuild, or replace them on the host. The root-owned isolation wrapper is
+   the only execution seam for these prepared builds.
    If `MANTIS_CANDIDATE_TRUST` is `fork-pr-head`, treat the
    candidate worktree as untrusted fork code: do not pass GitHub, OpenAI,
-   Crabbox, Convex, or other workflow secrets into candidate install, build, or
-   runtime commands. The candidate SUT may receive only the proof runner's
+   Crabbox, Convex, or other workflow secrets into candidate runtime commands.
+   The candidate SUT may receive only the proof runner's
    short-lived Telegram bot token, generated local config/state paths, and mock
    model key needed for this isolated proof.
 6. In each worktree, run the real-user Telegram Crabbox proof flow from the
    skill with `$OPENCLAW_TELEGRAM_USER_PROOF_CMD`; do not run
-   `pnpm qa:telegram-user:crabbox` directly. The proof command comes from the
-   trusted workflow checkout while the current directory controls which
-   baseline or candidate OpenClaw build is tested. Use
+   `pnpm qa:telegram-user:crabbox` directly. Run it from the trusted workflow
+   checkout and pass
+   `--sut-container --sut-lane baseline --sut-repo-root "$MANTIS_BASELINE_ROOT"`
+   for main and
+   `--sut-container --sut-lane candidate --sut-repo-root "$MANTIS_CANDIDATE_ROOT"`
+   for the PR. Fork heads are rejected without the explicit attested lane and
+   prepared root, and
+   the root-owned wrapper is the only process allowed to mount it. This keeps
+   candidate code away from the host Codex proxy and workflow filesystem while
+   preserving real Telegram network behavior. Use
    `$OPENCLAW_TELEGRAM_USER_DRIVER_SCRIPT`, the workflow-provided `crabbox`
    binary, and the workflow-provided local `ffmpeg`/`ffprobe`; do not generate,
    install, or patch replacement proof tooling during the run. Use the same
-   proof idea for baseline and candidate. You may iterate and rerun if the
-   visual result is not convincing.
+   proof idea for baseline and candidate. Let `start` return or fail on its
+   own; do not kill it while Crabbox is still waiting for bootstrap. Use a long
+   command timeout for `start`, `send`, `view`, and `finish`. You may iterate
+   and rerun if the visual result is not convincing.
+   When the requested scenario needs `channels.telegram.linkPreview: false`,
+   pass `--link-preview false` to `start`. The runner injects that setting into
+   the isolated SUT config before Gateway startup. Do not edit the generated
+   config or restart the Gateway to apply it.
+   To prove fixed pacing between streamed blocks, pass `--human-delay-fixed-ms <milliseconds>` to `start`.
+   When the proof must show an in-place streamed edit, also pass
+   `--mock-response-chunk-delay-ms 1200` and use a mock response long enough
+   for the first chunk to clear the preview debounce. Capture both the initial
+   partial reply and the later edit before finishing.
 7. Open Telegram Desktop directly to the newest relevant message with the
    runner `view` command before finishing each recording. Keep the chat scrolled
    to the bottom so new proof messages appear in-frame.
 8. Finish each session with `--preview-crop telegram-window`.
 9. Build `${MANTIS_OUTPUT_DIR}/mantis-evidence.json` with:
 
+   Session artifact paths are relative to the trusted workflow checkout, not
+   to the inaccessible SUT mounts. Pass the trusted checkout root for both
+   `--*-repo-root` arguments; use the prepared worktree paths only with
+   `--sut-lane`/`--sut-repo-root` during `start`.
+
    ```bash
-   node scripts/mantis/build-telegram-desktop-proof-evidence.mjs \
+   node --import tsx scripts/mantis/build-telegram-desktop-proof-evidence.mts \
      --output-dir "$MANTIS_OUTPUT_DIR" \
-     --baseline-repo-root <baseline-worktree> \
+     --baseline-repo-root "$GITHUB_WORKSPACE" \
      --baseline-output-dir <baseline-session-output-dir> \
      --baseline-ref "$BASELINE_REF" \
      --baseline-sha "$BASELINE_SHA" \
-     --candidate-repo-root <candidate-worktree> \
+     --candidate-repo-root "$GITHUB_WORKSPACE" \
      --candidate-output-dir <candidate-session-output-dir> \
      --candidate-ref "$CANDIDATE_REF" \
      --candidate-sha "$CANDIDATE_SHA" \
@@ -134,4 +188,6 @@ Expected final state:
   `Main` and `This PR`.
 - No-visual-proof manifests contain no artifacts and have `comparison.pass:
 true`.
+- Capture-infrastructure failure manifests contain no artifacts and have
+  `comparison.pass: false`.
 - The worktree can be dirty only under `.artifacts/`.

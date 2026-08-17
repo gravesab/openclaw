@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -u
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BACKUP_DIR="/mnt/ai-storage/openclaw-backups"
 
 SEND="$BASE/tools/telegram/send-telegram.sh"

@@ -1,13 +1,18 @@
-import os from "node:os";
-import path from "node:path";
+// Setup completion helpers render completion instructions after onboarding.
 import { resolveCliName } from "../cli/cli-name.js";
-import { installCompletion } from "../cli/completion-runtime.js";
-import type { ShellCompletionStatus } from "../commands/doctor-completion.js";
+import {
+  formatCompletionReloadCommand,
+  installCompletion,
+  resolveCompletionProfileHint,
+} from "../cli/completion-runtime.js";
+import type {
+  CompletionCacheGenerationOptions,
+  ShellCompletionStatus,
+} from "../commands/doctor-completion.js";
 import {
   checkShellCompletionStatus,
   ensureCompletionCacheExists,
 } from "../commands/doctor-completion.js";
-import { pathExists } from "../utils.js";
 import { t } from "./i18n/index.js";
 import type { WizardPrompter } from "./prompts.js";
 import type { WizardFlow } from "./setup.types.js";
@@ -15,32 +20,12 @@ import type { WizardFlow } from "./setup.types.js";
 type CompletionDeps = {
   resolveCliName: () => string;
   checkShellCompletionStatus: (binName: string) => Promise<ShellCompletionStatus>;
-  ensureCompletionCacheExists: (binName: string) => Promise<boolean>;
+  ensureCompletionCacheExists: (
+    binName: string,
+    options: CompletionCacheGenerationOptions,
+  ) => Promise<boolean>;
   installCompletion: (shell: string, yes: boolean, binName?: string) => Promise<void>;
 };
-
-async function resolveProfileHint(shell: ShellCompletionStatus["shell"]): Promise<string> {
-  const home = process.env.HOME || os.homedir();
-  if (shell === "zsh") {
-    return "~/.zshrc";
-  }
-  if (shell === "bash") {
-    const bashrc = path.join(home, ".bashrc");
-    return (await pathExists(bashrc)) ? "~/.bashrc" : "~/.bash_profile";
-  }
-  if (shell === "fish") {
-    return "~/.config/fish/config.fish";
-  }
-  // Best-effort. PowerShell profile path varies; restart hint is still correct.
-  return "$PROFILE";
-}
-
-function formatReloadHint(shell: ShellCompletionStatus["shell"], profileHint: string): string {
-  if (shell === "powershell") {
-    return t("wizard.completion.reloadPowerShell");
-  }
-  return t("wizard.completion.reloadShell", { profile: profileHint });
-}
 
 export async function setupWizardShellCompletion(params: {
   flow: WizardFlow;
@@ -57,10 +42,23 @@ export async function setupWizardShellCompletion(params: {
 
   const cliName = deps.resolveCliName();
   const completionStatus = await deps.checkShellCompletionStatus(cliName);
+  const generationOptions = { generationMode: "full" } as const;
+  const ensureCompletionCache = async (): Promise<boolean> => {
+    const cacheGenerated = await deps.ensureCompletionCacheExists(cliName, generationOptions);
+    if (!cacheGenerated) {
+      await params.prompter.note(
+        t("wizard.completion.cacheFailed", {
+          command: `${cliName} completion --write-state --install`,
+        }),
+        t("wizard.completion.title"),
+      );
+    }
+    return cacheGenerated;
+  };
 
   if (completionStatus.usesSlowPattern) {
     // Case 1: Profile uses slow dynamic pattern - silently upgrade to cached version
-    const cacheGenerated = await deps.ensureCompletionCacheExists(cliName);
+    const cacheGenerated = await ensureCompletionCache();
     if (cacheGenerated) {
       await deps.installCompletion(completionStatus.shell, true, cliName);
     }
@@ -69,7 +67,7 @@ export async function setupWizardShellCompletion(params: {
 
   if (completionStatus.profileInstalled && !completionStatus.cacheExists) {
     // Case 2: Profile has completion but no cache - auto-fix silently
-    await deps.ensureCompletionCacheExists(cliName);
+    await ensureCompletionCache();
     return;
   }
 
@@ -91,23 +89,22 @@ export async function setupWizardShellCompletion(params: {
     }
 
     // Generate cache first (required for fast shell startup)
-    const cacheGenerated = await deps.ensureCompletionCacheExists(cliName);
+    const cacheGenerated = await ensureCompletionCache();
     if (!cacheGenerated) {
-      await params.prompter.note(
-        t("wizard.completion.cacheFailed", { command: `${cliName} completion --install` }),
-        t("wizard.completion.title"),
-      );
       return;
     }
 
     // Install to shell profile
     await deps.installCompletion(completionStatus.shell, true, cliName);
 
-    const profileHint = await resolveProfileHint(completionStatus.shell);
+    const shell = completionStatus.shell;
+    const command = formatCompletionReloadCommand(shell, resolveCompletionProfileHint(shell));
+    const reloadHint =
+      shell === "powershell"
+        ? t("wizard.completion.reloadPowerShell", { command })
+        : t("wizard.completion.reloadShell", { profile: command.slice("source ".length) });
     await params.prompter.note(
-      t("wizard.completion.installed", {
-        reloadHint: formatReloadHint(completionStatus.shell, profileHint),
-      }),
+      t("wizard.completion.installed", { reloadHint }),
       t("wizard.completion.title"),
     );
   }

@@ -1,53 +1,42 @@
-import { normalizeSecretInput } from "../../utils/normalize-secret-input.js";
-import { ensureAuthStoreFile, resolveAuthStorePath } from "./paths.js";
+/**
+ * Locked auth profile upsert helper.
+ * Normalizes literal secrets before persistence and routes all writes through
+ * the shared SQLite lock to avoid racing concurrent auth updates.
+ */
+import { normalizeAuthProfileCredential } from "./credential-normalize.js";
 import { updateAuthProfileStoreWithLock } from "./store.js";
 import type { AuthProfileCredential, AuthProfileStore } from "./types.js";
 
-function normalizeAuthProfileCredential(credential: AuthProfileCredential): AuthProfileCredential {
-  if (credential.type === "api_key") {
-    if (typeof credential.key !== "string") {
-      return credential;
-    }
-    const { key: _key, ...rest } = credential;
-    const key = normalizeSecretInput(credential.key);
-    return {
-      ...rest,
-      ...(key ? { key } : {}),
-    };
-  }
-  if (credential.type === "token") {
-    if (typeof credential.token !== "string") {
-      return credential;
-    }
-    const { token: _token, ...rest } = credential;
-    const token = normalizeSecretInput(credential.token);
-    return { ...rest, ...(token ? { token } : {}) };
-  }
-  return credential;
-}
-
+/** Upserts an auth profile under the store lock, returning null on store write failure. */
 export async function upsertAuthProfileWithLock(params: {
   profileId: string;
   credential: AuthProfileCredential;
   agentDir?: string;
+  stateDir?: string;
 }): Promise<AuthProfileStore | null> {
-  const authPath = resolveAuthStorePath(params.agentDir);
-  ensureAuthStoreFile(authPath);
+  const credential = normalizeAuthProfileCredential(params.credential);
+  return await updateAuthProfileStoreWithLock({
+    agentDir: params.agentDir,
+    stateDir: params.stateDir,
+    saveOptions: {
+      filterExternalAuthProfiles: false,
+      syncExternalCli: false,
+    },
+    updater: (store) => {
+      store.profiles[params.profileId] = credential;
+      return true;
+    },
+  });
+}
 
-  try {
-    const credential = normalizeAuthProfileCredential(params.credential);
-    return await updateAuthProfileStoreWithLock({
-      agentDir: params.agentDir,
-      saveOptions: {
-        filterExternalAuthProfiles: false,
-        syncExternalCli: false,
-      },
-      updater: (store) => {
-        store.profiles[params.profileId] = credential;
-        return true;
-      },
-    });
-  } catch {
-    return null;
+/** Upserts an auth profile under the store lock, failing when the store cannot be written. */
+export async function upsertAuthProfileWithLockOrThrow(
+  params: Parameters<typeof upsertAuthProfileWithLock>[0],
+): Promise<void> {
+  const updated = await upsertAuthProfileWithLock(params);
+  if (!updated) {
+    throw new Error(
+      "Failed to update auth profile store; the auth store lock may be busy. Wait a moment and retry.",
+    );
   }
 }

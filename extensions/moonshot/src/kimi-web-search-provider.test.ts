@@ -1,29 +1,11 @@
+// Moonshot tests cover kimi web search provider plugin behavior.
 import type { OpenClawConfig } from "openclaw/plugin-sdk/provider-onboard";
-import { withEnvAsync } from "openclaw/plugin-sdk/test-env";
+import { withEnv, withEnvAsync } from "openclaw/plugin-sdk/test-env";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { __testing } from "../test-api.js";
+import { testing } from "../test-api.js";
 import { createKimiWebSearchProvider } from "./kimi-web-search-provider.js";
 
 const kimiApiKeyEnv = ["KIMI_API", "KEY"].join("_");
-
-function withEnv(overrides: Record<string, string>, run: () => void): void {
-  const previous = new Map<string, string | undefined>();
-  for (const [key, value] of Object.entries(overrides)) {
-    previous.set(key, process.env[key]);
-    process.env[key] = value;
-  }
-  try {
-    run();
-  } finally {
-    for (const [key, value] of previous) {
-      if (value === undefined) {
-        delete process.env[key];
-      } else {
-        process.env[key] = value;
-      }
-    }
-  }
-}
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -72,10 +54,10 @@ describe("kimi web search provider", () => {
   });
 
   it("uses configured model and base url overrides with sane defaults", () => {
-    expect(__testing.resolveKimiModel()).toBe("kimi-k2.6");
-    expect(__testing.resolveKimiModel({ model: "kimi-k2" })).toBe("kimi-k2");
-    expect(__testing.resolveKimiBaseUrl()).toBe("https://api.moonshot.ai/v1");
-    expect(__testing.resolveKimiBaseUrl({ baseUrl: "https://kimi.example/v1" })).toBe(
+    expect(testing.resolveKimiModel()).toBe("kimi-k2.6");
+    expect(testing.resolveKimiModel({ model: "kimi-k2" })).toBe("kimi-k2");
+    expect(testing.resolveKimiBaseUrl()).toBe("https://api.moonshot.ai/v1");
+    expect(testing.resolveKimiBaseUrl({ baseUrl: "https://kimi.example/v1" })).toBe(
       "https://kimi.example/v1",
     );
   });
@@ -88,8 +70,8 @@ describe("kimi web search provider", () => {
       models: { providers: { moonshot: { baseUrl: "https://api.moonshot.cn/v1/" } } },
     } as unknown as OpenClawConfig;
 
-    expect(__testing.resolveKimiBaseUrl(undefined, cnConfig)).toBe("https://api.moonshot.cn/v1");
-    expect(__testing.resolveKimiBaseUrl(undefined, cnConfigWithTrailingSlash)).toBe(
+    expect(testing.resolveKimiBaseUrl(undefined, cnConfig)).toBe("https://api.moonshot.cn/v1");
+    expect(testing.resolveKimiBaseUrl(undefined, cnConfigWithTrailingSlash)).toBe(
       "https://api.moonshot.cn/v1",
     );
   });
@@ -99,7 +81,7 @@ describe("kimi web search provider", () => {
       models: { providers: { moonshot: { baseUrl: "https://proxy.example/v1" } } },
     } as unknown as OpenClawConfig;
 
-    expect(__testing.resolveKimiBaseUrl(undefined, proxyConfig)).toBe("https://api.moonshot.ai/v1");
+    expect(testing.resolveKimiBaseUrl(undefined, proxyConfig)).toBe("https://api.moonshot.ai/v1");
   });
 
   it("keeps explicit kimi baseUrl over models.providers.moonshot.baseUrl", () => {
@@ -108,13 +90,13 @@ describe("kimi web search provider", () => {
     } as unknown as OpenClawConfig;
 
     expect(
-      __testing.resolveKimiBaseUrl({ baseUrl: "https://api.moonshot.ai/v1" }, moonshotConfig),
+      testing.resolveKimiBaseUrl({ baseUrl: "https://api.moonshot.ai/v1" }, moonshotConfig),
     ).toBe("https://api.moonshot.ai/v1");
   });
 
   it("extracts unique citations from search results and tool call arguments", () => {
     expect(
-      __testing.extractKimiCitations({
+      testing.extractKimiCitations({
         search_results: [{ url: "https://a.test" }, { url: "https://b.test" }],
         choices: [
           {
@@ -269,7 +251,7 @@ describe("kimi web search provider", () => {
     const rawArguments = '  {"query":"MacBook Neo","usage":{"total_tokens":123}}  ';
 
     expect(
-      __testing.extractKimiToolResultContent({
+      testing.extractKimiToolResultContent({
         function: {
           arguments: rawArguments,
         },
@@ -277,7 +259,7 @@ describe("kimi web search provider", () => {
     ).toBe(rawArguments);
 
     expect(
-      __testing.extractKimiToolResultContent({
+      testing.extractKimiToolResultContent({
         function: {
           arguments: "   ",
         },
@@ -285,13 +267,49 @@ describe("kimi web search provider", () => {
     ).toBeUndefined();
   });
 
+  it("forwards the execution abort signal to an in-flight Kimi search", async () => {
+    const fetchMock = vi.fn(
+      (_url: string, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(new Error(String(init.signal?.reason ?? "Aborted"))),
+            {
+              once: true,
+            },
+          );
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await withEnvAsync({ KIMI_API_KEY: "kimi-test-key" }, async () => {
+      const controller = new AbortController();
+      const tool = createKimiWebSearchProvider().createTool({ config: {}, searchConfig: {} });
+      if (!tool) {
+        throw new Error("Expected tool definition");
+      }
+
+      const search = tool.execute(
+        { query: "unique Kimi abort regression" },
+        {
+          signal: controller.signal,
+        },
+      );
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledOnce());
+      controller.abort(new Error("Kimi search cancelled"));
+
+      await expect(search).rejects.toThrow("Kimi search cancelled");
+      expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+    });
+  });
+
   it("uses config apiKey when provided", () => {
-    expect(__testing.resolveKimiApiKey({ apiKey: "kimi-test-key" })).toBe("kimi-test-key");
+    expect(testing.resolveKimiApiKey({ apiKey: "kimi-test-key" })).toBe("kimi-test-key");
   });
 
   it("falls back to env apiKey", () => {
     withEnv({ [kimiApiKeyEnv]: "kimi-env-key" }, () => {
-      expect(__testing.resolveKimiApiKey({})).toBe("kimi-env-key");
+      expect(testing.resolveKimiApiKey({})).toBe("kimi-env-key");
     });
   });
 });

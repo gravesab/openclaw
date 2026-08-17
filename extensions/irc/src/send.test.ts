@@ -1,19 +1,22 @@
-import { verifyChannelMessageAdapterCapabilityProofs } from "openclaw/plugin-sdk/channel-message";
+// Irc tests cover send plugin behavior.
+import { verifyChannelMessageAdapterCapabilityProofs } from "openclaw/plugin-sdk/channel-outbound";
 import { createSendCfgThreadingRuntime } from "openclaw/plugin-sdk/channel-test-helpers";
-import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { IrcClient } from "./client.js";
-import { clearIrcRuntime, setIrcRuntime } from "./runtime.js";
+import { setIrcRuntime } from "./runtime.js";
 import type { CoreConfig } from "./types.js";
 
 const hoisted = vi.hoisted(() => {
   const loadConfig = vi.fn();
   const resolveMarkdownTableMode = vi.fn(() => "preserve");
   const convertMarkdownTables = vi.fn((text: string) => text);
+  const stripMarkdown = vi.fn((text: string) => text);
   const record = vi.fn();
   return {
     loadConfig,
     resolveMarkdownTableMode,
     convertMarkdownTables,
+    stripMarkdown,
     record,
     normalizeIrcMessagingTarget: vi.fn((value: string) => value.trim()),
     connectIrcClient: vi.fn(),
@@ -46,6 +49,14 @@ vi.mock("openclaw/plugin-sdk/plugin-config-runtime", async () => {
     string,
     unknown
   >;
+  return original;
+});
+
+vi.mock("openclaw/plugin-sdk/markdown-table-runtime", async () => {
+  const original = (await vi.importActual("openclaw/plugin-sdk/markdown-table-runtime")) as Record<
+    string,
+    unknown
+  >;
   return {
     ...original,
     resolveMarkdownTableMode: hoisted.resolveMarkdownTableMode,
@@ -60,6 +71,7 @@ vi.mock("openclaw/plugin-sdk/text-chunking", async () => {
   return {
     ...original,
     convertMarkdownTables: hoisted.convertMarkdownTables,
+    stripMarkdown: hoisted.stripMarkdown,
   };
 });
 
@@ -70,6 +82,7 @@ function resetHoistedMocks() {
   hoisted.loadConfig.mockReset();
   hoisted.resolveMarkdownTableMode.mockReset().mockReturnValue("preserve");
   hoisted.convertMarkdownTables.mockReset().mockImplementation((text: string) => text);
+  hoisted.stripMarkdown.mockReset().mockImplementation((text: string) => text);
   hoisted.record.mockReset();
   hoisted.normalizeIrcMessagingTarget
     .mockReset()
@@ -84,6 +97,7 @@ afterAll(() => {
   vi.doUnmock("./connect-options.js");
   vi.doUnmock("./protocol.js");
   vi.doUnmock("openclaw/plugin-sdk/plugin-config-runtime");
+  vi.doUnmock("openclaw/plugin-sdk/markdown-table-runtime");
   vi.doUnmock("openclaw/plugin-sdk/text-chunking");
   vi.resetModules();
 });
@@ -92,10 +106,6 @@ describe("sendMessageIrc cfg threading", () => {
   beforeEach(() => {
     resetHoistedMocks();
     setIrcRuntime(createSendCfgThreadingRuntime(hoisted) as never);
-  });
-
-  afterEach(() => {
-    clearIrcRuntime();
   });
 
   it("uses explicitly provided cfg without loading runtime config", async () => {
@@ -162,6 +172,39 @@ describe("sendMessageIrc cfg threading", () => {
     });
   });
 
+  it("strips markdown after table conversion before sending to IRC", async () => {
+    const providedCfg = {
+      channels: {
+        irc: {
+          host: "irc.example.com",
+          nick: "openclaw",
+        },
+      },
+    } as unknown as CoreConfig;
+    const client = {
+      isReady: vi.fn(() => true),
+      sendPrivmsg: vi.fn(),
+    } as unknown as IrcClient;
+    hoisted.resolveMarkdownTableMode.mockReturnValue("bullets");
+    hoisted.convertMarkdownTables.mockReturnValue("**Status**\n- [docs](https://example.com)");
+    hoisted.stripMarkdown.mockReturnValue("Status\n- docs (https://example.com)");
+
+    await sendMessageIrc("#room", "  | a |\n| - |\n| **docs** |  ", {
+      cfg: providedCfg,
+      client,
+    });
+
+    expect(hoisted.convertMarkdownTables).toHaveBeenCalledWith(
+      "| a |\n| - |\n| **docs** |",
+      "bullets",
+    );
+    expect(hoisted.stripMarkdown).toHaveBeenCalledWith("**Status**\n- [docs](https://example.com)");
+    expect(client.sendPrivmsg).toHaveBeenCalledWith(
+      "#room",
+      "Status\n- docs (https://example.com)",
+    );
+  });
+
   it("fails hard when cfg is omitted", async () => {
     const client = {
       isReady: vi.fn(() => true),
@@ -177,7 +220,7 @@ describe("sendMessageIrc cfg threading", () => {
     expect(hoisted.record).not.toHaveBeenCalled();
   });
 
-  it("sends with provided cfg even when the runtime store is not initialized", async () => {
+  it("sends with provided cfg when runtime activity recording is unavailable", async () => {
     const providedCfg = {
       channels: {
         irc: {
@@ -257,7 +300,7 @@ describe("sendMessageIrc cfg threading", () => {
     });
   });
 
-  it("declares message adapter durable text, media, and reply with receipt proofs", async () => {
+  it("rejects stripped-empty replies before adding reply metadata", async () => {
     const providedCfg = {
       channels: {
         irc: {
@@ -269,8 +312,39 @@ describe("sendMessageIrc cfg threading", () => {
     const client = {
       isReady: vi.fn(() => true),
       sendPrivmsg: vi.fn(),
+    } as unknown as IrcClient;
+    hoisted.stripMarkdown.mockReturnValue("");
+
+    await expect(
+      sendMessageIrc("#room", "#", {
+        cfg: providedCfg,
+        client,
+        replyTo: "irc-parent-1",
+      }),
+    ).rejects.toThrow("Message must be non-empty for IRC sends");
+
+    expect(client.sendPrivmsg).not.toHaveBeenCalled();
+    expect(hoisted.record).not.toHaveBeenCalled();
+  });
+
+  it("declares message adapter durable text, media, and reply with receipt proofs", async () => {
+    const providedCfg = {
+      channels: {
+        irc: {
+          host: "irc.example.com",
+          nick: "openclaw",
+        },
+      },
+    } as unknown as CoreConfig;
+    const client = {
+      isReady: vi.fn(() => true),
+      join: vi.fn(),
+      sendPrivmsg: vi.fn(),
       quit: vi.fn(),
-    } as unknown as IrcClient & { quit: ReturnType<typeof vi.fn> };
+    } as unknown as IrcClient & {
+      join: ReturnType<typeof vi.fn>;
+      quit: ReturnType<typeof vi.fn>;
+    };
     hoisted.connectIrcClient.mockResolvedValue(client);
 
     const proofResults = await verifyChannelMessageAdapterCapabilityProofs({
@@ -284,6 +358,7 @@ describe("sendMessageIrc cfg threading", () => {
             text: "hello",
           });
           expect(result?.receipt.platformMessageIds).toEqual(["irc-msg-1"]);
+          expect(client.join).toHaveBeenCalledWith("#room");
           expect(client.sendPrivmsg).toHaveBeenCalledWith("#room", "hello");
         },
         media: async () => {
@@ -294,6 +369,7 @@ describe("sendMessageIrc cfg threading", () => {
             mediaUrl: "https://example.com/image.png",
           });
           expect(result?.receipt.platformMessageIds).toEqual(["irc-msg-1"]);
+          expect(client.join).toHaveBeenCalledWith("#room");
           expect(client.sendPrivmsg).toHaveBeenCalledWith(
             "#room",
             "image\n\nAttachment: https://example.com/image.png",
@@ -307,6 +383,7 @@ describe("sendMessageIrc cfg threading", () => {
             replyToId: "parent-1",
           });
           expect(result?.receipt.replyToId).toBe("parent-1");
+          expect(client.join).toHaveBeenCalledWith("#room");
           expect(client.sendPrivmsg).toHaveBeenCalledWith("#room", "threaded\n\n[reply:parent-1]");
         },
       },

@@ -11,13 +11,19 @@ export type QaReportScenario = {
   steps?: QaReportCheck[];
 };
 
-function pushDetailsBlock(lines: string[], label: string, details: string, indent = "") {
+function pushQaReportDetailsBlock(lines: string[], label: string, details: string, indent = "") {
   if (!details.includes("\n")) {
     lines.push(`${indent}- ${label}: ${details}`);
     return;
   }
   lines.push(`${indent}- ${label}:`);
   lines.push("", "```text", details, "```");
+}
+
+function formatQaReportCheck(check: QaReportCheck, indent = "") {
+  const marker = check.status === "pass" ? "x" : " ";
+  const outcome = check.status === "pass" ? "" : ` (${check.status})`;
+  return `${indent}- [${marker}] ${check.name}${outcome}`;
 }
 
 export function renderQaMarkdownReport(params: {
@@ -37,6 +43,9 @@ export function renderQaMarkdownReport(params: {
   const failCount =
     checks.filter((check) => check.status === "fail").length +
     scenarios.filter((scenario) => scenario.status === "fail").length;
+  const skipCount =
+    checks.filter((check) => check.status === "skip").length +
+    scenarios.filter((scenario) => scenario.status === "skip").length;
 
   const lines = [
     `# ${params.title}`,
@@ -46,15 +55,16 @@ export function renderQaMarkdownReport(params: {
     `- Duration ms: ${params.finishedAt.getTime() - params.startedAt.getTime()}`,
     `- Passed: ${passCount}`,
     `- Failed: ${failCount}`,
+    `- Skipped: ${skipCount}`,
     "",
   ];
 
   if (checks.length > 0) {
     lines.push("## Checks", "");
     for (const check of checks) {
-      lines.push(`- [${check.status === "pass" ? "x" : " "}] ${check.name}`);
+      lines.push(formatQaReportCheck(check));
       if (check.details) {
-        pushDetailsBlock(lines, "Details", check.details, "  ");
+        pushQaReportDetailsBlock(lines, "Details", check.details, "  ");
       }
     }
   }
@@ -66,14 +76,14 @@ export function renderQaMarkdownReport(params: {
       lines.push("");
       lines.push(`- Status: ${scenario.status}`);
       if (scenario.details) {
-        pushDetailsBlock(lines, "Details", scenario.details);
+        pushQaReportDetailsBlock(lines, "Details", scenario.details);
       }
       if (scenario.steps?.length) {
         lines.push("- Steps:");
         for (const step of scenario.steps) {
-          lines.push(`  - [${step.status === "pass" ? "x" : " "}] ${step.name}`);
+          lines.push(formatQaReportCheck(step, "  "));
           if (step.details) {
-            pushDetailsBlock(lines, "Details", step.details, "    ");
+            pushQaReportDetailsBlock(lines, "Details", step.details, "    ");
           }
         }
       }

@@ -1,12 +1,14 @@
+// Tests steer command persistence and retrieval for session guidance.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { buildCommandTestParams } from "./commands.test-harness.js";
 
 const steerRuntimeMocks = vi.hoisted(() => ({
-  formatEmbeddedPiQueueFailureSummary: vi.fn(),
-  isEmbeddedPiRunActive: vi.fn(),
-  queueEmbeddedPiMessageWithOutcomeAsync: vi.fn(),
+  formatEmbeddedAgentQueueFailureSummary: vi.fn(),
+  isEmbeddedAgentRunActive: vi.fn(),
+  queueEmbeddedAgentMessageWithOutcomeAsync: vi.fn(),
   resolveActiveEmbeddedRunSessionId: vi.fn(),
+  resolveActiveEmbeddedRunSessionIdBySessionFile: vi.fn(),
 }));
 
 vi.mock("./commands-steer.runtime.js", () => steerRuntimeMocks);
@@ -24,19 +26,22 @@ function buildParams(commandBody: string) {
 
 describe("handleSteerCommand", () => {
   beforeEach(() => {
-    steerRuntimeMocks.formatEmbeddedPiQueueFailureSummary
+    steerRuntimeMocks.formatEmbeddedAgentQueueFailureSummary
       .mockReset()
       .mockReturnValue(
         "queue_message_failed reason=not_streaming sessionId=session-active gatewayHealth=live",
       );
-    steerRuntimeMocks.isEmbeddedPiRunActive.mockReset().mockReturnValue(false);
-    steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync.mockReset().mockResolvedValue({
+    steerRuntimeMocks.isEmbeddedAgentRunActive.mockReset().mockReturnValue(false);
+    steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync.mockReset().mockResolvedValue({
       queued: true,
       sessionId: "session-active",
       target: "embedded_run",
       gatewayHealth: "live",
     });
     steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReset().mockReturnValue(undefined);
+    steerRuntimeMocks.resolveActiveEmbeddedRunSessionIdBySessionFile
+      .mockReset()
+      .mockReturnValue(undefined);
   });
 
   it("queues steering for the active current text-command session", async () => {
@@ -51,12 +56,33 @@ describe("handleSteerCommand", () => {
     expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenCalledWith(
       "agent:main:main",
     );
-    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).toHaveBeenCalledWith(
+    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
       "session-active",
       "keep going",
       {
         steeringMode: "all",
+        isInboundUserMessage: true,
         debounceMs: 0,
+        taskSuggestionDeliveryMode: undefined,
+      },
+    );
+  });
+
+  it("passes the initiating surface task capability into steering", async () => {
+    steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("session-active");
+    const params = buildParams("/steer keep going");
+    params.opts = { taskSuggestionDeliveryMode: "gateway" };
+
+    await handleSteerCommand(params, true);
+
+    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
+      "session-active",
+      "keep going",
+      {
+        steeringMode: "all",
+        isInboundUserMessage: true,
+        debounceMs: 0,
+        taskSuggestionDeliveryMode: "gateway",
       },
     );
   });
@@ -74,18 +100,20 @@ describe("handleSteerCommand", () => {
     expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenCalledWith(
       "agent:main:discord:direct:target",
     );
-    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).toHaveBeenCalledWith(
+    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
       "session-target",
       "check the target",
       {
         steeringMode: "all",
+        isInboundUserMessage: true,
         debounceMs: 0,
+        taskSuggestionDeliveryMode: undefined,
       },
     );
   });
 
   it("falls back to the stored session id when it is still active", async () => {
-    steerRuntimeMocks.isEmbeddedPiRunActive.mockReturnValue(true);
+    steerRuntimeMocks.isEmbeddedAgentRunActive.mockReturnValue(true);
 
     const params = buildParams("/tell continue from state");
     params.sessionEntry = { sessionId: "stored-session-id", updatedAt: Date.now() };
@@ -95,13 +123,80 @@ describe("handleSteerCommand", () => {
     expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenCalledWith(
       "agent:main:main",
     );
-    expect(steerRuntimeMocks.isEmbeddedPiRunActive).toHaveBeenCalledWith("stored-session-id");
-    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).toHaveBeenCalledWith(
+    expect(steerRuntimeMocks.isEmbeddedAgentRunActive).toHaveBeenCalledWith("stored-session-id");
+    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
       "stored-session-id",
       "continue from state",
       {
         steeringMode: "all",
+        isInboundUserMessage: true,
         debounceMs: 0,
+        taskSuggestionDeliveryMode: undefined,
+      },
+    );
+  });
+
+  it("resolves an active run from the target session key before stored session id fallback", async () => {
+    steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("session-key-active");
+
+    const params = buildParams("/steer check the active file");
+    params.ctx.CommandSource = "native";
+    params.ctx.CommandTargetSessionKey = "agent:main:telegram:topic:5907";
+    params.sessionKey = "agent:main:telegram:control";
+    params.sessionStore = {
+      "agent:main:telegram:topic:5907": {
+        sessionId: "stored-session-id",
+        updatedAt: Date.now(),
+      },
+    };
+
+    await handleSteerCommand(params, true);
+
+    expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenCalledWith(
+      "agent:main:telegram:topic:5907",
+    );
+    expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionIdBySessionFile).not.toHaveBeenCalled();
+    expect(steerRuntimeMocks.isEmbeddedAgentRunActive).not.toHaveBeenCalledWith(
+      "stored-session-id",
+    );
+    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
+      "session-key-active",
+      "check the active file",
+      {
+        steeringMode: "all",
+        isInboundUserMessage: true,
+        debounceMs: 0,
+        taskSuggestionDeliveryMode: undefined,
+      },
+    );
+  });
+
+  it("falls back from a slash-lane command session to an active direct sibling", async () => {
+    steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockImplementation((key: string) =>
+      key === "agent:main:telegram:direct:123" ? "session-direct-active" : undefined,
+    );
+
+    const params = buildParams("/steer use the active direct lane");
+    params.sessionKey = "agent:main:telegram:slash:123";
+
+    await handleSteerCommand(params, true);
+
+    expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenNthCalledWith(
+      1,
+      "agent:main:telegram:slash:123",
+    );
+    expect(steerRuntimeMocks.resolveActiveEmbeddedRunSessionId).toHaveBeenNthCalledWith(
+      2,
+      "agent:main:telegram:direct:123",
+    );
+    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).toHaveBeenCalledWith(
+      "session-direct-active",
+      "use the active direct lane",
+      {
+        steeringMode: "all",
+        isInboundUserMessage: true,
+        debounceMs: 0,
+        taskSuggestionDeliveryMode: undefined,
       },
     );
   });
@@ -113,7 +208,7 @@ describe("handleSteerCommand", () => {
       shouldContinue: false,
       reply: { text: "Usage: /steer <message>" },
     });
-    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).not.toHaveBeenCalled();
+    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).not.toHaveBeenCalled();
   });
 
   it("continues as a normal prompt when no current session run is active", async () => {
@@ -127,12 +222,12 @@ describe("handleSteerCommand", () => {
     expect(params.ctx.BodyForAgent).toBe("keep going");
     expect((params.ctx as Record<string, unknown>).BodyStripped).toBe("keep going");
     expect(params.command.commandBodyNormalized).toBe("keep going");
-    expect(steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync).not.toHaveBeenCalled();
+    expect(steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync).not.toHaveBeenCalled();
   });
 
   it("continues as a normal prompt when the active run rejects steering injection", async () => {
     steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("session-active");
-    steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync.mockResolvedValue({
+    steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync.mockResolvedValue({
       queued: false,
       sessionId: "session-active",
       reason: "not_streaming",
@@ -147,7 +242,7 @@ describe("handleSteerCommand", () => {
     });
     expect(params.ctx.BodyForAgent).toBe("keep going");
     expect(params.command.commandBodyNormalized).toBe("keep going");
-    expect(steerRuntimeMocks.formatEmbeddedPiQueueFailureSummary).toHaveBeenCalledWith({
+    expect(steerRuntimeMocks.formatEmbeddedAgentQueueFailureSummary).toHaveBeenCalledWith({
       queued: false,
       sessionId: "session-active",
       reason: "not_streaming",
@@ -157,7 +252,7 @@ describe("handleSteerCommand", () => {
 
   it("continues as a normal prompt when steering throws", async () => {
     steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("session-active");
-    steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync.mockRejectedValue(
+    steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync.mockRejectedValue(
       new Error("socket closed"),
     );
 
@@ -173,7 +268,7 @@ describe("handleSteerCommand", () => {
 
   it("continues as a normal prompt when the active run is compacting", async () => {
     steerRuntimeMocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("session-active");
-    steerRuntimeMocks.queueEmbeddedPiMessageWithOutcomeAsync.mockResolvedValue({
+    steerRuntimeMocks.queueEmbeddedAgentMessageWithOutcomeAsync.mockResolvedValue({
       queued: false,
       sessionId: "session-active",
       reason: "compacting",

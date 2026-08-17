@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BACKUP_MOUNT="${BACKUP_MOUNT:-/mnt/ai-storage}"
 BACKUP_PARENT="${BACKUP_PARENT:-/mnt/ai-storage/openclaw-backups}"
 BACKUP_DIR="${BACKUP_DIR:-$BACKUP_PARENT/dashboard-property-backups}"

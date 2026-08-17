@@ -1,19 +1,27 @@
-import { resolveDmAllowAuditState } from "../channels/message-access/dm-allow-state.js";
+/** Security warnings for gateway exposure, exec policy drift, channel DMs, and plaintext secrets. */
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { note } from "../../packages/terminal-core/src/note.js";
 import { listReadOnlyChannelPluginsForConfig } from "../channels/plugins/read-only.js";
-import type { ChannelId } from "../channels/plugins/types.public.js";
 import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig, GatewayBindMode } from "../config/config.js";
 import type { AgentConfig } from "../config/types.agents.js";
-import { hasConfiguredSecretInput } from "../config/types.secrets.js";
+import { hasConfiguredSecretInput, resolveSecretInputRef } from "../config/types.secrets.js";
 import { resolveGatewayAuthTokenSourceConflict } from "../gateway/auth-token-source-conflict.js";
 import { resolveGatewayAuth } from "../gateway/auth.js";
 import { isLoopbackHost, resolveGatewayBindHost } from "../gateway/net.js";
 import { resolveExecPolicyScopeSnapshot } from "../infra/exec-approvals-effective.js";
-import { loadExecApprovals, type ExecAsk, type ExecSecurity } from "../infra/exec-approvals.js";
+import {
+  loadExecApprovals,
+  resolveExecApprovalsDisplayPath,
+  type ExecAsk,
+  type ExecMode,
+  type ExecSecurity,
+} from "../infra/exec-approvals.js";
+import { isLikelySensitiveModelProviderHeaderName } from "../secrets/model-provider-header-policy.js";
+import { hasConfiguredPlaintextSecretValue } from "../secrets/secret-value.js";
+import { discoverConfigSecretTargets } from "../secrets/target-registry.js";
+import { collectChannelSecurityFindingsCore } from "../security/audit-channel.js";
 import { collectExecFilesystemPolicyDriftHits } from "../security/exec-filesystem-policy.js";
-import { normalizeOptionalString } from "../shared/string-coerce.js";
-import { note } from "../terminal/note.js";
-import { resolveDefaultChannelAccountContext } from "./channel-account-context.js";
 
 function collectImplicitHeartbeatDirectPolicyWarnings(cfg: OpenClawConfig): string[] {
   const warnings: string[] = [];
@@ -86,15 +94,17 @@ function collectExecPolicyConflictWarnings(cfg: OpenClawConfig): string[] {
 
   const maybeWarn = (params: {
     scopeLabel: string;
-    scopeExecConfig: { security?: ExecSecurity; ask?: ExecAsk } | undefined;
-    globalExecConfig?: { security?: ExecSecurity; ask?: ExecAsk } | undefined;
+    scopeExecConfig: { mode?: ExecMode; security?: ExecSecurity; ask?: ExecAsk } | undefined;
+    globalExecConfig?: { mode?: ExecMode; security?: ExecSecurity; ask?: ExecAsk } | undefined;
     agentId?: string;
   }) => {
     const scopeExecConfig = params.scopeExecConfig;
     const globalExecConfig = params.globalExecConfig;
     if (
+      !scopeExecConfig?.mode &&
       !scopeExecConfig?.security &&
       !scopeExecConfig?.ask &&
+      !globalExecConfig?.mode &&
       !globalExecConfig?.security &&
       !globalExecConfig?.ask
     ) {
@@ -107,7 +117,7 @@ function collectExecPolicyConflictWarnings(cfg: OpenClawConfig): string[] {
       configPath:
         params.scopeLabel === "tools.exec"
           ? "tools.exec"
-          : `agents.list.${params.agentId}.tools.exec`,
+          : `agents.entries.${params.agentId}.tools.exec`,
       scopeLabel: params.scopeLabel,
       agentId: params.agentId,
     });
@@ -124,12 +134,24 @@ function collectExecPolicyConflictWarnings(cfg: OpenClawConfig): string[] {
 
     const configParts: string[] = [];
     const hostParts: string[] = [];
+    const canonicalModeSource =
+      snapshot.security.requestedSource === snapshot.ask.requestedSource &&
+      snapshot.security.requestedSource.endsWith(".mode")
+        ? snapshot.security.requestedSource
+        : undefined;
+    if (canonicalModeSource) {
+      configParts.push(`${canonicalModeSource}="${snapshot.mode.requested}"`);
+    }
     if (securityConflict) {
-      configParts.push(`${snapshot.security.requestedSource}="${snapshot.security.requested}"`);
+      if (!canonicalModeSource) {
+        configParts.push(`${snapshot.security.requestedSource}="${snapshot.security.requested}"`);
+      }
       hostParts.push(`${snapshot.security.hostSource}="${snapshot.security.host}"`);
     }
     if (askConflict) {
-      configParts.push(`${snapshot.ask.requestedSource}="${snapshot.ask.requested}"`);
+      if (!canonicalModeSource) {
+        configParts.push(`${snapshot.ask.requestedSource}="${snapshot.ask.requested}"`);
+      }
       hostParts.push(`${snapshot.ask.hostSource}="${snapshot.ask.host}"`);
     }
 
@@ -150,13 +172,13 @@ function collectExecPolicyConflictWarnings(cfg: OpenClawConfig): string[] {
     scopeExecConfig: cfg.tools?.exec,
   });
 
-  const agents = Array.isArray(cfg.agents?.list) ? cfg.agents.list : [];
-  for (const agent of agents) {
+  const agents = cfg.agents?.entries ?? {};
+  for (const [agentId, agent] of Object.entries(agents)) {
     maybeWarn({
-      scopeLabel: `agents.list.${agent.id}.tools.exec`,
+      scopeLabel: `agents.entries.${agentId}.tools.exec`,
       scopeExecConfig: agent.tools?.exec,
       globalExecConfig: cfg.tools?.exec,
-      agentId: agent.id,
+      agentId,
     });
   }
 
@@ -180,14 +202,62 @@ function collectExecFilesystemPolicyWarnings(cfg: OpenClawConfig): string[] {
   );
 }
 
-export async function noteSecurityWarnings(cfg: OpenClawConfig) {
+function collectPlaintextConfigSecretWarnings(cfg: OpenClawConfig): string[] {
+  const plaintextPaths: string[] = [];
+  const defaults = cfg.secrets?.defaults;
+
+  for (const target of discoverConfigSecretTargets(cfg)) {
+    if (!target.entry.includeInAudit) {
+      continue;
+    }
+    if (
+      target.entry.id === "models.providers.*.headers.*" &&
+      !isLikelySensitiveModelProviderHeaderName(target.pathSegments.at(-1) ?? "")
+    ) {
+      continue;
+    }
+    const { ref } = resolveSecretInputRef({
+      value: target.value,
+      refValue: target.refValue,
+      defaults,
+    });
+    if (ref) {
+      continue;
+    }
+    if (!hasConfiguredPlaintextSecretValue(target.value, target.entry.expectedResolvedValue)) {
+      continue;
+    }
+    plaintextPaths.push(target.path);
+  }
+
+  if (plaintextPaths.length === 0) {
+    return [];
+  }
+
+  const samplePaths = plaintextPaths.slice(0, 5);
+  const extraCount = plaintextPaths.length - samplePaths.length;
+  const pathLine =
+    extraCount > 0 ? `${samplePaths.join(", ")} (+${extraCount} more)` : samplePaths.join(", ");
+
+  return [
+    "- WARNING: openclaw.json contains plaintext secret-bearing config fields.",
+    `  Paths: ${pathLine}`,
+    "  Agents or workspace tools that can read config files may see these API keys/tokens.",
+    `  Migrate them to SecretRefs with ${formatCliCommand("openclaw secrets configure")} or ${formatCliCommand("openclaw secrets apply")}, then verify with ${formatCliCommand("openclaw secrets audit --check")}.`,
+  ];
+}
+
+/** Collects doctor security warnings without emitting terminal notes. */
+export async function collectSecurityWarnings(
+  cfg: OpenClawConfig,
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<string[]> {
   const warnings: string[] = [];
-  const auditHint = `- Run: ${formatCliCommand("openclaw security audit --deep")}`;
 
   if (cfg.approvals?.exec?.enabled === false) {
     warnings.push(
       "- Note: approvals.exec.enabled=false disables approval forwarding only.",
-      "  Host exec gating still comes from ~/.openclaw/exec-approvals.json.",
+      `  Host exec gating still comes from ${resolveExecApprovalsDisplayPath()}.`,
       `  Check local policy with: ${formatCliCommand("openclaw approvals get --gateway")}`,
     );
   }
@@ -195,14 +265,10 @@ export async function noteSecurityWarnings(cfg: OpenClawConfig) {
   warnings.push(...collectImplicitHeartbeatDirectPolicyWarnings(cfg));
   warnings.push(...collectExecPolicyConflictWarnings(cfg));
   warnings.push(...collectExecFilesystemPolicyWarnings(cfg));
+  warnings.push(...collectPlaintextConfigSecretWarnings(cfg));
   warnings.push(...collectDurableExecApprovalWarnings(cfg));
 
-  // ===========================================
-  // GATEWAY NETWORK EXPOSURE CHECK
-  // ===========================================
-  // Check for dangerous gateway binding configurations
-  // that expose the gateway to network without proper auth
-
+  // Network exposure needs auth proof before doctor can treat non-loopback bind as intentional.
   const tailscaleMode = cfg.gateway?.tailscale?.mode ?? "off";
   const gatewayBind = (cfg.gateway?.bind ?? "loopback") as string;
   const customBindHost = cfg.gateway?.customBindHost?.trim();
@@ -217,7 +283,7 @@ export async function noteSecurityWarnings(cfg: OpenClawConfig) {
 
   const resolvedAuth = resolveGatewayAuth({
     authConfig: cfg.gateway?.auth,
-    env: process.env,
+    env,
     tailscaleMode,
   });
   const authToken = normalizeOptionalString(resolvedAuth.token) ?? "";
@@ -269,116 +335,33 @@ export async function noteSecurityWarnings(cfg: OpenClawConfig) {
     }
   }
 
-  const tokenConflict = resolveGatewayAuthTokenSourceConflict({ cfg, env: process.env });
+  const tokenConflict = resolveGatewayAuthTokenSourceConflict({ cfg, env });
   if (tokenConflict) {
     warnings.push(...tokenConflict.warningLines);
   }
 
-  const warnDmPolicy = async (params: {
-    label: string;
-    provider: ChannelId;
-    accountId: string;
-    dmPolicy: string;
-    allowFrom?: Array<string | number> | null;
-    policyPath?: string;
-    allowFromPath: string;
-    approveHint: string;
-    normalizeEntry?: (raw: string) => string;
-  }) => {
-    const dmPolicy = params.dmPolicy;
-    const policyPath = params.policyPath ?? `${params.allowFromPath}policy`;
-    const { hasWildcard, allowCount, isMultiUserDm } = await resolveDmAllowAuditState({
-      provider: params.provider,
-      accountId: params.accountId,
-      allowFrom: params.allowFrom,
-      dmPolicy,
-      normalizeEntry: params.normalizeEntry,
-    });
-    const dmScope = cfg.session?.dmScope ?? "main";
-
-    if (dmPolicy === "open") {
-      const allowFromPath = `${params.allowFromPath}allowFrom`;
-      warnings.push(`- ${params.label} DMs: OPEN (${policyPath}="open"). Anyone can DM it.`);
-      if (!hasWildcard) {
-        warnings.push(
-          `- ${params.label} DMs: config invalid — "open" requires ${allowFromPath} to include "*".`,
-        );
-      }
-    }
-
-    if (dmPolicy === "disabled") {
-      warnings.push(`- ${params.label} DMs: disabled (${policyPath}="disabled").`);
-      return;
-    }
-
-    if (dmPolicy !== "open" && allowCount === 0) {
-      warnings.push(
-        `- ${params.label} DMs: locked (${policyPath}="${dmPolicy}") with no allowlist; unknown senders will be blocked / get a pairing code.`,
-      );
-      warnings.push(`  ${params.approveHint}`);
-    }
-
-    if (dmScope === "main" && isMultiUserDm) {
-      warnings.push(
-        `- ${params.label} DMs: multiple senders share the main session; run: ` +
-          formatCliCommand('openclaw config set session.dmScope "per-channel-peer"') +
-          ' (or "per-account-channel-peer" for multi-account channels) to isolate sessions.',
-      );
-    }
-  };
-
-  for (const plugin of listReadOnlyChannelPluginsForConfig(cfg, {
-    includePersistedAuthState: true,
-    includeSetupFallbackPlugins: true,
-  })) {
-    if (!plugin.security) {
-      continue;
-    }
-    const { defaultAccountId, account, enabled, configured, diagnostics } =
-      await resolveDefaultChannelAccountContext(plugin, cfg, {
-        mode: "read_only",
-        commandName: "doctor",
-      });
-    for (const diagnostic of diagnostics) {
-      warnings.push(`- [secrets] ${diagnostic}`);
-    }
-    if (!enabled) {
-      continue;
-    }
-    if (!configured) {
-      continue;
-    }
-    const dmPolicy = plugin.security.resolveDmPolicy?.({
-      cfg,
-      accountId: defaultAccountId,
-      account,
-    });
-    if (dmPolicy) {
-      await warnDmPolicy({
-        label: plugin.meta.label ?? plugin.id,
-        provider: plugin.id,
-        accountId: defaultAccountId,
-        dmPolicy: dmPolicy.policy,
-        allowFrom: dmPolicy.allowFrom,
-        policyPath: dmPolicy.policyPath,
-        allowFromPath: dmPolicy.allowFromPath,
-        approveHint: dmPolicy.approveHint,
-        normalizeEntry: dmPolicy.normalizeEntry,
-      });
-    }
-    if (plugin.security.collectWarnings) {
-      const extra = await plugin.security.collectWarnings({
-        cfg,
-        accountId: defaultAccountId,
-        account,
-      });
-      if (extra?.length) {
-        warnings.push(...extra);
-      }
+  const channelFindings = await collectChannelSecurityFindingsCore({
+    cfg,
+    mode: "doctor",
+    plugins: listReadOnlyChannelPluginsForConfig(cfg, {
+      includePersistedAuthState: true,
+      includeSetupFallbackPlugins: true,
+    }),
+  });
+  for (const finding of channelFindings) {
+    warnings.push(`- ${finding.title}: ${finding.detail}`);
+    if (finding.remediation) {
+      warnings.push(`  ${finding.remediation}`);
     }
   }
+  return warnings;
+}
 
-  const lines = warnings.length > 0 ? warnings : ["- No channel security warnings detected."];
-  lines.push(auditHint);
-  note(lines.join("\n"), "Security");
+/** Emits security warnings plus the deep audit follow-up command. */
+export async function noteSecurityWarnings(cfg: OpenClawConfig) {
+  const warnings = await collectSecurityWarnings(cfg);
+  if (warnings.length > 0) {
+    warnings.push(`- Run: ${formatCliCommand("openclaw security audit --deep")}`);
+    note(warnings.join("\n"), "Security");
+  }
 }

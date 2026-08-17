@@ -44,11 +44,11 @@ export const TRUSTED_RECORD_RELATIONSHIP_TYPES = [
   "created_task",
 ] as const;
 
-export type TrustedRecordDomain = (typeof TRUSTED_RECORD_DOMAINS)[number];
-export type TrustedRecordDataState = (typeof TRUSTED_RECORD_DATA_STATES)[number];
-export type TrustedRecordSourceType = (typeof TRUSTED_RECORD_SOURCE_TYPES)[number];
-export type TrustedRecordSensitivity = (typeof TRUSTED_RECORD_SENSITIVITIES)[number];
-export type TrustedRecordRelationshipType = (typeof TRUSTED_RECORD_RELATIONSHIP_TYPES)[number];
+type TrustedRecordDomain = (typeof TRUSTED_RECORD_DOMAINS)[number];
+type TrustedRecordDataState = (typeof TRUSTED_RECORD_DATA_STATES)[number];
+type TrustedRecordSourceType = (typeof TRUSTED_RECORD_SOURCE_TYPES)[number];
+type TrustedRecordSensitivity = (typeof TRUSTED_RECORD_SENSITIVITIES)[number];
+type TrustedRecordRelationshipType = (typeof TRUSTED_RECORD_RELATIONSHIP_TYPES)[number];
 
 export type TrustedRecord = {
   schemaVersion: typeof TRUSTED_RECORD_SCHEMA_VERSION;

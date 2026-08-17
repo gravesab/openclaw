@@ -1,7 +1,5 @@
-import { createRequire } from "node:module";
 import type { DatabaseSync } from "node:sqlite";
-
-const require = createRequire(import.meta.url);
+import { openNodeSqliteDatabase } from "openclaw/plugin-sdk/sqlite-runtime";
 
 type SqliteVersion = {
   major: number;
@@ -61,33 +59,31 @@ function isWalSafeVersion(value: string): boolean {
   );
 }
 
-let validatedSqlite: typeof import("node:sqlite") | undefined;
+let validatedSqliteRuntime = false;
 
-export function requireNodeSqlite(): typeof import("node:sqlite") {
+export function validateTrustedRecordsSqliteRuntime(): void {
+  if (validatedSqliteRuntime) {
+    return;
+  }
+
   try {
-    const sqlite = require("node:sqlite") as typeof import("node:sqlite");
+    const probe = openNodeSqliteDatabase(":memory:");
 
-    if (validatedSqlite !== sqlite) {
-      const probe = new sqlite.DatabaseSync(":memory:");
+    try {
+      const row = probe.prepare("SELECT sqlite_version() AS version").get() as
+        | { version?: unknown }
+        | undefined;
 
-      try {
-        const row = probe.prepare("SELECT sqlite_version() AS version").get() as
-          | { version?: unknown }
-          | undefined;
+      const version = typeof row?.version === "string" ? row.version : "unknown";
 
-        const version = typeof row?.version === "string" ? row.version : "unknown";
-
-        if (!isWalSafeVersion(version)) {
-          throw new Error(`SQLite ${version} is not approved for Trusted Records WAL storage`);
-        }
-
-        validatedSqlite = sqlite;
-      } finally {
-        probe.close();
+      if (!isWalSafeVersion(version)) {
+        throw new Error(`SQLite ${version} is not approved for Trusted Records WAL storage`);
       }
-    }
 
-    return sqlite;
+      validatedSqliteRuntime = true;
+    } finally {
+      probe.close();
+    }
   } catch (error) {
     throw new Error(`Trusted Records SQLite support is unavailable or unsafe: ${String(error)}`, {
       cause: error,

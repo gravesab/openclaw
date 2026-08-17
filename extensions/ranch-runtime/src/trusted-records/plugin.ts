@@ -7,7 +7,7 @@ import {
   type TrustedRecordDevelopmentRuntime,
 } from "./runtime.development.js";
 
-export type TrustedRecordsDevelopmentRegistration = {
+type TrustedRecordsDevelopmentRegistration = {
   enabled: boolean;
 };
 

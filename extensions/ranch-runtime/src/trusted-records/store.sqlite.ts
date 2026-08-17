@@ -1,10 +1,14 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { openNodeSqliteDatabase } from "openclaw/plugin-sdk/sqlite-runtime";
 import { TrustedRecordConflictError, TrustedRecordNotFoundError } from "./errors.js";
 import { parseTrustedRecord } from "./schema.js";
-import { requireNodeSqlite } from "./sqlite-runtime.js";
-import { configureSqliteWalMaintenance, type SqliteWalMaintenance } from "./sqlite-runtime.js";
+import {
+  configureSqliteWalMaintenance,
+  type SqliteWalMaintenance,
+  validateTrustedRecordsSqliteRuntime,
+} from "./sqlite-runtime.js";
 import type { TrustedRecordStore } from "./store.js";
 import type { TrustedRecord, TrustedRecordCorrection } from "./types.js";
 
@@ -76,9 +80,9 @@ export function createSqliteTrustedRecordStore(params: {
   path: string;
   now?: () => Date;
 }): SqliteTrustedRecordStore {
-  const { DatabaseSync } = requireNodeSqlite();
+  validateTrustedRecordsSqliteRuntime();
   mkdirSync(dirname(params.path), { recursive: true, mode: 0o700 });
-  const db = new DatabaseSync(params.path);
+  const db = openNodeSqliteDatabase(params.path);
   chmodSync(params.path, 0o600);
   db.exec("PRAGMA foreign_keys = ON;");
   const walMaintenance: SqliteWalMaintenance = configureSqliteWalMaintenance(db);

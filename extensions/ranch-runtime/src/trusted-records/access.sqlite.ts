@@ -1,14 +1,18 @@
 import { chmodSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import type { DatabaseSync, StatementSync } from "node:sqlite";
+import { openNodeSqliteDatabase } from "openclaw/plugin-sdk/sqlite-runtime";
 import type {
   TrustedRecordAccessPolicy,
   TrustedRecordAuditEvent,
   TrustedRecordAuditSink,
   TrustedRecordPolicySource,
 } from "./access.js";
-import { requireNodeSqlite } from "./sqlite-runtime.js";
-import { configureSqliteWalMaintenance, type SqliteWalMaintenance } from "./sqlite-runtime.js";
+import {
+  configureSqliteWalMaintenance,
+  type SqliteWalMaintenance,
+  validateTrustedRecordsSqliteRuntime,
+} from "./sqlite-runtime.js";
 
 type PolicyRow = {
   policy_id: string;
@@ -124,9 +128,9 @@ function createStatements(db: DatabaseSync): Statements {
 export function createSqliteTrustedRecordSecurityStore(params: {
   path: string;
 }): SqliteTrustedRecordSecurityStore {
-  const { DatabaseSync } = requireNodeSqlite();
+  validateTrustedRecordsSqliteRuntime();
   mkdirSync(dirname(params.path), { recursive: true, mode: 0o700 });
-  const db = new DatabaseSync(params.path);
+  const db = openNodeSqliteDatabase(params.path);
   chmodSync(params.path, 0o600);
   const walMaintenance: SqliteWalMaintenance = configureSqliteWalMaintenance(db);
   initialize(db);

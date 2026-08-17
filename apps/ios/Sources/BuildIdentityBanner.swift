@@ -43,6 +43,9 @@ struct BuildIdentityBanner: View {
             .foregroundStyle(.black)
             .background(OpenClawBuildIdentity.color)
             .accessibilityLabel(
-                "OpenClaw \(OpenClawBuildIdentity.environment) version \(OpenClawBuildIdentity.version)")
+                String(
+                    format: String(localized: "OpenClaw %@ version %@"),
+                    OpenClawBuildIdentity.environment,
+                    OpenClawBuildIdentity.version))
     }
 }

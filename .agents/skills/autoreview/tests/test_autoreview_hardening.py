@@ -62,7 +62,7 @@ def init_repo(tempdir: Path) -> Path:
 
 
 def realistic_secret_value() -> str:
-    return "A7f9K2m4Q8v6" + "N3x5R1p0T9z8"
+    return "synthetic_" + "secret_" + "fixture_42"
 
 
 def installed_java() -> str | None:

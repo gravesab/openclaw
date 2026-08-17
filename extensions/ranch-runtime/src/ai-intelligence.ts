@@ -5,6 +5,7 @@ import {
   errorShape,
   type GatewayRequestHandlerOptions,
 } from "openclaw/plugin-sdk/gateway-runtime";
+import { isRecord } from "openclaw/plugin-sdk/string-coerce-runtime";
 
 const MAX_OUTPUT_BYTES = 1024 * 1024;
 
@@ -43,10 +44,6 @@ type AiExecuteResult = {
   selectedModelId: string | null;
   attempts: AiExecutionAttempt[];
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
-}
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0;

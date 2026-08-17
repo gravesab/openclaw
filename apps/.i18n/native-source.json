@@ -36838,6 +36838,17 @@
       ]
     },
     {
+      "id": "native.apple.6a252881173717b5",
+      "source": "OpenClaw %@ version %@",
+      "surface": "apple",
+      "sites": [
+        {
+          "kind": "ui-localized-call",
+          "path": "apps/ios/Sources/BuildIdentityBanner.swift"
+        }
+      ]
+    },
+    {
       "id": "native.apple.70fb8dd2e7c87448",
       "source": "OpenClaw - Voice Wake live meter active",
       "surface": "apple",

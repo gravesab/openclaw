@@ -3,20 +3,60 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  InMemoryTrustedRecordAuditSink,
   SecureTrustedRecordService,
-  TrustedRecordAccessDeniedError,
-  TrustedRecordInboxService,
-  TrustedRecordInspector,
-  TrustedRecordPolicyRegistry,
-  createSqliteTrustedRecordSecurityStore,
-  createSqliteTrustedRecordStore,
-  createTrustedRecordDevelopmentRuntime,
-  parseTrustedRecord,
-  type SqliteTrustedRecordStore,
-  type TrustedRecord,
+  type TrustedRecordAccessPolicy,
   type TrustedRecordActor,
-} from "./index.js";
+  type TrustedRecordAuditEvent,
+  type TrustedRecordAuditSink,
+  type TrustedRecordPolicySource,
+} from "./access.js";
+import { createSqliteTrustedRecordSecurityStore } from "./access.sqlite.js";
+import { TrustedRecordAccessDeniedError } from "./errors.js";
+import { TrustedRecordInboxService } from "./inbox.js";
+import { TrustedRecordInspector } from "./inspector.js";
+import { createTrustedRecordDevelopmentRuntime } from "./runtime.development.js";
+import { parseTrustedRecord } from "./schema.js";
+import { createSqliteTrustedRecordStore, type SqliteTrustedRecordStore } from "./store.sqlite.js";
+import type { TrustedRecord } from "./types.js";
+
+class InMemoryTrustedRecordAuditSink implements TrustedRecordAuditSink {
+  readonly #events: TrustedRecordAuditEvent[] = [];
+
+  append(event: TrustedRecordAuditEvent): void {
+    this.#events.push(structuredClone(event));
+  }
+
+  events(): TrustedRecordAuditEvent[] {
+    return structuredClone(this.#events);
+  }
+}
+
+class TrustedRecordPolicyRegistry implements TrustedRecordPolicySource {
+  readonly #policies = new Map<string, TrustedRecordAccessPolicy>();
+
+  register(policy: TrustedRecordAccessPolicy): void {
+    if (this.#policies.has(policy.id)) {
+      throw new Error(`policy already exists: ${policy.id}`);
+    }
+    this.#policies.set(policy.id, {
+      ...policy,
+      readActorIds: new Set(policy.readActorIds),
+      writeActorIds: new Set(policy.writeActorIds),
+    });
+  }
+
+  get(policyId: string): TrustedRecordAccessPolicy {
+    const policy = this.#policies.get(policyId);
+    if (!policy) {
+      throw new Error(`policy not found: ${policyId}`);
+    }
+    return {
+      ...policy,
+      readActorIds: new Set(policy.readActorIds),
+      writeActorIds: new Set(policy.writeActorIds),
+    };
+  }
+}
 
 const NOW = new Date("2026-08-04T21:00:00.000Z");
 

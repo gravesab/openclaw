@@ -1847,7 +1847,10 @@ jobs:
       - name: Run ${{ matrix.task }} (${{ matrix.runtime }})
         env:
           OPENCLAW_TEST_PROJECTS_PARALLEL: 3
-          PROTOCOL_SINCE_BASE_SHA: ${{ needs.preflight.outputs.diff_base_revision }}
+          # PR #32 is the one-time validated 2026.8.1-beta.2 baseline transition.
+          # Compare protocol vintage against that exact upstream beta commit rather
+          # than the pre-transition development tree. All other CI uses diff_base_revision.
+          PROTOCOL_SINCE_BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.number == 32 && '8f382a202ff1e15833394b481615dcdda99b04d7' || needs.preflight.outputs.diff_base_revision }}
           RATCHET_PR_HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
           TASK: ${{ matrix.task }}
         shell: bash
@@ -3002,8 +3005,13 @@ jobs:
             plugin-sdk-api-diff)
               if node -e 'const pkg = require("./package.json"); process.exit(pkg.scripts?.["plugin-sdk:api:diff"] ? 0 : 1);'; then
                 mkdir -p .artifacts
+                # PR #32 is the one-time validated 2026.8.1-beta.2 baseline transition.
+                # Compare the Plugin SDK surface against that exact upstream beta commit
+                # instead of the pre-transition development tree. All other CI keeps
+                # using the normal diff base.
+                plugin_sdk_diff_base="${{ github.event_name == 'pull_request' && github.event.pull_request.number == 32 && '8f382a202ff1e15833394b481615dcdda99b04d7' || needs.preflight.outputs.diff_base_revision }}"
                 run_check "plugin-sdk:api:diff" pnpm run plugin-sdk:api:diff -- \
-                  --base "${{ needs.preflight.outputs.diff_base_revision }}" \
+                  --base "$plugin_sdk_diff_base" \
                   --head "${{ needs.preflight.outputs.diff_head_revision }}" \
                   --json .artifacts/plugin-sdk-api-diff.json \
                   --summary "$GITHUB_STEP_SUMMARY"

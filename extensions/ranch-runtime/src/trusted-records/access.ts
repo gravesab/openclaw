@@ -2,7 +2,7 @@ import { TrustedRecordAccessDeniedError } from "./errors.js";
 import type { TrustedRecordStore } from "./store.js";
 import type { TrustedRecord, TrustedRecordCorrection } from "./types.js";
 
-export type TrustedRecordAction = "read" | "correct" | "archive" | "reference" | "delete_preview";
+type TrustedRecordAction = "read" | "correct" | "archive" | "reference" | "delete_preview";
 
 export type TrustedRecordActor = {
   id: string;
@@ -33,45 +33,6 @@ export type TrustedRecordAuditSink = {
 export type TrustedRecordPolicySource = {
   get: (policyId: string) => TrustedRecordAccessPolicy;
 };
-
-export class InMemoryTrustedRecordAuditSink implements TrustedRecordAuditSink {
-  readonly #events: TrustedRecordAuditEvent[] = [];
-
-  append(event: TrustedRecordAuditEvent): void {
-    this.#events.push(structuredClone(event));
-  }
-
-  events(): TrustedRecordAuditEvent[] {
-    return structuredClone(this.#events);
-  }
-}
-
-export class TrustedRecordPolicyRegistry {
-  readonly #policies = new Map<string, TrustedRecordAccessPolicy>();
-
-  register(policy: TrustedRecordAccessPolicy): void {
-    if (this.#policies.has(policy.id)) {
-      throw new Error(`policy already exists: ${policy.id}`);
-    }
-    this.#policies.set(policy.id, {
-      ...policy,
-      readActorIds: new Set(policy.readActorIds),
-      writeActorIds: new Set(policy.writeActorIds),
-    });
-  }
-
-  get(policyId: string): TrustedRecordAccessPolicy {
-    const policy = this.#policies.get(policyId);
-    if (!policy) {
-      throw new Error(`policy not found: ${policyId}`);
-    }
-    return {
-      ...policy,
-      readActorIds: new Set(policy.readActorIds),
-      writeActorIds: new Set(policy.writeActorIds),
-    };
-  }
-}
 
 function policyPermits(
   policy: TrustedRecordAccessPolicy,

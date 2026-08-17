@@ -46,7 +46,7 @@ const ProvenanceSchema = z
   })
   .strict();
 
-export const TrustedRecordSchema = z
+const TrustedRecordSchema = z
   .object({
     schemaVersion: z.literal(TRUSTED_RECORD_SCHEMA_VERSION),
     id: RecordIdSchema,

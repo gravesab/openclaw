@@ -88,5 +88,17 @@ Updating GitHub’s `development` branch is part of normal development. The
 acceptance, and production authorization. Updating `development` never implies
 permission to update or deploy `production`.
 
+Everything required to recreate OpenClaw must be represented in governed Git
+history. No required application source, service source, client source,
+infrastructure definition, migration, test, configuration contract, or
+reconstruction knowledge may remain permanently local-only. Secrets, live
+databases, generated build artifacts, and large mutable runtime artifacts must
+remain outside Git where appropriate, but Git must contain the schemas,
+templates, metadata, backup requirements, and restore procedures necessary to
+recreate or recover them.
+
+No production promotion is permitted when the corresponding implementation or
+required reconstruction material exists only on a local machine.
+
 These principles govern all future architecture, implementation, testing,
 documentation, and deployment decisions for this project.

@@ -157,6 +157,12 @@ Defines the mandatory development-only workflow, operator acceptance gate,
 product reliability requirements, mobile asset-management vision, evidence
 standards, and production authorization boundary.
 
+GITHUB_SOURCE_OF_TRUTH_AND_RECREATABILITY_POLICY.md
+
+Defines GitHub as the authoritative source for recreatable project state and
+requires all source, configuration contracts, migrations, tests, infrastructure,
+and reconstruction knowledge to be governed in Git.
+
 ---
 
 ## PropertyManager
@@ -294,6 +300,7 @@ The maintained documentation library is located under `docs/`.
 - `docs/foundation/SOUL.md`
 - `docs/foundation/AI_GOVERNANCE_MANIFEST.md`
 - `docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md`
+- `docs/foundation/GITHUB_SOURCE_OF_TRUTH_AND_RECREATABILITY_POLICY.md`
 - `docs/foundation/RESTORE_MANIFEST.md`
 - `docs/foundation/OPERATIONS_RUNBOOK.md`
 - `docs/foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md`

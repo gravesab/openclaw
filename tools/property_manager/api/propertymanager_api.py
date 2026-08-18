@@ -382,7 +382,6 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
                 )
 
                 next_due = item.get("next_due")
-                warning_days = max(int(item.get("warning_days") or 0), 0)
 
                 calendar_relevant = True
                 relevant_at = None

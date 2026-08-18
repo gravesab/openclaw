@@ -480,6 +480,186 @@ class MutatingRouteAuthTests(unittest.TestCase):
         self.assertEqual(payload.get("code"), "COMPLETION_ALREADY_UNDONE")
 
 
+    def _enrich_for_suppression_test(
+        self,
+        task: dict,
+        completion_rows: list[dict],
+    ) -> dict:
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_json",
+            side_effect=[
+                [],
+                [],
+                completion_rows,
+            ],
+        ):
+            enriched = self.api.enrich_tasks([task])
+
+        self.assertEqual(len(enriched), 1)
+        return enriched[0]
+
+    def test_acknowledged_calendar_occurrence_is_suppressed_until_next_due(
+        self,
+    ) -> None:
+        completed_at = "2026-08-17T18:00:00+00:00"
+        next_due = "2099-09-16T18:00:00+00:00"
+
+        task = {
+            "id": "00000000-0000-0000-0000-000000000101",
+            "asset_id": None,
+            "schedule_kind": "calendar",
+            "last_done": completed_at,
+            "next_due": next_due,
+        }
+        completions = [
+            {
+                "task_id": task["id"],
+                "completed_at": completed_at,
+                "acknowledged_at": "2026-08-17T18:01:00+00:00",
+                "undone_at": None,
+            }
+        ]
+
+        result = self._enrich_for_suppression_test(task, completions)
+
+        self.assertTrue(result["occurrence_suppressed"])
+        self.assertEqual(
+            result["occurrence_suppressed_until"],
+            next_due,
+        )
+
+    def test_acknowledged_calendar_occurrence_reappears_at_or_after_next_due(
+        self,
+    ) -> None:
+        completed_at = "2026-07-17T18:00:00+00:00"
+
+        task = {
+            "id": "00000000-0000-0000-0000-000000000102",
+            "asset_id": None,
+            "schedule_kind": "calendar",
+            "last_done": completed_at,
+            "next_due": "2000-01-01T00:00:00+00:00",
+        }
+        completions = [
+            {
+                "task_id": task["id"],
+                "completed_at": completed_at,
+                "acknowledged_at": "2026-07-17T18:01:00+00:00",
+                "undone_at": None,
+            }
+        ]
+
+        result = self._enrich_for_suppression_test(task, completions)
+
+        self.assertFalse(result["occurrence_suppressed"])
+        self.assertIsNone(result["occurrence_suppressed_until"])
+
+    def test_acknowledged_older_completion_does_not_suppress_current_occurrence(
+        self,
+    ) -> None:
+        task = {
+            "id": "00000000-0000-0000-0000-000000000103",
+            "asset_id": None,
+            "schedule_kind": "calendar",
+            "last_done": "2026-08-17T18:00:00+00:00",
+            "next_due": "2099-09-16T18:00:00+00:00",
+        }
+        completions = [
+            {
+                "task_id": task["id"],
+                "completed_at": "2026-07-17T18:00:00+00:00",
+                "acknowledged_at": "2026-07-17T18:01:00+00:00",
+                "undone_at": None,
+            }
+        ]
+
+        result = self._enrich_for_suppression_test(task, completions)
+
+        self.assertFalse(result["occurrence_suppressed"])
+        self.assertIsNone(result["occurrence_suppressed_until"])
+
+    def test_undone_completion_does_not_suppress_occurrence(self) -> None:
+        task = {
+            "id": "00000000-0000-0000-0000-000000000104",
+            "asset_id": None,
+            "schedule_kind": "calendar",
+            "last_done": "2026-08-17T18:00:00+00:00",
+            "next_due": "2099-09-16T18:00:00+00:00",
+        }
+
+        # enrich_tasks receives no acknowledgement row because its SQL
+        # explicitly excludes undone completions.
+        result = self._enrich_for_suppression_test(task, [])
+
+        self.assertFalse(result["occurrence_suppressed"])
+        self.assertIsNone(result["occurrence_suppressed_until"])
+
+    def test_acknowledged_meter_occurrence_stays_suppressed_until_meter_due(
+        self,
+    ) -> None:
+        completed_at = "2026-08-17T18:00:00+00:00"
+
+        task = {
+            "id": "00000000-0000-0000-0000-000000000105",
+            "asset_id": None,
+            "schedule_kind": "meter",
+            "last_done": completed_at,
+            "next_due": None,
+            "due_meter": False,
+            "overdue_meter": False,
+        }
+        completions = [
+            {
+                "task_id": task["id"],
+                "completed_at": completed_at,
+                "acknowledged_at": "2026-08-17T18:01:00+00:00",
+                "undone_at": None,
+            }
+        ]
+
+        result = self._enrich_for_suppression_test(task, completions)
+        self.assertTrue(result["occurrence_suppressed"])
+
+        task["due_meter"] = True
+        result = self._enrich_for_suppression_test(task, completions)
+        self.assertFalse(result["occurrence_suppressed"])
+
+    def test_combined_occurrence_reappears_when_calendar_or_meter_is_due(
+        self,
+    ) -> None:
+        completed_at = "2026-08-17T18:00:00+00:00"
+
+        task = {
+            "id": "00000000-0000-0000-0000-000000000106",
+            "asset_id": None,
+            "schedule_kind": "both",
+            "last_done": completed_at,
+            "next_due": "2099-09-16T18:00:00+00:00",
+            "due_meter": False,
+            "overdue_meter": False,
+        }
+        completions = [
+            {
+                "task_id": task["id"],
+                "completed_at": completed_at,
+                "acknowledged_at": "2026-08-17T18:01:00+00:00",
+                "undone_at": None,
+            }
+        ]
+
+        result = self._enrich_for_suppression_test(task, completions)
+        self.assertTrue(result["occurrence_suppressed"])
+
+        task["due_meter"] = True
+        result = self._enrich_for_suppression_test(task, completions)
+        self.assertFalse(result["occurrence_suppressed"])
+
+        task["due_meter"] = False
+        task["next_due"] = "2000-01-01T00:00:00+00:00"
+        result = self._enrich_for_suppression_test(task, completions)
+        self.assertFalse(result["occurrence_suppressed"])
+
     def test_reads_remain_unauthenticated(self) -> None:
         with mock.patch.object(self.api.pm_db, "execute_json", return_value=[]):
             response = self.client.get("/categories")

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>PropertyManagerApp</string>
+	<key>CFBundleExecutable</key>
+	<string>PropertyManagerApp</string>
+	<key>CFBundleIconFile</key>
+	<string>PropertyManagerIcon</string>
+	<key>CFBundleIdentifier</key>
+	<string>local.andrewgraves.PropertyManagerApp</string>
+	<key>CFBundleName</key>
+	<string>PropertyManagerApp</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleShortVersionString</key>
+	<string>0.2.1</string>
+	<key>CFBundleVersion</key>
+	<string>3</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>13.0</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>PropertyManager updates the OpenClaw calendar when EventKit cannot list iCloud calendars.</string>
+	<key>NSCalendarsFullAccessUsageDescription</key>
+	<string>PropertyManager needs Full Calendar access to find the OpenClaw calendar by name and write today's due-task blocks.</string>
+	<key>NSCalendarsUsageDescription</key>
+	<string>PropertyManager pushes today's due tasks into your OpenClaw calendar as a read-only plan view.</string>
+	<key>NSCalendarsWriteOnlyAccessUsageDescription</key>
+	<string>PropertyManager writes today's due tasks into the OpenClaw calendar.</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+</dict>
+</plist>

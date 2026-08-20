@@ -11,7 +11,7 @@ OUTPUT_ROOT="${2:-/tmp/propertymanager-packaged}"
 
 case "$ENVIRONMENT" in
     dev)
-        APP_NAME="Dev"
+        APP_NAME="DEV"
         BUNDLE_ID="ai.openclaw.propertymanager.macos.dev"
         ;;
     prod)

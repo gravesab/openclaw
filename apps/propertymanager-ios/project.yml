@@ -82,7 +82,7 @@ targets:
       configs:
         Debug:
           PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.propertymanager.dev
-          APP_DISPLAY_NAME: Dev
+          APP_DISPLAY_NAME: DEV
           APP_URL_SCHEME: propertymanager-dev
   PropertyManagerTests:
     type: bundle.unit-test

@@ -18,6 +18,7 @@ from tools.ai_intelligence.execution_models import (
 )
 from tools.ai_intelligence.provider import (
     AIProvider,
+    AvailabilityAwareProvider,
     InvalidProviderResponseError,
     ProviderError,
     ProviderTimeoutError,
@@ -169,6 +170,10 @@ class ExecutionEngine:
                 provider = self._provider_registry.get_provider(
                     assignment.model_id
                 )
+                if isinstance(provider, AvailabilityAwareProvider) and not provider.is_available():
+                    raise ProviderUnavailableError(
+                        f"Provider is unavailable: {provider.name}"
+                    )
                 response = provider.execute(
                     ProviderRequest(
                         model_id=assignment.model_id,
@@ -304,6 +309,12 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
     from tools.ai_intelligence.omlx_config import (
         is_omlx_configured,
     )
+    from tools.ai_intelligence.foundation_models_config import (
+        is_foundation_models_configured,
+    )
+    from tools.ai_intelligence.foundation_models_provider import (
+        build_foundation_models_provider,
+    )
     from tools.ai_intelligence.provider_registry import (
         ProviderRegistry,
     )
@@ -313,6 +324,8 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
 
     database = AIIntelligenceDatabase(DatabaseConfig.from_env())
     providers: list[AIProvider] = []
+    if is_foundation_models_configured():
+        providers.append(build_foundation_models_provider())
     if is_omlx_configured():
         providers.append(build_omlx_provider())
     providers.append(build_ollama_provider())

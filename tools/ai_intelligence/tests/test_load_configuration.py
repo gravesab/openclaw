@@ -28,13 +28,53 @@ class ConfigurationLoaderTests(unittest.TestCase):
         cls.plan = MODULE.build_plan()
 
     def test_expected_model_count(self) -> None:
-        self.assertEqual(len(self.plan.models), 10)
+        self.assertEqual(len(self.plan.models), 11)
 
     def test_expected_benchmark_count(self) -> None:
         self.assertEqual(len(self.plan.benchmarks), 10)
 
     def test_expected_component_count(self) -> None:
-        self.assertEqual(len(self.plan.components), 10)
+        self.assertEqual(len(self.plan.components), 11)
+
+    def test_apple_foundation_models_dev_inventory_is_configured(self) -> None:
+        models = {
+            item["model_id"]: item
+            for item in self.plan.models
+        }
+        components = {
+            item["component_id"]: item
+            for item in self.plan.components
+        }
+
+        apple = models["apple-foundation-models"]
+        self.assertEqual(apple["deployment"], "local")
+        self.assertEqual(apple["status"], "evaluation")
+
+        apple_component = components["apple_foundation_models_dev"]
+        assignments = [
+            item
+            for item in self.plan.assignments
+            if item["component_id"] == apple_component["component_id"]
+        ]
+        primary = [
+            item
+            for item in assignments
+            if item["assignment_type"] == "primary"
+        ]
+        fallbacks = [
+            item
+            for item in assignments
+            if item["assignment_type"] == "fallback"
+        ]
+
+        self.assertEqual(apple_component["task_type"], "routine_local_query")
+        self.assertEqual(len(primary), 1)
+        self.assertEqual(
+            primary[0]["model_id"],
+            "apple-foundation-models",
+        )
+        self.assertEqual(len(fallbacks), 2)
+        self.assertEqual(fallbacks[0]["model_id"], "omlx-qwen3.5-9b-4bit")
 
     def test_model_ids_are_unique(self) -> None:
         model_ids = [item["model_id"] for item in self.plan.models]

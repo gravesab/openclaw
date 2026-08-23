@@ -48,3 +48,13 @@ class AIProvider(Protocol):
         """Execute one model request or raise ProviderError."""
 
         ...
+
+
+@runtime_checkable
+class AvailabilityAwareProvider(Protocol):
+    """Optional lightweight availability contract for an AI provider."""
+
+    def is_available(self) -> bool:
+        """Return whether the provider can accept a request now."""
+
+        ...

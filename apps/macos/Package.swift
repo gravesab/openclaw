@@ -13,6 +13,9 @@ let package = Package(
         .library(name: "OpenClawDiscovery", targets: ["OpenClawDiscovery"]),
         .executable(name: "OpenClaw", targets: ["OpenClaw"]),
         .executable(name: "openclaw-mac", targets: ["OpenClawMacCLI"]),
+        .executable(
+            name: "openclaw-foundation-models",
+            targets: ["OpenClawFoundationModelsHelper"]),
     ],
     dependencies: [
         .package(url: "https://github.com/orchetect/MenuBarExtraAccess", exact: "1.3.0"),
@@ -73,6 +76,13 @@ let package = Package(
                 .product(name: "OpenClawProtocol", package: "OpenClawKit"),
             ],
             path: "Sources/OpenClawMacCLI",
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency"),
+            ]),
+        .executableTarget(
+            name: "OpenClawFoundationModelsHelper",
+            dependencies: [],
+            path: "Sources/OpenClawFoundationModelsHelper",
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency"),
             ]),

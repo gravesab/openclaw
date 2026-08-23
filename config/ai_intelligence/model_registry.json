@@ -3,6 +3,16 @@
   "updated": "2026-07-23",
   "models": [
     {
+      "id": "apple-foundation-models",
+      "display_name": "Apple Foundation Models",
+      "provider": "Apple Foundation Models",
+      "deployment": "local",
+      "status": "evaluation",
+      "privacy_tier": "local",
+      "cost_tier": "owned-hardware",
+      "notes": "DEV-only, opt-in macOS helper for lightweight private summaries, extraction, classification, and refinement. It is not approved for deep reasoning, RAG, manuals, or multi-record analysis."
+    },
+    {
       "id": "claude",
       "display_name": "Claude",
       "provider": "Anthropic",

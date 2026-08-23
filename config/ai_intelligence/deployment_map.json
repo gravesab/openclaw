@@ -9,6 +9,21 @@
   ],
   "components": [
     {
+      "id": "apple_foundation_models_dev",
+      "display_name": "Apple Foundation Models DEV",
+      "description": "Lightweight private on-device summary, extraction, classification, and refinement tasks only.",
+      "privacy_tier": "local",
+      "primary_model": "apple-foundation-models",
+      "fallback_models": [
+        "omlx-qwen3.5-9b-4bit",
+        "ollama-llama3.2-3b"
+      ],
+      "task_type": "routine_local_query",
+      "assignment_status": "configured",
+      "configuration_source": "Apple Foundation Models DEV-only evaluation",
+      "verification_status": "development-live-verification-required"
+    },
+    {
       "id": "ranchbrain",
       "display_name": "RanchBrain",
       "description": "Private knowledge retrieval, personal wiki, asset knowledge, and conversational access.",
@@ -117,13 +132,14 @@
       "display_name": "Knowledge Ingestion",
       "description": "Processes manuals, notes, foundational documentation, and RanchBrain source material.",
       "privacy_tier": "local",
-      "primary_model": "ollama-gemma3-12b",
+      "primary_model": "omlx-qwen3.5-9b-4bit",
       "fallback_models": [
+        "ollama-gemma3-12b",
         "ollama-hermes3-8b"
       ],
       "task_type": "long_context_engineering",
       "assignment_status": "configured",
-      "configuration_source": "RanchBrain ingestion configuration",
+      "configuration_source": "OMLX-D03 Development routing approval for deep reasoning, RAG, manuals, and multi-record analysis",
       "verification_status": "needs-runtime-verification"
     },
     {

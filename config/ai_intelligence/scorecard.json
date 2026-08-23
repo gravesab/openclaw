@@ -20,6 +20,26 @@
     "tool_calling": 8
   },
   "models": {
+    "apple-foundation-models": {
+      "agent_orchestration": 3,
+      "code_generation": 2,
+      "cost": 10,
+      "debugging": 2,
+      "docker": 1,
+      "documentation": 4,
+      "home_assistant": 3,
+      "linux_admin": 1,
+      "local_deployment": 10,
+      "long_context": 2,
+      "low_hallucination": 5,
+      "postgresql": 1,
+      "privacy": 10,
+      "python": 1,
+      "repository_understanding": 2,
+      "speed": 10,
+      "swift": 3,
+      "tool_calling": 3
+    },
     "claude": {
       "agent_orchestration": 8,
       "code_generation": 9,

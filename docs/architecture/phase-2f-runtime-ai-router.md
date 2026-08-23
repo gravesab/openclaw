@@ -216,6 +216,35 @@ Examples include:
 
 Health checks should be inexpensive and bounded by short timeouts.
 
+### DEV-only local provider policy
+
+- Apple Foundation Models is an opt-in provider for lightweight private summaries,
+  extraction, classification, and refinement. The Python router invokes only a
+  configured, absolute-path macOS helper when
+  `OPENCLAW_AI_INTELLIGENCE_ENVIRONMENT=development`; it treats a missing helper, an
+  unavailable Apple Intelligence model, or an invalid helper response as an
+  unavailable provider and continues the approved fallback chain.
+- Qwen through oMLX remains the preferred local route for deep reasoning, RAG,
+  manuals, and multi-record work. Apple Foundation Models is never selected for
+  those workloads.
+- The AI Intelligence MCP surface is DEV-only and uses the official
+  `mcp` Python SDK v2 (`MCPServer`) over stdio. It validates component, prompt,
+  and bounded timeout inputs before invoking the same privacy-preserving router
+  as `ai.execute`; execution also requires
+  `OPENCLAW_AI_INTELLIGENCE_MCP_ENABLED=1` and the development environment. It
+  has no FastMCP dependency. The MCP process does not load the generic gateway
+  credential file; its database configuration must be supplied explicitly, or
+  execution fails closed.
+
+### MCP delivery phases
+
+- **Phase 0:** provider-neutral AI routing, the Apple Foundation Models provider,
+  and the generic `ai_execute` MCP boundary. This phase exposes no
+  PropertyManager domain tools, resources, or prompts.
+- **Phase 1:** PropertyManager MCP domain tools such as asset lookup, task and
+  maintenance queries, runtime-hour reads, and manual search. Phase 1 is not
+  part of this change and requires its own authoritative data contract and tests.
+
 A successful health check does not guarantee inference success; execution failures must still trigger failover when classified as retryable.
 
 ## 10. Failure Classification

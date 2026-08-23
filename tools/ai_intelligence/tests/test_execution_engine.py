@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -17,6 +18,8 @@ from tools.ai_intelligence.execution_models import (
     ProviderRequest,
     ProviderResponse,
 )
+from tools.ai_intelligence.foundation_models_config import FoundationModelsConfig
+from tools.ai_intelligence.foundation_models_provider import FoundationModelsProvider
 from tools.ai_intelligence.provider import (
     AIProvider,
     InvalidProviderResponseError,
@@ -165,12 +168,31 @@ class FakeProvider:
         return outcome
 
 
+class AvailabilityAwareFakeProvider(FakeProvider):
+    def __init__(
+        self,
+        outcomes: list[ProviderResponse | Exception],
+        *,
+        available: bool,
+    ) -> None:
+        super().__init__(outcomes)
+        self.available = available
+
+    def is_available(self) -> bool:
+        return self.available
+
+
+class QwenFakeProvider(FakeProvider):
+    name = "omlx"
+
+
 def response(
     model_id: str,
     content: str = "Answer",
+    provider_name: str = "ollama",
 ) -> ProviderResponse:
     return ProviderResponse(
-        provider_name="ollama",
+        provider_name=provider_name,
         model_id=model_id,
         content=content,
         duration_ms=5,
@@ -411,6 +433,84 @@ class ExecutionEngineTests(unittest.TestCase):
             primary.requests[0].request_id,
             fallback.requests[0].request_id,
         )
+
+    def test_skips_unavailable_provider_before_execution(self) -> None:
+        routing_request = RoutingRequest(component_id="ranchbrain")
+        primary = AvailabilityAwareFakeProvider(
+            [response("ollama-primary")],
+            available=False,
+        )
+        fallback = FakeProvider([response("ollama-fallback-1")])
+        engine = ExecutionEngine(
+            FakeRouter(decision(routing_request)),
+            FakeProviderRegistry(
+                {
+                    "ollama-primary": primary,
+                    "ollama-fallback-1": fallback,
+                }
+            ),
+        )
+
+        result = engine.execute(routing_request, prompt="Hello")
+
+        self.assertTrue(result.succeeded)
+        self.assertEqual(result.attempts[0].status, AttemptStatus.UNAVAILABLE)
+        self.assertEqual(primary.requests, [])
+        self.assertEqual(result.selected_model_id, "ollama-fallback-1")
+
+    @patch.object(FoundationModelsProvider, "is_available", return_value=False)
+    def test_unavailable_apple_provider_falls_back_to_qwen(
+        self,
+        is_available: Any,
+    ) -> None:
+        routing_request = RoutingRequest(component_id="ranchbrain")
+        apple = FoundationModelsProvider(
+            FoundationModelsConfig(Path("/tmp/openclaw-foundation-models"))
+        )
+        qwen = QwenFakeProvider(
+            [response("omlx-qwen3.5-9b-4bit", provider_name="omlx")]
+        )
+        qwen.name = "omlx"
+        routing_decision = RoutingDecision(
+            request=routing_request,
+            component_name="RanchBrain",
+            task_type="routine_local_query",
+            privacy_tier=PrivacyTier.LOCAL,
+            routing_mode=RoutingMode.PRODUCTION_SAFE,
+            chain=FallbackChain(
+                primary=assignment(
+                    model_id="apple-foundation-models",
+                    assignment_type=AssignmentType.PRIMARY,
+                    priority=1,
+                ),
+                fallbacks=(
+                    assignment(
+                        model_id="omlx-qwen3.5-9b-4bit",
+                        assignment_type=AssignmentType.FALLBACK,
+                        priority=1,
+                    ),
+                ),
+            ),
+        )
+        engine = ExecutionEngine(
+            FakeRouter(routing_decision),
+            FakeProviderRegistry(
+                {
+                    "apple-foundation-models": apple,
+                    "omlx-qwen3.5-9b-4bit": qwen,
+                }
+            ),
+        )
+
+        result = engine.execute(routing_request, prompt="Hello")
+
+        self.assertTrue(result.succeeded)
+        self.assertEqual(
+            result.attempted_model_ids,
+            ("apple-foundation-models", "omlx-qwen3.5-9b-4bit"),
+        )
+        self.assertEqual(result.selected_model_id, "omlx-qwen3.5-9b-4bit")
+        is_available.assert_called_once_with()
 
     def test_returns_failure_after_all_candidates(
         self,

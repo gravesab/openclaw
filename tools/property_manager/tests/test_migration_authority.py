@@ -32,6 +32,7 @@ APPROVED_HASHES = {
     "005_assets_and_meters.sql": "f90a39cdc6234d72a431d4caba23720d98aa7b4dff1a83f15845ecb936ff0147",
     "006_phase1_meter_audit.sql": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0",
     "009_maintenance_proposals.sql": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a",
+    "010_handbook_ingestion_v1.sql": "17ba25449a4f3dc8f1f4137313930bfff6fcd213397493a01bc5bc6035230db5",
 }
 APPROVED_CONTRACT_HASH = "63063adf5396817e8fa8607a5ccb108cdc3d79a4f9c6a046e6068ee1a6f59a52"
 APPROVED_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -53,6 +54,7 @@ APPROVED_REAPPLICATION = {
     "005": True,
     "006": True,
     "009": True,
+    "010": False,
 }
 APPROVED_TABLES = (
     "asset_meter",
@@ -474,7 +476,8 @@ class AuthorityFixture(unittest.TestCase):
     def file_audit(self):
         return authority._audit_migration_files_at(self.db, self.manifest_path)
 
-    def metadata(self, *, ledger_state="absent"):
+    def metadata(self, *, terminal_migration="009", ledger_state="absent"):
+        snapshot = self.manifest.snapshots[terminal_migration]
         entries = []
         if ledger_state == "present":
             entries = [
@@ -484,10 +487,10 @@ class AuthorityFixture(unittest.TestCase):
                     "filename": spec.filename,
                     "sha256": spec.sha256,
                 }
-                for spec in self.manifest.canonical
+                for spec in snapshot.canonical
             ]
         return {
-            "declared_version": "009",
+            "declared_version": terminal_migration,
             "concurrent_migration_activity": False,
             "unexplained_schema_objects": False,
             "identity": {
@@ -495,13 +498,15 @@ class AuthorityFixture(unittest.TestCase):
                 "environment": self.identity.environment,
             },
             "ledger": {"state": ledger_state, "entries": entries},
-            "schema": copy.deepcopy(self.manifest.schema_contract),
+            "schema": copy.deepcopy(snapshot.schema_contract),
         }
 
-    def snapshot(self, metadata):
-        return authority._audit_supplied_metadata(metadata, self.identity, self.manifest)
+    def snapshot(self, metadata, *, terminal_migration="009"):
+        return authority._audit_supplied_metadata(
+            metadata, self.identity, self.manifest, terminal_migration=terminal_migration
+        )
 
-    def public_snapshot(self, metadata, expected_identity=...):
+    def public_snapshot(self, metadata, expected_identity=..., *, terminal_migration="009"):
         source = FixtureMetadataSource(metadata)
         verified = authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest)
         with mock.patch.object(
@@ -512,6 +517,7 @@ class AuthorityFixture(unittest.TestCase):
             result = authority.audit_schema_metadata(
                 source,
                 self.identity if expected_identity is ... else expected_identity,
+                terminal_migration=terminal_migration,
             )
         return result, source
 
@@ -521,16 +527,16 @@ class ManifestFingerprintTests(AuthorityFixture):
         for name, expected in APPROVED_RESOURCE_LIMITS.items():
             self.assertEqual(getattr(authority, name), expected, name)
         self.assertEqual(
-            {spec.version: spec.reapplication_permitted for spec in self.manifest.canonical},
+            {spec.version: spec.reapplication_permitted for spec in self.manifest.snapshots["010"].canonical},
             APPROVED_REAPPLICATION,
         )
         self.assertEqual(self.manifest.reserved_versions, ("007", "008"))
-        self.assertEqual(self.manifest.next_canonical_version, "010")
+        self.assertEqual(self.manifest.next_canonical_version, "011")
         self.assertNotIn("007", {spec.version for spec in self.manifest.canonical})
         self.assertNotIn("008", {spec.version for spec in self.manifest.canonical})
 
     def test_complete_independent_canonical_oracle(self):
-        self.assertEqual(self.manifest.schema_contract, EXPECTED_SCHEMA_ORACLE)
+        self.assertEqual(self.manifest.snapshots["009"].schema_contract, EXPECTED_SCHEMA_ORACLE)
         tables = EXPECTED_SCHEMA_ORACLE["tables"]
         self.assertEqual(tuple(tables), APPROVED_TABLES)
         self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 143)
@@ -576,13 +582,15 @@ class ManifestFingerprintTests(AuthorityFixture):
 
     def test_manifest_has_independently_pinned_contract_and_migrations(self):
         raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-        encoded = json.dumps(raw["schema_contract"], sort_keys=True, separators=(",", ":")).encode()
+        historical = raw["snapshots"]["009"]
+        current = raw["snapshots"]["010"]
+        encoded = json.dumps(historical["schema_contract"], sort_keys=True, separators=(",", ":")).encode()
         self.assertEqual(hashlib.sha256(encoded).hexdigest(), APPROVED_CONTRACT_HASH)
         self.assertEqual(
-            {item["filename"]: item["sha256"] for item in raw["canonical_migrations"]},
+            {item["filename"]: item["sha256"] for item in current["canonical_migrations"]},
             APPROVED_HASHES,
         )
-        contract = raw["schema_contract"]
+        contract = historical["schema_contract"]
         self.assertEqual(tuple(contract["tables"]), APPROVED_TABLES)
         self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 143)
         self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 39)
@@ -665,7 +673,7 @@ class ManifestFingerprintTests(AuthorityFixture):
     def test_incomplete_manifest_fingerprints_are_rejected(self):
         for collection, property_name in (("columns", "nullable"), ("constraints", "on_delete"), ("indexes", "predicate")):
             raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-            del raw["schema_contract"]["tables"]["asset_meter_reading"][collection][0][property_name]
+            del raw["snapshots"]["009"]["schema_contract"]["tables"]["asset_meter_reading"][collection][0][property_name]
             path = self.root / f"incomplete-{collection}.json"
             path.write_text(json.dumps(raw), encoding="utf-8")
             with self.subTest(collection=collection), self.assertRaises(authority.AuthorityConfigurationError):
@@ -673,23 +681,40 @@ class ManifestFingerprintTests(AuthorityFixture):
 
     def test_malformed_manifest_levels_fail_closed(self):
         cases = []
+        legacy_source = json.loads(self.manifest_path.read_text())
+        cases.append(
+            {
+                "format_version": 2,
+                "authority": "propertymanager",
+                "canonical_migrations": legacy_source["snapshots"]["009"]["canonical_migrations"],
+                "reserved_versions": legacy_source["reserved_versions"],
+                "next_canonical_version": "010",
+                "schema_contract": legacy_source["snapshots"]["009"]["schema_contract"],
+            }
+        )
         reserved = json.loads(self.manifest_path.read_text())
         reserved["reserved_versions"].append("invalid")
         cases.append(reserved)
+        missing_current = json.loads(self.manifest_path.read_text())
+        del missing_current["current_snapshot"]
+        cases.append(missing_current)
+        unknown_current = json.loads(self.manifest_path.read_text())
+        unknown_current["current_snapshot"] = "999"
+        cases.append(unknown_current)
         table = json.loads(self.manifest_path.read_text())
-        table["schema_contract"]["tables"]["assets"] = []
+        table["snapshots"]["009"]["schema_contract"]["tables"]["assets"] = []
         cases.append(table)
         column_case = json.loads(self.manifest_path.read_text())
-        column_case["schema_contract"]["tables"]["assets"]["columns"][0]["name"] = []
+        column_case["snapshots"]["009"]["schema_contract"]["tables"]["assets"]["columns"][0]["name"] = []
         cases.append(column_case)
         constraint_case = json.loads(self.manifest_path.read_text())
-        constraint_case["schema_contract"]["tables"]["assets"]["constraints"][0]["columns"] = "external_id"
+        constraint_case["snapshots"]["009"]["schema_contract"]["tables"]["assets"]["constraints"][0]["columns"] = "external_id"
         cases.append(constraint_case)
         index_case = json.loads(self.manifest_path.read_text())
-        index_case["schema_contract"]["tables"]["assets"]["indexes"][0]["keys"] = {}
+        index_case["snapshots"]["009"]["schema_contract"]["tables"]["assets"]["indexes"][0]["keys"] = {}
         cases.append(index_case)
         seed_case = json.loads(self.manifest_path.read_text())
-        seed_case["schema_contract"]["canonical_data"]["maintenance_categories"]["rows"] = {}
+        seed_case["snapshots"]["009"]["schema_contract"]["canonical_data"]["maintenance_categories"]["rows"] = {}
         cases.append(seed_case)
         for position, raw in enumerate(cases):
             with self.subTest(position=position):
@@ -702,21 +727,22 @@ class ManifestFingerprintTests(AuthorityFixture):
         mutations = []
         selectors = (
             lambda raw: raw,
-            lambda raw: raw["canonical_migrations"][0],
+            lambda raw: raw["snapshots"]["010"],
+            lambda raw: raw["snapshots"]["010"]["canonical_migrations"][0],
             lambda raw: raw["reserved_versions"][0],
-            lambda raw: raw["schema_contract"],
-            lambda raw: raw["schema_contract"]["tables"]["assets"],
-            lambda raw: raw["schema_contract"]["tables"]["assets"]["columns"][0],
-            lambda raw: raw["schema_contract"]["tables"]["assets"]["constraints"][0],
-            lambda raw: raw["schema_contract"]["tables"]["assets"]["indexes"][0],
-            lambda raw: raw["schema_contract"]["canonical_data"]["maintenance_categories"],
+            lambda raw: raw["snapshots"]["009"]["schema_contract"],
+            lambda raw: raw["snapshots"]["009"]["schema_contract"]["tables"]["assets"],
+            lambda raw: raw["snapshots"]["009"]["schema_contract"]["tables"]["assets"]["columns"][0],
+            lambda raw: raw["snapshots"]["009"]["schema_contract"]["tables"]["assets"]["constraints"][0],
+            lambda raw: raw["snapshots"]["009"]["schema_contract"]["tables"]["assets"]["indexes"][0],
+            lambda raw: raw["snapshots"]["009"]["schema_contract"]["canonical_data"]["maintenance_categories"],
         )
         for selector in selectors:
             raw = json.loads(self.manifest_path.read_text())
             selector(raw)["unexpected"] = True
             mutations.append(raw)
         missing = json.loads(self.manifest_path.read_text())
-        del missing["schema_contract"]["tables"]["assets"]["columns"][0]["type"]
+        del missing["snapshots"]["009"]["schema_contract"]["tables"]["assets"]["columns"][0]["type"]
         mutations.append(missing)
         for position, raw in enumerate(mutations):
             path = self.root / f"exact-keys-{position}.json"
@@ -763,7 +789,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
             APPROVED_EMPTY_SHA256,
         )
         raw = json.loads(self.manifest_path.read_text())
-        for position, entry in enumerate(raw["canonical_migrations"]):
+        for position, entry in enumerate(raw["snapshots"]["010"]["canonical_migrations"]):
             data = b"x" * authority.MAX_MIGRATION_BYTES if position < 4 else b""
             (self.db / entry["filename"]).write_bytes(data)
             entry["sha256"] = (
@@ -786,12 +812,12 @@ class FilesystemAuthorityTests(AuthorityFixture):
         with mock.patch.object(authority, "_read_regular_at", side_effect=record):
             result = self.file_audit()
         self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
-        successors = [entry["filename"] for entry in raw["canonical_migrations"][4:]]
+        successors = [entry["filename"] for entry in raw["snapshots"]["010"]["canonical_migrations"][4:]]
         self.assertTrue(all(name not in calls for name in successors))
 
     def test_exhausted_budget_rejects_nonempty_replacement_without_opening(self):
         raw = self.configure_exact_cumulative_boundary()
-        target = self.db / raw["canonical_migrations"][4]["filename"]
+        target = self.db / raw["snapshots"]["010"]["canonical_migrations"][4]["filename"]
         calls = []
         original = authority._read_regular_at
 
@@ -811,8 +837,8 @@ class FilesystemAuthorityTests(AuthorityFixture):
 
     def test_exhausted_budget_rejects_incorrect_empty_checksum_without_opening(self):
         raw = self.configure_exact_cumulative_boundary()
-        target = self.db / raw["canonical_migrations"][4]["filename"]
-        raw["canonical_migrations"][4]["sha256"] = "0" * 64
+        target = self.db / raw["snapshots"]["010"]["canonical_migrations"][4]["filename"]
+        raw["snapshots"]["010"]["canonical_migrations"][4]["sha256"] = "0" * 64
         self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
         calls = []
         original = authority._read_regular_at
@@ -832,7 +858,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
         for case in cases:
             with self.subTest(case=case):
                 raw = self.configure_exact_cumulative_boundary()
-                target = self.db / raw["canonical_migrations"][4]["filename"]
+                target = self.db / raw["snapshots"]["010"]["canonical_migrations"][4]["filename"]
                 external_link = self.root / "zero-successor-hard-link"
                 calls = []
                 original = authority._read_regular_at
@@ -871,7 +897,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
 
     def test_cumulative_migration_limit_rejects_first_excess_without_later_reads(self):
         raw = json.loads(self.manifest_path.read_text())
-        for position, entry in enumerate(raw["canonical_migrations"]):
+        for position, entry in enumerate(raw["snapshots"]["010"]["canonical_migrations"]):
             data = b"x" * authority.MAX_MIGRATION_BYTES if position < 4 else b"x"
             (self.db / entry["filename"]).write_bytes(data)
             entry["sha256"] = hashlib.sha256(data).hexdigest()
@@ -887,12 +913,12 @@ class FilesystemAuthorityTests(AuthorityFixture):
             result = self.file_audit()
         self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
         self.assertIn("migration_size_invalid", {item.code for item in result.diagnostics})
-        self.assertNotIn(raw["canonical_migrations"][4]["filename"], calls)
-        self.assertNotIn(raw["canonical_migrations"][5]["filename"], calls)
+        self.assertNotIn(raw["snapshots"]["010"]["canonical_migrations"][4]["filename"], calls)
+        self.assertNotIn(raw["snapshots"]["010"]["canonical_migrations"][5]["filename"], calls)
 
     def test_cumulative_accounting_rejects_replacement_before_read(self):
         raw = json.loads(self.manifest_path.read_text())
-        for position, entry in enumerate(raw["canonical_migrations"]):
+        for position, entry in enumerate(raw["snapshots"]["010"]["canonical_migrations"]):
             if position < 4:
                 data = b"x" * (authority.MAX_MIGRATION_BYTES - 1)
             elif position == 4:
@@ -902,7 +928,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
             (self.db / entry["filename"]).write_bytes(data)
             entry["sha256"] = hashlib.sha256(data).hexdigest()
         self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
-        target = self.db / raw["canonical_migrations"][4]["filename"]
+        target = self.db / raw["snapshots"]["010"]["canonical_migrations"][4]["filename"]
 
         result = authority._audit_migration_files_at(
             self.db,
@@ -1197,7 +1223,7 @@ class MetadataAndLedgerTests(AuthorityFixture):
         verified = authority._result(authority.AuditStatus.MIGRATION_FILES_VERIFIED, self.manifest)
         observed = []
 
-        def classify(metadata, expected_identity, manifest):
+        def classify(metadata, expected_identity, manifest, *, terminal_migration=None):
             observed.append(manifest)
             return authority._result(
                 authority.AuditStatus.SNAPSHOT_CONSISTENT,
@@ -1273,8 +1299,13 @@ class MetadataAndLedgerTests(AuthorityFixture):
             self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
         lower, higher = self.metadata(), self.metadata()
         lower["declared_version"], higher["declared_version"] = "006", "010"
-        self.assertEqual(self.snapshot(lower).status, authority.AuditStatus.SNAPSHOT_PARTIAL)
-        self.assertEqual(self.snapshot(higher).status, authority.AuditStatus.SNAPSHOT_LATER)
+        self.assertEqual(self.snapshot(lower).status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
+        self.assertEqual(self.snapshot(higher).status, authority.AuditStatus.SNAPSHOT_AMBIGUOUS)
+        current = self.metadata(terminal_migration="010", ledger_state="present")
+        self.assertEqual(
+            self.snapshot(current, terminal_migration="010").status,
+            authority.AuditStatus.SNAPSHOT_CONSISTENT,
+        )
 
     def test_concurrency_and_unexplained_state_are_explicit_booleans(self):
         for field in ("concurrent_migration_activity", "unexplained_schema_objects"):
@@ -1466,7 +1497,7 @@ class MetadataAndLedgerTests(AuthorityFixture):
             self.assertEqual(self.snapshot(metadata).status, authority.AuditStatus.LEDGER_INCONSISTENT)
         later = copy.deepcopy(valid)
         later["ledger"]["entries"].append({"order": 8, "version": "010", "filename": "010.sql", "sha256": "0" * 64})
-        self.assertEqual(self.snapshot(later).status, authority.AuditStatus.SNAPSHOT_LATER)
+        self.assertEqual(self.snapshot(later).status, authority.AuditStatus.LEDGER_INCONSISTENT)
 
     def test_malformed_ledger_entries_never_escape(self):
         values = (None, "006", [], {}, {"order": 1}, {"order": [], "version": "001", "filename": "x", "sha256": "0" * 64})

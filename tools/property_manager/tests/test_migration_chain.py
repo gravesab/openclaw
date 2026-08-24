@@ -13,6 +13,9 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+from tools.property_manager.db.migration_authority import load_manifest
+from tools.property_manager.db.schema_contract_extractor import PostgresSchemaContractExtractor
+
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_DIR = REPO_ROOT / "tools" / "property_manager" / "db"
 MIGRATIONS = (
@@ -23,8 +26,14 @@ MIGRATIONS = (
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
+    "010_handbook_ingestion_v1.sql",
 )
-EXPECTED_VERSION = "009"
+REAPPLICABLE_MIGRATIONS = (
+    "005_assets_and_meters.sql",
+    "006_phase1_meter_audit.sql",
+    "009_maintenance_proposals.sql",
+)
+EXPECTED_VERSION = "010"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -49,6 +58,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
     container_id: str
     database_name: str
     database_user: str
+    database_port: str
     token: str
 
     @classmethod
@@ -76,7 +86,6 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "--detach",
                 "--rm",
                 "--pull=never",
-                "--network=none",
                 "--name",
                 cls.container_name,
                 "--label",
@@ -89,6 +98,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "POSTGRES_HOST_AUTH_METHOD=trust",
                 "--env",
                 f"POSTGRES_USER={cls.database_user}",
+                "--publish=127.0.0.1::5432",
                 IMAGE,
             ]
         )
@@ -96,6 +106,8 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         try:
             cls._prove_container_identity()
             cls._wait_until_ready()
+            port = _run(["docker", "port", cls.container_id, "5432/tcp"]).stdout.decode().strip()
+            cls.database_port = port.rsplit(":", 1)[1]
         except BaseException as setup_error:
             try:
                 cls._remove_verified_container()
@@ -154,11 +166,14 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                     "docker",
                     "exec",
                     cls.container_id,
-                    "pg_isready",
+                    "psql",
+                    "-X",
                     "-U",
                     cls.database_user,
                     "-d",
                     cls.database_name,
+                    "-c",
+                    "SELECT 1",
                 ],
                 check=False,
             )
@@ -194,6 +209,19 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             raise AssertionError(f"isolated psql command failed: {detail}")
         return result.stdout.decode().strip()
 
+    @classmethod
+    def _extract_contract(cls) -> dict:
+        import psycopg2
+
+        return PostgresSchemaContractExtractor(
+            lambda: psycopg2.connect(
+                host="127.0.0.1",
+                port=cls.database_port,
+                dbname=cls.database_name,
+                user=cls.database_user,
+            )
+        ).extract()
+
     def test_canonical_migrations_build_expected_schema(self) -> None:
         identity = self._psql(
             "SELECT current_database() || '|' || current_user || '|' || pg_is_in_recovery();"
@@ -201,17 +229,21 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         self.assertEqual(identity, f"{self.database_name}|{self.database_user}|false")
 
         applied: list[str] = []
+        manifest = load_manifest()
         for filename in MIGRATIONS:
             self._prove_container_identity()
             migration = (MIGRATION_DIR / filename).read_bytes()
             self._psql(migration.decode())
             applied.append(filename[:3])
-        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009"])
+            if filename == "009_maintenance_proposals.sql":
+                self.assertEqual(self._extract_contract(), manifest.snapshots["009"].schema_contract)
+        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010"])
         self.assertEqual(applied[-1], EXPECTED_VERSION)
+        self.assertEqual(self._extract_contract(), manifest.snapshots["010"].schema_contract)
 
         # The 005/006/009 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.
-        for filename in MIGRATIONS[4:]:
+        for filename in REAPPLICABLE_MIGRATIONS:
             self._psql((MIGRATION_DIR / filename).read_text())
 
         tables = set(
@@ -225,6 +257,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             {
                 "asset_meter",
                 "asset_meter_reading",
+                "asset_manual",
+                "asset_manual_chunk",
+                "asset_manual_state_event",
+                "asset_manual_version",
                 "asset_task_mapping_proposals",
                 "assets",
                 "maintenance_categories",
@@ -300,6 +336,43 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             <= constraints
         )
 
+        handbook_columns = {
+            "asset_manual": {"asset_id", "document_key", "title", "document_type", "created_by"},
+            "asset_manual_version": {
+                "manual_id", "version_number", "source_locator", "source_sha256", "provenance",
+                "ingestion_status", "review_status", "lifecycle_status", "supersedes_version_id",
+            },
+            "asset_manual_chunk": {"manual_version_id", "chunk_ordinal", "content", "content_sha256", "search_vector"},
+            "asset_manual_state_event": {"manual_version_id", "event_type", "from_state", "to_state", "actor_id"},
+        }
+        for table, columns in handbook_columns.items():
+            actual = set(
+                self._psql(
+                    "SELECT column_name FROM information_schema.columns "
+                    f"WHERE table_schema='propertymanager' AND table_name='{table}'"
+                ).splitlines()
+            )
+            self.assertTrue(columns <= actual, f"{table} missing {sorted(columns - actual)}")
+
+        handbook_indexes = set(
+            self._psql(
+                "SELECT indexname FROM pg_indexes "
+                "WHERE schemaname='propertymanager' AND tablename IN "
+                "('asset_manual', 'asset_manual_version', 'asset_manual_chunk')"
+            ).splitlines()
+        )
+        self.assertTrue(
+            {
+                "asset_manual_asset_id_idx",
+                "asset_manual_version_one_active_idx",
+                "asset_manual_version_state_idx",
+                "asset_manual_version_sha_idx",
+                "asset_manual_chunk_version_idx",
+                "asset_manual_chunk_search_idx",
+            }
+            <= handbook_indexes
+        )
+
 
 class MigrationContainerCleanupTests(unittest.TestCase):
     returned_id = "a" * 64
@@ -324,6 +397,8 @@ class MigrationContainerCleanupTests(unittest.TestCase):
             return subprocess.CompletedProcess(args, 0, b"[]", b"")
         if args[:2] == ["docker", "run"]:
             return subprocess.CompletedProcess(args, 0, f"{self.returned_id}\n".encode(), b"")
+        if args[:2] == ["docker", "port"]:
+            return subprocess.CompletedProcess(args, 0, b"127.0.0.1:54321\n", b"")
         if args[:3] == ["docker", "rm", "--force"]:
             return subprocess.CompletedProcess(args, 0, f"{self.returned_id}\n".encode(), b"")
         raise AssertionError(f"unexpected command: {args}")

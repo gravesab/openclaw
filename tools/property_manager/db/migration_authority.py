@@ -60,8 +60,9 @@ VAGUE_IDENTITIES = frozenset(
 MUTATING_ACTIONS = frozenset({"apply", "baseline", "bootstrap", "migrate", "repair", "write"})
 
 MANIFEST_KEYS = frozenset(
-    {"format_version", "authority", "canonical_migrations", "reserved_versions", "next_canonical_version", "schema_contract"}
+    {"format_version", "authority", "reserved_versions", "next_canonical_version", "snapshots", "current_snapshot"}
 )
+SNAPSHOT_RECORD_KEYS = frozenset({"terminal_migration", "canonical_migrations", "schema_contract"})
 MIGRATION_KEYS = frozenset({"version", "order", "filename", "sha256", "reapplication_permitted"})
 RESERVED_KEYS = frozenset({"version", "status", "reason"})
 CONTRACT_KEYS = frozenset({"normalization_version", "comparison", "allowed_extras", "tables", "canonical_data"})
@@ -100,7 +101,7 @@ class UnsafeAuthorityObjectError(OSError):
 class AuditStatus(str, enum.Enum):
     MIGRATION_FILES_VERIFIED = "migration_files_verified"
     MIGRATION_FILES_INVALID = "migration_files_invalid"
-    SNAPSHOT_CONSISTENT = "snapshot_consistent_001_009"
+    SNAPSHOT_CONSISTENT = "snapshot_consistent"
     SNAPSHOT_PARTIAL = "snapshot_partial"
     SNAPSHOT_AMBIGUOUS = "snapshot_ambiguous"
     SNAPSHOT_LATER = "snapshot_later_than_authorized"
@@ -152,9 +153,24 @@ class MigrationSpec:
 
 @dataclass(frozen=True)
 class AuthorityManifest:
-    canonical: tuple[MigrationSpec, ...]
+    snapshots: Mapping[str, "AuthoritySnapshot"]
+    current_snapshot: str
     reserved_versions: tuple[str, ...]
     next_canonical_version: str
+
+    @property
+    def canonical(self) -> tuple[MigrationSpec, ...]:
+        return self.snapshots[self.current_snapshot].canonical
+
+    @property
+    def schema_contract(self) -> Mapping[str, Any]:
+        return self.snapshots[self.current_snapshot].schema_contract
+
+
+@dataclass(frozen=True)
+class AuthoritySnapshot:
+    terminal_migration: str
+    canonical: tuple[MigrationSpec, ...]
     schema_contract: Mapping[str, Any]
 
 
@@ -687,7 +703,7 @@ def _validate_contract(contract: Any) -> dict[str, Any]:
                 raise AuthorityConfigurationError("non-foreign constraint actions are invalid")
         for raw_index in indexes:
             index = _require_exact_keys(raw_index, INDEX_KEYS, "index")
-            if type(index["unique"]) is not bool or index["method"] != "btree":
+            if type(index["unique"]) is not bool or index["method"] not in {"btree", "gin"}:
                 raise AuthorityConfigurationError("index method or uniqueness is invalid")
             keys = index["keys"]
             if type(keys) is not list or not keys:
@@ -729,32 +745,34 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
         )
         _validate_plain_json(raw)
         raw = _require_exact_keys(raw, MANIFEST_KEYS, "manifest")
-        if type(raw["format_version"]) is not int or raw["format_version"] != 2 or raw["authority"] != "propertymanager":
+        if type(raw["format_version"]) is not int or raw["format_version"] != 3 or raw["authority"] != "propertymanager":
             raise AuthorityConfigurationError("authority manifest version is invalid")
-        entries = raw["canonical_migrations"]
-        expected_versions = ("001", "002", "003", "004", "005", "006", "009")
-        if type(entries) is not list or len(entries) != len(expected_versions):
-            raise AuthorityConfigurationError("canonical migration list is invalid")
-        canonical: list[MigrationSpec] = []
-        for position, raw_entry in enumerate(entries, 1):
-            entry = _require_exact_keys(raw_entry, MIGRATION_KEYS, "migration")
-            spec = MigrationSpec(
-                entry["version"], entry["order"], entry["filename"], entry["sha256"], entry["reapplication_permitted"]
-            )
-            if (
-                type(spec.version) is not str
-                or spec.version != expected_versions[position - 1]
-                or type(spec.order) is not int
-                or spec.order != position
-                or type(spec.filename) is not str
-                or (match := EXACT_MIGRATION.fullmatch(spec.filename)) is None
-                or match.group("version") != spec.version
-                or type(spec.sha256) is not str
-                or SHA256.fullmatch(spec.sha256) is None
-                or type(spec.reapplication_permitted) is not bool
-            ):
-                raise AuthorityConfigurationError("canonical migration entry is invalid")
-            canonical.append(spec)
+        snapshots = raw["snapshots"]
+        if type(snapshots) is not dict or list(snapshots) != ["009", "010"] or raw["current_snapshot"] != "010":
+            raise AuthorityConfigurationError("snapshot declarations are invalid")
+        expected_versions = {"009": ("001", "002", "003", "004", "005", "006", "009"), "010": ("001", "002", "003", "004", "005", "006", "009", "010")}
+        parsed_snapshots: dict[str, AuthoritySnapshot] = {}
+        for terminal, expected in expected_versions.items():
+            record = _require_exact_keys(snapshots[terminal], SNAPSHOT_RECORD_KEYS, "snapshot record")
+            if record["terminal_migration"] != terminal or type(record["canonical_migrations"]) is not list:
+                raise AuthorityConfigurationError("snapshot record is invalid")
+            entries = record["canonical_migrations"]
+            if len(entries) != len(expected):
+                raise AuthorityConfigurationError("canonical migration list is invalid")
+            canonical: list[MigrationSpec] = []
+            for position, raw_entry in enumerate(entries, 1):
+                entry = _require_exact_keys(raw_entry, MIGRATION_KEYS, "migration")
+                spec = MigrationSpec(entry["version"], entry["order"], entry["filename"], entry["sha256"], entry["reapplication_permitted"])
+                if (
+                    type(spec.version) is not str or spec.version != expected[position - 1]
+                    or type(spec.order) is not int or spec.order != position
+                    or type(spec.filename) is not str or (match := EXACT_MIGRATION.fullmatch(spec.filename)) is None
+                    or match.group("version") != spec.version or type(spec.sha256) is not str
+                    or SHA256.fullmatch(spec.sha256) is None or type(spec.reapplication_permitted) is not bool
+                ):
+                    raise AuthorityConfigurationError("canonical migration entry is invalid")
+                canonical.append(spec)
+            parsed_snapshots[terminal] = AuthoritySnapshot(terminal, tuple(canonical), _validate_contract(record["schema_contract"]))
         reserved = raw["reserved_versions"]
         if type(reserved) is not list or len(reserved) != 2:
             raise AuthorityConfigurationError("reserved migration list is invalid")
@@ -765,9 +783,9 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
                 raise AuthorityConfigurationError("reserved migration entry is invalid")
             _safe_contract_text(entry["reason"], "reserved migration reason")
             reserved_versions.append(entry["version"])
-        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "010":
+        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "011":
             raise AuthorityConfigurationError("reserved or next migration version is invalid")
-        return AuthorityManifest(tuple(canonical), ("007", "008"), "010", _validate_contract(raw["schema_contract"]))
+        return AuthorityManifest(parsed_snapshots, "010", ("007", "008"), "011")
     except AuthorityConfigurationError:
         raise
     except (BoundedInputError, MemoryError, RecursionError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
@@ -1001,7 +1019,14 @@ def _classify_schema(expected: Mapping[str, Any], supplied: Any) -> AuditStatus 
         return AuditStatus.SNAPSHOT_AMBIGUOUS
 
 
-def _classify_ledger(manifest: AuthorityManifest, ledger: Any) -> AuditStatus | None:
+def _select_snapshot(manifest: AuthorityManifest, terminal_migration: str | None) -> AuthoritySnapshot | None:
+    selected = manifest.current_snapshot if terminal_migration is None else terminal_migration
+    if type(selected) is not str or selected not in manifest.snapshots:
+        return None
+    return manifest.snapshots[selected]
+
+
+def _classify_ledger(snapshot: AuthoritySnapshot, ledger: Any) -> AuditStatus | None:
     try:
         if type(ledger) is not dict or set(ledger) != LEDGER_KEYS:
             return AuditStatus.LEDGER_INCONSISTENT
@@ -1021,11 +1046,9 @@ def _classify_ledger(manifest: AuthorityManifest, ledger: Any) -> AuditStatus | 
                 or type(entry["sha256"]) is not str
             ):
                 return AuditStatus.LEDGER_INCONSISTENT
-            if entry["version"] > "009":
-                return AuditStatus.SNAPSHOT_LATER
         expected = [
             {"order": spec.order, "version": spec.version, "filename": spec.filename, "sha256": spec.sha256}
-            for spec in manifest.canonical
+            for spec in snapshot.canonical
         ]
         return None if entries == expected else AuditStatus.LEDGER_INCONSISTENT
     except (MemoryError, RecursionError, TypeError, ValueError, KeyError):
@@ -1033,7 +1056,7 @@ def _classify_ledger(manifest: AuthorityManifest, ledger: Any) -> AuditStatus | 
 
 
 def _audit_supplied_metadata(
-    metadata: Any, expected_identity: ExpectedIdentity, manifest: AuthorityManifest
+    metadata: Any, expected_identity: ExpectedIdentity, manifest: AuthorityManifest, *, terminal_migration: str | None = None
 ) -> AuditResult:
     assurance = "unproven"
     try:
@@ -1060,17 +1083,16 @@ def _audit_supplied_metadata(
         for field in ("concurrent_migration_activity", "unexplained_schema_objects"):
             if type(metadata[field]) is not bool or metadata[field]:
                 return _result(AuditStatus.SNAPSHOT_AMBIGUOUS, manifest, identity_assurance=assurance)
+        snapshot = _select_snapshot(manifest, terminal_migration)
+        if snapshot is None:
+            return _result(AuditStatus.SNAPSHOT_AMBIGUOUS, manifest, (Diagnostic("snapshot_unknown", "requested snapshot is unavailable"),), identity_assurance=assurance)
         declared = metadata["declared_version"]
-        if type(declared) is not str or re.fullmatch(r"[0-9]{3}", declared) is None:
+        if type(declared) is not str or declared != snapshot.terminal_migration:
             return _result(AuditStatus.SNAPSHOT_AMBIGUOUS, manifest, identity_assurance=assurance)
-        if declared < "009":
-            return _result(AuditStatus.SNAPSHOT_PARTIAL, manifest, identity_assurance=assurance)
-        if declared > "009":
-            return _result(AuditStatus.SNAPSHOT_LATER, manifest, identity_assurance=assurance)
-        ledger_status = _classify_ledger(manifest, metadata["ledger"])
+        ledger_status = _classify_ledger(snapshot, metadata["ledger"])
         if ledger_status:
             return _result(ledger_status, manifest, identity_assurance=assurance)
-        schema_status = _classify_schema(manifest.schema_contract, metadata["schema"])
+        schema_status = _classify_schema(snapshot.schema_contract, metadata["schema"])
         if schema_status:
             return _result(schema_status, manifest, identity_assurance=assurance)
         return _result(AuditStatus.SNAPSHOT_CONSISTENT, manifest, identity_assurance=assurance)
@@ -1078,7 +1100,9 @@ def _audit_supplied_metadata(
         return _result(AuditStatus.SNAPSHOT_AMBIGUOUS, manifest, identity_assurance=assurance)
 
 
-def audit_schema_metadata(source: SchemaMetadataSource, expected_identity: ExpectedIdentity) -> AuditResult:
+def audit_schema_metadata(
+    source: SchemaMetadataSource, expected_identity: ExpectedIdentity, *, terminal_migration: str | None = None
+) -> AuditResult:
     """Compare an untrusted supplied snapshot; never verify a real database."""
     try:
         file_result, manifest = _audit_migration_authority_at(CANONICAL_MIGRATION_DIR, CANONICAL_MANIFEST)
@@ -1109,7 +1133,7 @@ def audit_schema_metadata(source: SchemaMetadataSource, expected_identity: Expec
             identity_assurance="unproven",
         )
     try:
-        return _audit_supplied_metadata(metadata, expected_identity, manifest)
+        return _audit_supplied_metadata(metadata, expected_identity, manifest, terminal_migration=terminal_migration)
     except (BaseException,) as exc:
         if isinstance(exc, (KeyboardInterrupt, SystemExit)):
             raise

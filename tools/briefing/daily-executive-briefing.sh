@@ -3,7 +3,7 @@ set -u
 
 export TZ="America/Chicago"
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 REPORT_DIR="$BASE/reports/daily-briefings"
 mkdir -p "$REPORT_DIR"
 
@@ -359,7 +359,10 @@ fi
 
 PROPERTY_REPORT="$($BASE/tools/property_manager/propertymanager-summary.sh 2>/dev/null | sed -n '1,28p' || true)"
 CALENDAR_REPORT="$($BASE/tools/calendar/apple-calendar-summary.sh 2>/dev/null | sed -n '1,22p' || true)"
-MAIL_REPORT="$(MAILMANAGER_TELEGRAM=0 $BASE/tools/mailmanager/mailmanager2-summary.sh 2>/dev/null | sed -n '1,22p' || true)"
+
+MAIL_REPORT="MailManager unavailable in this beta migration.
+Legacy MailManager 2.0 is intentionally disabled because its summary path could mutate Gmail state.
+Read-only mail summary replacement pending."
 
 INTEL_DISK="$(disk_line /)"
 AI_DISK="$(disk_line /mnt/ai-storage)"

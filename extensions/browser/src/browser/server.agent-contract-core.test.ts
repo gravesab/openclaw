@@ -1,6 +1,10 @@
+// Browser tests cover server.agent contract core plugin behavior.
 import fs from "node:fs";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { expectDefined } from "@openclaw/normalization-core";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_AI_SNAPSHOT_MAX_CHARS } from "./constants.js";
+import { ACT_ERROR_CODES } from "./routes/agent.act.errors.js";
+import { isActKind } from "./routes/agent.act.shared.js";
 import {
   installAgentContractHooks,
   postJson,
@@ -15,11 +19,22 @@ import {
   makeResponse,
   resetBrowserControlServerTestContext,
   setBrowserControlServerEvaluateEnabled,
+  setBrowserControlServerExtraArgs,
   setBrowserControlServerProfiles,
   setBrowserControlServerReachable,
+  setBrowserControlServerSsrFPolicy,
+  setBrowserControlServerTabUrl,
   startBrowserControlServerFromConfig,
 } from "./server.control-server.test-harness.js";
 import { getBrowserTestFetch } from "./test-support/fetch.js";
+
+const BROWSER_NAVIGATION_BLOCKED_MESSAGE = "browser navigation blocked by policy";
+const NAVIGATION_TIMEOUT_CASES = [
+  { requestedTimeoutMs: 10, expectedTimeoutMs: 1_000 },
+  { requestedTimeoutMs: 45_000, expectedTimeoutMs: 45_000 },
+  { requestedTimeoutMs: 180_000, expectedTimeoutMs: 120_000 },
+  { requestedTimeoutMs: 3_000_000_000, expectedTimeoutMs: 120_000 },
+] as const;
 
 type ActErrorResponse = {
   error?: string;
@@ -77,21 +92,27 @@ async function postActAndReadError(base: string, body?: unknown): Promise<ActErr
 const state = getBrowserControlServerTestState();
 const cdpMocks = getCdpMocks();
 const pwMocks = getPwMocks();
+function requirePwMock<K extends keyof typeof pwMocks>(name: K): NonNullable<(typeof pwMocks)[K]> {
+  return expectDefined(pwMocks[name], `Playwright mock ${name}`);
+}
 
 describe("browser control server", () => {
   installAgentContractHooks();
 
   const slowTimeoutMs = 60_000;
 
+  beforeAll(async () => {
+    await resetBrowserControlServerTestContext();
+    await startBrowserControlServerFromConfig();
+    await cleanupBrowserControlServerTestContext();
+  }, slowTimeoutMs);
+
   it(
     "returns ACT_KIND_REQUIRED when kind is missing",
-    async () => {
-      const base = await startServerAndBase();
-      const response = await postActAndReadError(base, {});
-
-      expect(response.status).toBe(400);
-      expect(response.body.code).toBe("ACT_KIND_REQUIRED");
-      expect(response.body.error).toContain("kind is required");
+    () => {
+      expect(isActKind(undefined)).toBe(false);
+      expect(isActKind("")).toBe(false);
+      expect(ACT_ERROR_CODES.kindRequired).toBe("ACT_KIND_REQUIRED");
     },
     slowTimeoutMs,
   );
@@ -125,6 +146,28 @@ describe("browser control server", () => {
       expect(response.status).toBe(400);
       expect(response.body.code).toBe("ACT_INVALID_REQUEST");
       expect(response.body.error).toContain("clickCoords requires non-negative x and y");
+    },
+    slowTimeoutMs,
+  );
+
+  it.each([
+    {
+      body: { kind: "clickCoords", x: "0x10", y: "20" },
+      message: "x must be a finite number",
+    },
+    {
+      body: { kind: "clickCoords", x: "20", y: "0x10" },
+      message: "y must be a finite number",
+    },
+  ])(
+    "returns ACT_INVALID_REQUEST for non-decimal coordinate clicks",
+    async ({ body, message }) => {
+      const base = await startServerAndBase();
+      const response = await postActAndReadError(base, body);
+
+      expect(response.status).toBe(400);
+      expect(response.body.code).toBe("ACT_INVALID_REQUEST");
+      expect(response.body.error).toContain(message);
     },
     slowTimeoutMs,
   );
@@ -188,10 +231,71 @@ describe("browser control server", () => {
   );
 
   it(
+    "forwards the resolved browser proxy mode to Playwright actions",
+    async () => {
+      setBrowserControlServerExtraArgs(["--proxy-server=http://proxy.example:8080"]);
+      const base = await startServerAndBase();
+
+      const response = await postJson<{ ok: boolean }>(`${base}/act`, {
+        kind: "hover",
+        ref: "1",
+      });
+
+      expect(response.ok).toBe(true);
+      const execArgs = mockFirstArg(requirePwMock("executeActViaPlaywright"), 0, "executeAct");
+      expect(execArgs.browserProxyMode).toBe("explicit-browser-proxy");
+      const hoverArgs = mockFirstArg(requirePwMock("hoverViaPlaywright"), 0, "hover");
+      expect(hoverArgs.browserProxyMode).toBe("explicit-browser-proxy");
+    },
+    slowTimeoutMs,
+  );
+
+  it(
+    "canonicalizes a unique targetId prefix to the request tab before dispatch",
+    async () => {
+      const base = await startServerAndBase();
+      // "abcd" is a unique prefix of the canonical targetId "abcd1234". The route
+      // must rewrite the action's targetId to the canonical id, because the
+      // Playwright executor reads `action.targetId ?? targetId` for an exact page
+      // lookup; a surviving alias would miss the lookup and break at runtime.
+      const response = await postJson<{ ok: boolean }>(`${base}/act`, {
+        kind: "click",
+        ref: "1",
+        targetId: "abcd",
+      });
+
+      expect(response.ok).toBe(true);
+      const execArgs = mockFirstArg(requirePwMock("executeActViaPlaywright"), 0, "executeAct");
+      const action = execArgs.action as { targetId?: string };
+      expect(action.targetId).toBe("abcd1234");
+    },
+    slowTimeoutMs,
+  );
+
+  it(
+    "canonicalizes a batched sub-action targetId alias before dispatch",
+    async () => {
+      const base = await startServerAndBase();
+      const response = await postJson<{ ok: boolean }>(`${base}/act`, {
+        kind: "batch",
+        targetId: "abcd1234",
+        // Sub-action references the same tab via a unique prefix alias.
+        actions: [{ kind: "click", ref: "1", targetId: "abcd" }],
+      });
+
+      expect(response.ok).toBe(true);
+      const execArgs = mockFirstArg(requirePwMock("executeActViaPlaywright"), 0, "executeAct");
+      const action = execArgs.action as { actions?: Array<{ targetId?: string }> };
+      expect(action.actions?.[0]?.targetId).toBe("abcd1234");
+    },
+    slowTimeoutMs,
+  );
+
+  it(
     "returns the replacement targetId after an action-triggered target swap",
     async () => {
       const base = await startServerAndBase();
-      pwMocks.clickViaPlaywright.mockImplementationOnce(async () => {
+      requirePwMock("clickViaPlaywright").mockImplementationOnce(async () => {
         vi.stubGlobal(
           "fetch",
           vi.fn(async (url: string) => {
@@ -219,6 +323,80 @@ describe("browser control server", () => {
 
       expect(response.ok).toBe(true);
       expect(response.targetId).toBe("fresh5678");
+    },
+    slowTimeoutMs,
+  );
+
+  it(
+    "returns blocked dialog state for action-triggered modals",
+    async () => {
+      const base = await startServerAndBase();
+      requirePwMock("executeActViaPlaywright").mockResolvedValueOnce({
+        blockedByDialog: true,
+        browserState: {
+          dialogs: {
+            pending: [
+              {
+                id: "d1",
+                type: "confirm",
+                message: "Continue?",
+                openedAt: "2026-05-17T12:00:00.000Z",
+              },
+            ],
+            recent: [],
+          },
+        },
+      });
+
+      const response = await postJson<{
+        ok: boolean;
+        blockedByDialog?: boolean;
+        browserState?: { dialogs?: { pending?: Array<{ id?: string; message?: string }> } };
+      }>(`${base}/act`, {
+        kind: "click",
+        ref: "5",
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.blockedByDialog).toBe(true);
+      expect(response.browserState?.dialogs?.pending?.[0]).toMatchObject({
+        id: "d1",
+        message: "Continue?",
+      });
+    },
+    slowTimeoutMs,
+  );
+
+  it(
+    "returns action download metadata from /act responses",
+    async () => {
+      const base = await startServerAndBase();
+      requirePwMock("executeActViaPlaywright").mockResolvedValueOnce({
+        downloads: [
+          {
+            url: "https://example.com/report.pdf",
+            suggestedFilename: "report.pdf",
+            path: "/tmp/openclaw/downloads/report.pdf",
+          },
+        ],
+      });
+
+      const response = await postJson<{
+        ok: boolean;
+        downloads?: Array<{ url?: string; suggestedFilename?: string; path?: string }>;
+      }>(`${base}/act`, {
+        kind: "click",
+        ref: "5",
+      });
+
+      expect(response.ok).toBe(true);
+      expect(response.downloads).toEqual([
+        {
+          url: "https://example.com/report.pdf",
+          suggestedFilename: "report.pdf",
+          path: "/tmp/openclaw/downloads/report.pdf",
+        },
+      ]);
     },
     slowTimeoutMs,
   );
@@ -285,7 +463,7 @@ describe("browser control server", () => {
       wsUrl: "ws://127.0.0.1/devtools/page/abcd1234",
       limit: 1,
     });
-    expect(pwMocks.storeAriaSnapshotRefsViaPlaywright).toHaveBeenCalledWith({
+    expect(requirePwMock("storeAriaSnapshotRefsViaPlaywright")).toHaveBeenCalledWith({
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
       nodes: [{ ref: "1", role: "link", name: "x", depth: 0 }],
@@ -297,7 +475,7 @@ describe("browser control server", () => {
     };
     expect(snapAi.ok).toBe(true);
     expect(snapAi.format).toBe("ai");
-    expect(pwMocks.snapshotAiViaPlaywright).toHaveBeenCalledWith({
+    expect(requirePwMock("snapshotAiViaPlaywright")).toHaveBeenCalledWith({
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
       maxChars: DEFAULT_AI_SNAPSHOT_MAX_CHARS,
@@ -311,7 +489,7 @@ describe("browser control server", () => {
     )) as { ok: boolean; format?: string };
     expect(snapAiZero.ok).toBe(true);
     expect(snapAiZero.format).toBe("ai");
-    const [lastCall] = pwMocks.snapshotAiViaPlaywright.mock.calls.at(-1) ?? [];
+    const [lastCall] = requirePwMock("snapshotAiViaPlaywright").mock.calls.at(-1) ?? [];
     expect(lastCall).toEqual({
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
@@ -320,7 +498,9 @@ describe("browser control server", () => {
       },
     });
 
-    pwMocks.snapshotRoleViaPlaywright.mockRejectedValueOnce(new Error("playwright stale page"));
+    requirePwMock("snapshotRoleViaPlaywright").mockRejectedValueOnce(
+      new Error("playwright stale page"),
+    );
     const fallback = (await realFetch(`${base}/snapshot?format=ai&interactive=true`).then((r) =>
       r.json(),
     )) as { ok: boolean; format?: string; snapshot?: string };
@@ -330,12 +510,75 @@ describe("browser control server", () => {
     expect(cdpMocks.snapshotRoleViaCdp).toHaveBeenCalledWith({
       wsUrl: "ws://127.0.0.1/devtools/page/abcd1234",
       urls: undefined,
+      maxChars: DEFAULT_AI_SNAPSHOT_MAX_CHARS,
+      timeoutMs: undefined,
       options: {
         interactive: true,
         compact: undefined,
         maxDepth: undefined,
       },
     });
+  });
+
+  it("agent contract: snapshot surfaces pending dialog state without reading the blocked page", async () => {
+    const base = await startServerAndBase();
+    const realFetch = getBrowserTestFetch();
+    requirePwMock("getObservedBrowserStateViaPlaywright").mockResolvedValueOnce({
+      dialogs: {
+        pending: [
+          {
+            id: "d1",
+            type: "confirm",
+            message: "Continue?",
+            openedAt: "2026-05-17T12:00:00.000Z",
+          },
+        ],
+        recent: [],
+      },
+    });
+
+    const snap = (await realFetch(`${base}/snapshot?format=ai`).then((r) => r.json())) as {
+      ok: boolean;
+      blockedByDialog?: boolean;
+      browserState?: { dialogs?: { pending?: Array<{ id?: string; message?: string }> } };
+      snapshot?: string;
+    };
+
+    expect(snap.ok).toBe(true);
+    expect(snap.blockedByDialog).toBe(true);
+    expect(snap.snapshot).toBe("");
+    expect(snap.browserState?.dialogs?.pending?.[0]).toMatchObject({
+      id: "d1",
+      message: "Continue?",
+    });
+    expect(requirePwMock("snapshotAiViaPlaywright")).not.toHaveBeenCalled();
+  });
+
+  it("agent contract: snapshot blocks pending dialog state on disallowed current tab URLs", async () => {
+    setBrowserControlServerSsrFPolicy({ allowPrivateNetwork: false });
+    setBrowserControlServerTabUrl("http://127.0.0.1:8080/admin");
+    const base = await startServerAndBase();
+    const realFetch = getBrowserTestFetch();
+    requirePwMock("getObservedBrowserStateViaPlaywright").mockResolvedValueOnce({
+      dialogs: {
+        pending: [
+          {
+            id: "d1",
+            type: "alert",
+            message: "blocked secret",
+            openedAt: "2026-05-17T12:00:00.000Z",
+          },
+        ],
+        recent: [],
+      },
+    });
+
+    const res = await realFetch(`${base}/snapshot?format=ai`);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error?: unknown };
+    expect(body.error).toBe(BROWSER_NAVIGATION_BLOCKED_MESSAGE);
+    expect(requirePwMock("getObservedBrowserStateViaPlaywright")).not.toHaveBeenCalled();
+    expect(requirePwMock("snapshotAiViaPlaywright")).not.toHaveBeenCalled();
   });
 
   it("agent contract: doctor deep runs a live snapshot probe", async () => {
@@ -356,6 +599,53 @@ describe("browser control server", () => {
     });
   });
 
+  it.each(NAVIGATION_TIMEOUT_CASES)(
+    "forwards timer-safe navigation timeout $requestedTimeoutMs to the Playwright backend",
+    async ({ requestedTimeoutMs, expectedTimeoutMs }) => {
+      const base = await startServerAndBase();
+
+      const response = await postJson<{ ok: boolean }>(`${base}/navigate`, {
+        url: "https://example.com/slow",
+        timeoutMs: requestedTimeoutMs,
+      });
+
+      expect(response.ok).toBe(true);
+      expect(requirePwMock("navigateViaPlaywright")).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://example.com/slow",
+          timeoutMs: expectedTimeoutMs,
+        }),
+      );
+    },
+  );
+
+  it.each(NAVIGATION_TIMEOUT_CASES)(
+    "forwards timer-safe navigation timeout $requestedTimeoutMs to the Chrome MCP backend",
+    async ({ requestedTimeoutMs, expectedTimeoutMs }) => {
+      setBrowserControlServerProfiles({
+        openclaw: { color: "#FF4500", driver: "existing-session" },
+      });
+      const base = await startServerAndBase();
+
+      const response = await postJson<{ ok: boolean }>(`${base}/navigate`, {
+        url: "https://example.com/slow",
+        targetId: "7",
+        timeoutMs: requestedTimeoutMs,
+      });
+
+      expect(response.ok).toBe(true);
+      const chromeMcp = await vi.importMock<typeof import("./chrome-mcp.js")>("./chrome-mcp.js");
+      expect(chromeMcp.navigateChromeMcpPage).toHaveBeenCalledWith(
+        expect.objectContaining({
+          profileName: "openclaw",
+          targetId: "7",
+          url: "https://example.com/slow",
+          timeoutMs: expectedTimeoutMs,
+        }),
+      );
+    },
+  );
+
   it("agent contract: navigation + common act commands", async () => {
     const base = await startServerAndBase();
     const realFetch = getBrowserTestFetch();
@@ -365,7 +655,7 @@ describe("browser control server", () => {
     });
     expect(nav.ok).toBe(true);
     expect(typeof nav.targetId).toBe("string");
-    const navigateArgs = mockFirstArg(pwMocks.navigateViaPlaywright, 0, "navigate");
+    const navigateArgs = mockFirstArg(requirePwMock("navigateViaPlaywright"), 0, "navigate");
     expectRecordFields(navigateArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
@@ -382,7 +672,7 @@ describe("browser control server", () => {
       modifiers: ["Shift"],
     });
     expect(click.ok).toBe(true);
-    const clickArgs = mockFirstArg(pwMocks.clickViaPlaywright, 0, "click");
+    const clickArgs = mockFirstArg(requirePwMock("clickViaPlaywright"), 0, "click");
     expectRecordFields(clickArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
@@ -402,7 +692,7 @@ describe("browser control server", () => {
     });
     expect(clickSelector.status).toBe(200);
     expect(((await clickSelector.json()) as { ok?: boolean }).ok).toBe(true);
-    const clickSelectorArgs = mockFirstArg(pwMocks.clickViaPlaywright, 1, "click");
+    const clickSelectorArgs = mockFirstArg(requirePwMock("clickViaPlaywright"), 1, "click");
     expectRecordFields(clickSelectorArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
@@ -423,7 +713,11 @@ describe("browser control server", () => {
     });
     expect(clickCoords.ok).toBe(true);
     expect(clickCoords.url).toBe("https://example.com");
-    const clickCoordsArgs = mockFirstArg(pwMocks.clickCoordsViaPlaywright, 0, "click coords");
+    const clickCoordsArgs = mockFirstArg(
+      requirePwMock("clickCoordsViaPlaywright"),
+      0,
+      "click coords",
+    );
     expectRecordFields(clickCoordsArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
@@ -443,7 +737,7 @@ describe("browser control server", () => {
       text: "",
     });
     expect(type.ok).toBe(true);
-    const typeArgs = mockFirstArg(pwMocks.typeViaPlaywright, 0, "type");
+    const typeArgs = mockFirstArg(requirePwMock("typeViaPlaywright"), 0, "type");
     expectRecordFields(typeArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
@@ -461,7 +755,7 @@ describe("browser control server", () => {
       key: "Enter",
     });
     expect(press.ok).toBe(true);
-    const pressArgs = mockFirstArg(pwMocks.pressKeyViaPlaywright, 0, "press");
+    const pressArgs = mockFirstArg(requirePwMock("pressKeyViaPlaywright"), 0, "press");
     expectRecordFields(pressArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
@@ -477,11 +771,14 @@ describe("browser control server", () => {
       ref: "2",
     });
     expect(hover.ok).toBe(true);
-    const hoverArgs = mockFirstArg(pwMocks.hoverViaPlaywright, 0, "hover");
+    const hoverArgs = mockFirstArg(requirePwMock("hoverViaPlaywright"), 0, "hover");
     expectRecordFields(hoverArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
       ref: "2",
+      ssrfPolicy: {
+        dangerouslyAllowPrivateNetwork: true,
+      },
     });
     expect((hoverArgs as { timeoutMs?: number }).timeoutMs).toBeUndefined();
 
@@ -490,11 +787,14 @@ describe("browser control server", () => {
       ref: "2",
     });
     expect(scroll.ok).toBe(true);
-    const scrollArgs = mockFirstArg(pwMocks.scrollIntoViewViaPlaywright, 0, "scroll");
+    const scrollArgs = mockFirstArg(requirePwMock("scrollIntoViewViaPlaywright"), 0, "scroll");
     expectRecordFields(scrollArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
       ref: "2",
+      ssrfPolicy: {
+        dangerouslyAllowPrivateNetwork: true,
+      },
     });
     expect((scrollArgs as { timeoutMs?: number }).timeoutMs).toBeUndefined();
 
@@ -504,12 +804,15 @@ describe("browser control server", () => {
       endRef: "4",
     });
     expect(drag.ok).toBe(true);
-    const dragArgs = mockFirstArg(pwMocks.dragViaPlaywright, 0, "drag");
+    const dragArgs = mockFirstArg(requirePwMock("dragViaPlaywright"), 0, "drag");
     expectRecordFields(dragArgs, {
       cdpUrl: state.cdpBaseUrl,
       targetId: "abcd1234",
       startRef: "3",
       endRef: "4",
+      ssrfPolicy: {
+        dangerouslyAllowPrivateNetwork: true,
+      },
     });
     expect((dragArgs as { timeoutMs?: number }).timeoutMs).toBeUndefined();
   });

@@ -1,21 +1,31 @@
+// Qa Lab tests cover gateway log sentinel plugin behavior.
 import { describe, expect, it } from "vitest";
 import {
   assertNoGatewayLogSentinels,
+  extractGatewayMessageText,
   formatGatewayLogSentinelSummary,
   scanDirectReplyTranscriptSentinels,
   scanGatewayLogSentinels,
 } from "./gateway-log-sentinel.js";
 
 describe("gateway log sentinels", () => {
+  it.each([
+    [{ content: [{ type: "toolResult", content: "codex output" }] }, "codex output"],
+    [{ content: [{ type: "text", text: "standard output" }] }, "standard output"],
+  ])("extracts message text from tool result shapes", (message, expected) => {
+    expect(extractGatewayMessageText(message)).toBe(expected);
+  });
+
   it("classifies May 13 beta.5 operational failure signatures", () => {
     const findings = scanGatewayLogSentinels(
       [
         "2026-05-13T00:00:01Z plugin before_prompt_build hook failed: TypeError: boom",
         "2026-05-13T00:00:02Z plugin before_tool_call crashed while evaluating policy",
         "2026-05-13T00:00:03Z plugin manifest invalid: missing contracts.tools registration",
+        "[plugins] plugin must declare contracts.tools for: runtime_tool",
         "2026-05-13T00:00:04Z codex app-server attempt timed out after 180000ms",
         "2026-05-13T00:00:05Z codex_app_server progress stalled for run abc123",
-        "2026-05-13T00:00:06Z cron payload model openai/gpt-5.4 is not in model allowlist",
+        "2026-05-13T00:00:06Z cron payload model openai/gpt-5.6-luna is not in model allowlist",
         "2026-05-13T00:00:07Z OpenAI quota exceeded for live-frontier request",
       ].join("\n"),
     );
@@ -23,6 +33,7 @@ describe("gateway log sentinels", () => {
     expect(findings.map((finding) => finding.kind)).toEqual([
       "plugin-hook-failure",
       "plugin-hook-failure",
+      "plugin-contract-error",
       "plugin-contract-error",
       "codex-app-server-timeout",
       "stalled-agent-run",

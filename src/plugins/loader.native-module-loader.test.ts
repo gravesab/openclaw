@@ -1,19 +1,14 @@
+/** Verifies plugin loader behavior for native module loading and resolver hooks. */
 import fs from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { importFreshModule } from "openclaw/plugin-sdk/test-fixtures";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createTempDirTracker } from "../../test/helpers/temp-dir.js";
 
-const tempDirs: string[] = [];
-
-function makeTempDir() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-plugin-loader-"));
-  tempDirs.push(dir);
-  return dir;
-}
+const tempDirs = createTempDirTracker();
 
 function writeBundledPluginFixture(id: string) {
-  const pluginRoot = makeTempDir();
+  const pluginRoot = tempDirs.make("openclaw-plugin-loader-");
   fs.writeFileSync(
     path.join(pluginRoot, "openclaw.plugin.json"),
     JSON.stringify(
@@ -39,7 +34,7 @@ function writeBundledPluginFixture(id: string) {
 }
 
 function writePackagedPluginFixture(id: string) {
-  const pluginRoot = makeTempDir();
+  const pluginRoot = tempDirs.make("openclaw-plugin-loader-");
   fs.writeFileSync(
     path.join(pluginRoot, "package.json"),
     JSON.stringify(
@@ -83,9 +78,7 @@ afterEach(() => {
   vi.resetModules();
   vi.doUnmock("./plugin-module-loader-cache.js");
   delete process.env.OPENCLAW_BUNDLED_PLUGINS_DIR;
-  for (const dir of tempDirs.splice(0)) {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+  tempDirs.cleanup();
 });
 
 function mockSourceLoaderCalls() {
@@ -125,6 +118,7 @@ describe("createPluginModuleLoader", () => {
 
     loadOpenClawPlugins({
       cache: false,
+      installRecords: {},
       workspaceDir: pluginRoot,
       onlyPluginIds: ["demo"],
       config: {
@@ -150,10 +144,12 @@ describe("createPluginModuleLoader", () => {
     );
 
     const pluginRoot = writePackagedPluginFixture("npm-demo");
-    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = makeTempDir();
+    process.env.OPENCLAW_BUNDLED_PLUGINS_DIR = tempDirs.make("openclaw-plugin-loader-");
 
     const registry = loadOpenClawPlugins({
       cache: false,
+      installRecords: {},
+      onlyPluginIds: ["npm-demo"],
       config: {
         plugins: {
           enabled: true,

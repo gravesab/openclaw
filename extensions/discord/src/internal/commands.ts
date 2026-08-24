@@ -1,3 +1,4 @@
+// Discord plugin module implements commands behavior.
 import {
   ApplicationCommandOptionType,
   ApplicationCommandType,
@@ -6,9 +7,10 @@ import {
 } from "discord-api-types/v10";
 import type { BaseMessageInteractiveComponent } from "./components.js";
 import type { AutocompleteInteraction, CommandInteraction } from "./interactions.js";
+import { stripUndefinedFields as clean } from "./undefined-fields.js";
 
-export type ConditionalCommandOption = (interaction: unknown) => boolean;
-export type CommandOption = Record<string, unknown> & {
+type ConditionalCommandOption = (interaction: unknown) => boolean;
+type CommandOption = Record<string, unknown> & {
   name: string;
   description?: string;
   type: ApplicationCommandOptionType;
@@ -23,10 +25,6 @@ type RawSubcommandOption = {
   type?: unknown;
   options?: RawSubcommandOption[];
 };
-
-function clean<T extends Record<string, unknown>>(value: T): T {
-  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined)) as T;
-}
 
 function resolveConditionalCommandOption(
   value: boolean | ConditionalCommandOption,
@@ -142,9 +140,6 @@ export abstract class Command extends BaseCommand {
     throw new Error(
       `The ${(interaction as { rawData?: { data?: { name?: string } } }).rawData?.data?.name ?? this.name} command does not support autocomplete`,
     );
-  }
-  async preCheck(interaction: unknown): Promise<unknown> {
-    return Boolean(interaction) || true;
   }
   serializeOptions() {
     return this.options?.map((option) => {

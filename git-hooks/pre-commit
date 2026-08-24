@@ -16,34 +16,61 @@ if [[ ! -f "$FILTER_FILES" ]]; then
   exit 1
 fi
 
-# Security: avoid option-injection from malicious file names (e.g. "--all", "--force").
-# Robustness: NUL-delimited file list handles spaces/newlines safely.
-# Compatibility: use read loops instead of `mapfile` so this runs on macOS Bash 3.x.
-files=()
-while IFS= read -r -d '' file; do
-  files+=("$file")
-done < <(git diff --cached --name-only --diff-filter=ACMR -z)
-
-if [ "${#files[@]}" -eq 0 ]; then
+GIT_DIR="$(git rev-parse --git-dir 2>/dev/null || true)"
+if [[ -n "$GIT_DIR" ]] && \
+  { [[ -f "$GIT_DIR/MERGE_HEAD" ]] || \
+    [[ -f "$GIT_DIR/CHERRY_PICK_HEAD" ]] || \
+    [[ -f "$GIT_DIR/REVERT_HEAD" ]] || \
+    [[ -f "$GIT_DIR/REBASE_HEAD" ]] || \
+    [[ -d "$GIT_DIR/rebase-merge" ]] || \
+    [[ -d "$GIT_DIR/rebase-apply" ]]; }; then
+  # Sequencer commits stage the operation result, not just the user's local edits.
   exit 0
 fi
 
-restage_files=()
-for file in "${files[@]}"; do
-  if ! git check-ignore --no-index -q -- "$file"; then
-    restage_files+=("$file")
+# Security: never expand staged paths into a command line. Every path stream is
+# NUL-delimited, which preserves whitespace, Unicode, newlines, and leading dashes.
+# macOS's ARG_MAX is smaller than a source-replacement commit's path list.
+format_batch_bytes="${OPENCLAW_PRE_COMMIT_BATCH_BYTES:-65536}"
+if ! [[ "$format_batch_bytes" =~ ^[1-9][0-9]*$ ]]; then
+  echo "OPENCLAW_PRE_COMMIT_BATCH_BYTES must be a positive integer" >&2
+  exit 2
+fi
+
+# Bash 3.x supports indexed arrays and ${#value}, but use the C locale so the
+# accounting is byte-based rather than character-based.
+LC_ALL=C
+export LC_ALL
+format_batch=()
+format_batch_size=0
+format_base_size=96
+
+run_format_batch() {
+  if [ "${#format_batch[@]}" -eq 0 ]; then
+    return 0
   fi
-done
+  "$RUN_NODE_TOOL" oxfmt --write --no-error-on-unmatched-pattern -- "${format_batch[@]}"
+  format_batch=()
+  format_batch_size=0
+}
 
-format_files=()
 while IFS= read -r -d '' file; do
-  format_files+=("$file")
-done < <(node "$FILTER_FILES" format -- "${restage_files[@]}")
+  file_size=$((${#file} + 1))
+  if [ "${#format_batch[@]}" -gt 0 ] && \
+    [ $((format_base_size + format_batch_size + file_size)) -gt "$format_batch_bytes" ]; then
+    run_format_batch
+  fi
+  format_batch+=("$file")
+  format_batch_size=$((format_batch_size + file_size))
+done < <(
+  git diff --cached --name-only --diff-filter=ACMR -z |
+    node "$FILTER_FILES" format --stdin0 |
+    git check-ignore --stdin -z --non-matching --verbose |
+    node "$FILTER_FILES" unignored --stdin0
+)
+run_format_batch
 
-if [ "${#format_files[@]}" -gt 0 ]; then
-  "$RUN_NODE_TOOL" oxfmt --write --no-error-on-unmatched-pattern "${format_files[@]}"
-fi
-
-if [ "${#restage_files[@]}" -gt 0 ]; then
-  git add -- "${restage_files[@]}"
-fi
+# Git's NUL pathspec input is the all-staged form: no paths are skipped and
+# `--`-looking names cannot become options. It also avoids a second ARG_MAX risk.
+git diff --cached --name-only --diff-filter=ACMR -z |
+  git add --update --pathspec-from-file=- --pathspec-file-nul

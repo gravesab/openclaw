@@ -1,32 +1,37 @@
+/**
+ * update_plan built-in tool.
+ *
+ * Validates structured model work plans and stores them in tool details for UI/transcript consumers.
+ */
 import { Type } from "typebox";
 import { stringEnum } from "../schema/typebox.js";
 import {
   describeUpdatePlanTool,
   UPDATE_PLAN_TOOL_DISPLAY_SUMMARY,
 } from "../tool-description-presets.js";
-import { type AnyAgentTool, ToolInputError, readStringParam } from "./common.js";
+import { type AnyAgentTool, ToolInputError, readToolStringParam, textResult } from "./common.js";
 
 const PLAN_STEP_STATUSES = ["pending", "in_progress", "completed"] as const;
 
 const UpdatePlanToolSchema = Type.Object({
   explanation: Type.Optional(
     Type.String({
-      description: "Optional short note explaining what changed in the plan.",
+      description: "Short note: what changed.",
     }),
   ),
   plan: Type.Array(
     Type.Object(
       {
-        step: Type.String({ description: "Short plan step." }),
+        step: Type.String({ description: "Short step." }),
         status: stringEnum(PLAN_STEP_STATUSES, {
-          description: 'One of "pending", "in_progress", or "completed".',
+          description: "pending | in_progress | completed.",
         }),
       },
       { additionalProperties: true },
     ),
     {
       minItems: 1,
-      description: "Ordered list of plan steps. At most one step may be in_progress.",
+      description: "Ordered steps; max one in_progress.",
     },
   ),
 });
@@ -47,11 +52,11 @@ function readPlanSteps(params: Record<string, unknown>): UpdatePlanStep[] {
       throw new ToolInputError(`plan[${index}] must be an object`);
     }
     const stepParams = entry as Record<string, unknown>;
-    const step = readStringParam(stepParams, "step", {
+    const step = readToolStringParam(stepParams, "step", {
       required: true,
       label: `plan[${index}].step`,
     });
-    const status = readStringParam(stepParams, "status", {
+    const status = readToolStringParam(stepParams, "status", {
       required: true,
       label: `plan[${index}].status`,
     });
@@ -68,11 +73,13 @@ function readPlanSteps(params: Record<string, unknown>): UpdatePlanStep[] {
 
   const inProgressCount = steps.filter((entry) => entry.status === "in_progress").length;
   if (inProgressCount > 1) {
+    // Multiple in-progress steps make progress state ambiguous for UI and transcript consumers.
     throw new ToolInputError("plan can contain at most one in_progress step");
   }
   return steps;
 }
 
+/** Creates the update_plan tool used by agent runtimes that expose progress planning. */
 export function createUpdatePlanTool(): AnyAgentTool {
   return {
     label: "Update Plan",
@@ -82,16 +89,13 @@ export function createUpdatePlanTool(): AnyAgentTool {
     parameters: UpdatePlanToolSchema,
     execute: async (_toolCallId, args) => {
       const params = args as Record<string, unknown>;
-      const explanation = readStringParam(params, "explanation");
+      const explanation = readToolStringParam(params, "explanation");
       const plan = readPlanSteps(params);
-      return {
-        content: [],
-        details: {
-          status: "updated" as const,
-          ...(explanation ? { explanation } : {}),
-          plan,
-        },
-      };
+      return textResult("Plan updated", {
+        status: "updated" as const,
+        ...(explanation ? { explanation } : {}),
+        plan,
+      });
     },
   };
 }

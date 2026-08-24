@@ -1,13 +1,19 @@
 import SwiftUI
 
 enum OpenClawMacBuildIdentity {
-    #if DEBUG
-    static let environment = "DEV"
-    static let color = Color.orange
-    #else
-    static let environment = "PROD"
-    static let color = Color.green
-    #endif
+    private static let productionBundleIdentifier = "ai.openclaw.mac"
+
+    static var isProduction: Bool {
+        Bundle.main.bundleIdentifier == self.productionBundleIdentifier
+    }
+
+    static var environment: String {
+        self.isProduction ? "PROD" : "DEV"
+    }
+
+    static var color: Color {
+        self.isProduction ? .green : .orange
+    }
 
     static var version: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "unknown"
@@ -20,8 +26,8 @@ enum OpenClawMacBuildIdentity {
 
     static var label: String {
         if let build {
-            return "\(environment) · v\(version) (\(build))"
+            return "\(self.environment) · v\(self.version) (\(build))"
         }
-        return "\(environment) · v\(version)"
+        return "\(self.environment) · v\(self.version)"
     }
 }

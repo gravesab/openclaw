@@ -1,13 +1,14 @@
+/** Tests ACP translator replay ledger recording and load-session replay behavior. */
 import type {
   LoadSessionRequest,
   NewSessionRequest,
   PromptRequest,
 } from "@agentclientprotocol/sdk";
+import { createInMemorySessionStore } from "@openclaw/acp-core/session";
 import { describe, expect, it, vi } from "vitest";
+import type { EventFrame } from "../../packages/gateway-protocol/src/index.js";
 import type { GatewayClient } from "../gateway/client.js";
-import type { EventFrame } from "../gateway/protocol/index.js";
 import { createInMemoryAcpEventLedger, type AcpEventLedger } from "./event-ledger.js";
-import { createInMemorySessionStore } from "./session.js";
 import { AcpGatewayAgent } from "./translator.js";
 import { createAcpConnection, createAcpGateway } from "./translator.test-helpers.js";
 
@@ -110,10 +111,19 @@ describe("ACP translator event ledger replay", () => {
     if (!firstSession) {
       throw new Error("Expected new ACP session to be stored");
     }
-    firstConnection.__sessionUpdateMock.mockClear();
+    firstConnection["__sessionUpdateMock"].mockClear();
 
     const promptPromise = firstAgent.prompt(createPromptRequest(created.sessionId, "Question"));
     await waitForChatSend(firstRequestMock);
+    await vi.waitFor(async () => {
+      const replay = await eventLedger.readReplay({
+        sessionId: created.sessionId,
+        sessionKey: firstSession.sessionKey,
+      });
+      expect(
+        replay.events.some((event) => event.update.sessionUpdate === "user_message_chunk"),
+      ).toBe(true);
+    });
     const runId = firstSessionStore.getSession(created.sessionId)?.activeRunId;
     if (!runId) {
       throw new Error("Expected active ACP run");
@@ -169,7 +179,7 @@ describe("ACP translator event ledger replay", () => {
     await secondAgent.loadSession(createLoadSessionRequest(created.sessionId));
 
     expect(secondRequestMock.mock.calls.map((call) => call[0])).not.toContain("sessions.get");
-    const replayedUpdates = secondConnection.__sessionUpdateMock.mock.calls.map(
+    const replayedUpdates = secondConnection["__sessionUpdateMock"].mock.calls.map(
       (call) => call[0]?.update,
     );
     const replayedUpdateTypes = replayedUpdates.map((update) => update?.sessionUpdate);
@@ -224,7 +234,7 @@ describe("ACP translator event ledger replay", () => {
     await listedAgent.loadSession(createLoadSessionRequest(firstSession.sessionKey));
 
     expect(listedRequestMock.mock.calls.map((call) => call[0])).not.toContain("sessions.get");
-    const listedReplayTypes = listedConnection.__sessionUpdateMock.mock.calls.map(
+    const listedReplayTypes = listedConnection["__sessionUpdateMock"].mock.calls.map(
       (call) => call[0]?.update?.sessionUpdate,
     );
     expect(listedReplayTypes).toEqual([
@@ -326,7 +336,7 @@ describe("ACP translator event ledger replay", () => {
 
     await loadAgent.loadSession(createLoadSessionRequest(created.sessionId));
 
-    const replayedUpdates = loadConnection.__sessionUpdateMock.mock.calls.map(
+    const replayedUpdates = loadConnection["__sessionUpdateMock"].mock.calls.map(
       (call) => call[0]?.update?.sessionUpdate,
     );
     expect(replayedUpdates).not.toContain("user_message_chunk");

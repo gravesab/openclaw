@@ -1,3 +1,4 @@
+// Matrix API module exposes the plugin public contract.
 export { matrixPlugin } from "./src/channel.js";
 export { createMatrixSetupWizardProxy, matrixSetupAdapter } from "./src/setup-core.js";
 export { matrixOnboardingAdapter } from "./src/setup-surface.js";
@@ -20,8 +21,6 @@ export {
   resolveMatrixCredentialsFilename,
   resolveMatrixCredentialsPath,
   resolveMatrixHomeserverKey,
-  resolveMatrixLegacyFlatStoragePaths,
-  resolveMatrixLegacyFlatStoreRoot,
   sanitizeMatrixPathSegment,
 } from "./src/storage-paths.js";
 export {
@@ -34,5 +33,3 @@ export {
   setMatrixThreadBindingMaxAgeBySessionKey,
 } from "./src/matrix/thread-bindings-shared.js";
 export { matrixOnboardingAdapter as matrixSetupWizard } from "./src/onboarding.js";
-
-export const matrixSessionBindingAdapterChannels = ["matrix"] as const;

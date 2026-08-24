@@ -1,4 +1,7 @@
-import { normalizeOptionalString } from "../shared/string-coerce.js";
+import { expectDefined } from "@openclaw/normalization-core";
+// Directive tag helpers parse inline directive tags from user text.
+import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
+import { parseFenceSpans } from "../../packages/markdown-core/src/fences.js";
 
 export type InlineDirectiveParseResult = {
   text: string;
@@ -45,13 +48,19 @@ function normalizeDirectiveWhitespace(text: string): string {
   const blockSentinel = createBlockSentinel(text);
   const blockPlaceholderRe = new RegExp(`${blockSentinel}(\\d+)${blockSentinel}`, "g");
   const blocks: string[] = [];
-  const masked = text.replace(
-    /(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\1[^\n]*|(?:(?:^|\n)(?:    |\t)[^\n]*)+/gm,
-    (block) => {
-      blocks.push(block);
-      return `${blockSentinel}${blocks.length - 1}${blockSentinel}`;
-    },
-  );
+  const fenceSpans = text.includes("```") || text.includes("~~~") ? parseFenceSpans(text) : [];
+  let masked = "";
+  let cursor = 0;
+  // The canonical scanner keeps false closers, indented closers, and open fences intact.
+  for (const span of fenceSpans) {
+    blocks.push(text.slice(span.start, span.end));
+    masked += `${text.slice(cursor, span.start)}${blockSentinel}${blocks.length - 1}${blockSentinel}`;
+    cursor = span.end;
+  }
+  masked = `${masked}${text.slice(cursor)}`.replace(/(?:(?:^|\n)(?:    |\t)[^\n]*)+/gm, (block) => {
+    blocks.push(block);
+    return `${blockSentinel}${blocks.length - 1}${blockSentinel}`;
+  });
 
   const normalized = masked
     .replace(/\r\n/g, "\n")
@@ -62,7 +71,9 @@ function normalizeDirectiveWhitespace(text: string): string {
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd();
 
-  return normalized.replace(blockPlaceholderRe, (_, i) => blocks[Number(i)]);
+  return normalized.replace(blockPlaceholderRe, (_, i) =>
+    expectDefined(blocks[Number(i)], "blocks entry at number(i)"),
+  );
 }
 
 type StripInlineDirectiveTagsResult = {
@@ -94,15 +105,21 @@ export function stripInlineDirectiveTagsForDisplay(text: string): StripInlineDir
 }
 
 function stripUnsafeReplyDirectiveChars(value: string): string {
-  let next = "";
+  const chars: string[] = [];
   for (const ch of value) {
     const code = ch.charCodeAt(0);
-    if ((code >= 0 && code <= 31) || code === 127 || ch === "[" || ch === "]") {
+    if (
+      (code >= 0 && code <= 31) ||
+      code === 127 ||
+      (code >= 0x80 && code <= 0x9f) ||
+      ch === "[" ||
+      ch === "]"
+    ) {
       continue;
     }
-    next += ch;
+    chars.push(ch);
   }
-  return next;
+  return chars.join("");
 }
 
 export function sanitizeReplyDirectiveId(rawReplyToId?: string): string | undefined {
@@ -114,8 +131,9 @@ export function sanitizeReplyDirectiveId(rawReplyToId?: string): string | undefi
   if (!sanitized) {
     return undefined;
   }
-  if (sanitized.length > MAX_REPLY_DIRECTIVE_ID_LENGTH) {
-    return sanitized.slice(0, MAX_REPLY_DIRECTIVE_ID_LENGTH);
+  const chars = Array.from(sanitized);
+  if (chars.length > MAX_REPLY_DIRECTIVE_ID_LENGTH) {
+    return chars.slice(0, MAX_REPLY_DIRECTIVE_ID_LENGTH).join("");
   }
   return sanitized;
 }
@@ -137,8 +155,11 @@ function isMessageTextPart(part: MessagePart): part is MessageTextPart {
 }
 
 /**
- * Strips inline directive tags from message text blocks while preserving message shape.
+ * Strips inline directive tags from text content while preserving message shape.
  * Empty post-strip text stays empty-string to preserve caller semantics.
+ * Returns the input message reference (including the original content array) when
+ * no text part changed, and reuses unchanged text-part references in mixed content,
+ * so identity-equality consumers avoid spurious churn.
  */
 export function stripInlineDirectiveTagsFromMessageForDisplay(
   message: DisplayMessageWithContent | undefined,
@@ -149,16 +170,29 @@ export function stripInlineDirectiveTagsFromMessageForDisplay(
   if (!Array.isArray(message.content)) {
     return message;
   }
-  const cleaned = message.content.map((part) => {
-    if (!part || typeof part !== "object") {
-      return part;
+  let cleaned: unknown[] | undefined;
+  for (let i = 0; i < message.content.length; i++) {
+    const part = message.content[i];
+    let next: unknown = part;
+    if (part && typeof part === "object" && isMessageTextPart(part as MessagePart)) {
+      const record = part as MessageTextPart;
+      const stripped = stripInlineDirectiveTagsForDisplay(record.text);
+      if (stripped.changed) {
+        next = { ...record, text: stripped.text };
+      }
     }
-    const record = part as MessagePart;
-    if (!isMessageTextPart(record)) {
-      return part;
+    if (next === part) {
+      cleaned?.push(part);
+      continue;
     }
-    return { ...record, text: stripInlineDirectiveTagsForDisplay(record.text).text };
-  });
+    if (!cleaned) {
+      cleaned = message.content.slice(0, i);
+    }
+    cleaned.push(next);
+  }
+  if (!cleaned) {
+    return message;
+  }
   return { ...message, content: cleaned };
 }
 
@@ -204,7 +238,7 @@ export function parseInlineDirectives(
     if (idRaw === undefined) {
       sawCurrent = true;
     } else {
-      const id = idRaw.trim();
+      const id = sanitizeReplyDirectiveId(idRaw);
       if (id) {
         lastExplicitId = id;
       }

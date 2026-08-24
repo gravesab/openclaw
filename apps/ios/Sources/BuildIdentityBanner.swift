@@ -1,13 +1,17 @@
 import SwiftUI
 
 enum OpenClawBuildIdentity {
-    #if DEBUG
-    static let environment = "DEV"
-    static let color = Color.orange
-    #else
-    static let environment = "PROD"
-    static let color = Color.green
-    #endif
+    static var isProduction: Bool {
+        PushBuildConfig.current.mode == .appStore
+    }
+
+    static var environment: String {
+        self.isProduction ? "PROD" : "DEV"
+    }
+
+    static var color: Color {
+        self.isProduction ? .green : .orange
+    }
 
     static var version: String {
         (Bundle.main.infoDictionary?["OpenClawCanonicalVersion"] as? String)
@@ -22,9 +26,9 @@ enum OpenClawBuildIdentity {
 
     static var label: String {
         if let build {
-            return "\(environment) · v\(version) (\(build))"
+            return "\(self.environment) · v\(self.version) (\(build))"
         }
-        return "\(environment) · v\(version)"
+        return "\(self.environment) · v\(self.version)"
     }
 }
 
@@ -39,6 +43,9 @@ struct BuildIdentityBanner: View {
             .foregroundStyle(.black)
             .background(OpenClawBuildIdentity.color)
             .accessibilityLabel(
-                "OpenClaw \(OpenClawBuildIdentity.environment) version \(OpenClawBuildIdentity.version)")
+                String(
+                    format: String(localized: "OpenClaw %@ version %@"),
+                    OpenClawBuildIdentity.environment,
+                    OpenClawBuildIdentity.version))
     }
 }

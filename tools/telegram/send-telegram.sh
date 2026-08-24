@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-source ~/.openclaw/credentials/telegram.env
+TELEGRAM_ENV="${OPENCLAW_TELEGRAM_ENV:-$HOME/.openclaw/credentials/telegram.env}"
+source "$TELEGRAM_ENV"
 
 MESSAGE="${*:-OpenClaw Telegram test message}"
 

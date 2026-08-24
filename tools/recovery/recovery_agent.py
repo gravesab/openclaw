@@ -145,7 +145,6 @@ def main():
         ("Dashboard Service", lambda: check_systemd_service("openclaw-dashboard")),
         ("Watchdog Timer", lambda: check_systemd_service("openclaw-watchdog.timer")),
         ("HomeManager Timer", lambda: check_systemd_service("openclaw-home-manager.timer")),
-        ("Coordinator Timer", lambda: check_systemd_service("openclaw-coordinator.timer")),
         ("Remediation Timer", lambda: check_systemd_service("openclaw-remediation.timer")),
         ("AI Summary Timer", lambda: check_systemd_service("openclaw-ai-summary.timer")),
         ("Briefing Timer", lambda: check_systemd_service("openclaw-briefing.timer")),

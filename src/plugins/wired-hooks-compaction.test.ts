@@ -19,12 +19,15 @@ vi.mock("../plugins/hook-runner-global.js", () => ({
 
 vi.mock("../infra/agent-events.js", () => ({
   emitAgentEvent: hookMocks.emitAgentEvent,
+  getAgentEventLifecycleGeneration: () => "test-generation",
+  isAgentEventLifecycleGenerationCurrent: (generation: string) => generation === "test-generation",
+  registerAgentEventLifecycleRotationHandler: vi.fn(),
 }));
 
 import {
   handleCompactionEnd,
   handleCompactionStart,
-} from "../agents/pi-embedded-subscribe.handlers.compaction.js";
+} from "../agents/embedded-agent-subscribe.handlers.compaction.js";
 
 describe("compaction hook wiring", () => {
   beforeEach(() => {

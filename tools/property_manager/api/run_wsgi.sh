@@ -2,7 +2,7 @@
 # Run the PropertyManager API under the approved WSGI server.
 set -euo pipefail
 
-ROOT="${OPENCLAW_BASE:-/home/gravesab/ai/projects/openclaw}"
+ROOT="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../.." && pwd)}"
 API_DIR="$ROOT/tools/property_manager/api"
 ENV_FILE="${PROPERTYMANAGER_DB_ENV_FILE:-$HOME/.config/openclaw/db.env}"
 

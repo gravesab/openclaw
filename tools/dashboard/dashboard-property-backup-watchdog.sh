@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
 SEND="${SEND:-$BASE/tools/telegram/send-telegram.sh}"
 BACKUP_MANAGER="${BACKUP_MANAGER:-$BASE/tools/dashboard/dashboard-property-backup-manager.sh}"

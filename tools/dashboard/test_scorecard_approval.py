@@ -47,6 +47,7 @@ def install_stubs():
     requests = types.ModuleType("requests")
     requests.get = mock.Mock()
     requests.post = mock.Mock()
+    requests.RequestException = Exception
     requests.exceptions = types.SimpleNamespace(Timeout=TimeoutError)
     sys.modules["requests"] = requests
 

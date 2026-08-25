@@ -41,6 +41,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from tools.ai_intelligence.ollama_config import OllamaConfig
+from tools.ai_intelligence.omlx_config import OMLXConfig, OMLXConfigurationError
 from tools.dashboard.pm_asset_page import register_pm_asset_routes
 from tools.dashboard.document_inventory import ensure_document_inventory
 
@@ -1023,7 +1024,7 @@ def check_service(name, command, scope):
     return (name, scope, "Offline / Warning", "#b91c1c")
 
 
-def build_system_health():
+def build_system_health(omlx=None):
     checks = []
 
     checks.append(
@@ -1091,7 +1092,17 @@ def build_system_health():
         )
     )
 
-    return checks
+    omlx = omlx or get_omlx_status()
+    checks.append(
+        (
+            "oMLX API",
+            "HTTP endpoint",
+            "Connected" if omlx["connected"] else omlx["status"],
+            "#16a34a" if omlx["connected"] else "#b91c1c",
+        )
+    )
+
+    return sorted(checks, key=lambda service: service[0].casefold())
 
 
 def service_scope_panel_html(services):
@@ -1550,13 +1561,18 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
     }
 
 
-def m4_ai_health_panel_html(ollama=None):
+def m4_ai_health_panel_html(ollama=None, omlx=None):
     ollama = ollama or get_m4_ollama_status()
+    omlx = omlx or get_omlx_status()
     ollama_status = "Online" if ollama["connected"] else "Offline"
     ollama_color = "#22c55e" if ollama["connected"] else "#ef4444"
     response_ms = ollama.get("response_ms", "unknown")
     model_count = ollama.get("model_count", "unknown")
     model_names = ollama.get("detected_models") or ollama.get("error", "unknown")
+    omlx_status = omlx["status"]
+    omlx_color = "#22c55e" if omlx["connected"] else "#fbbf24"
+    omlx_response_ms = omlx.get("response_ms", "unknown")
+    omlx_models = omlx.get("detected_models") or omlx.get("error", "unknown")
 
     m4 = {
         "reachable": False,
@@ -1677,6 +1693,13 @@ Response: {response_ms} ms
 </div>
 
 <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
+<b>oMLX API</b><br><br>
+<span style="color:{omlx_color};font-weight:bold;">{html_module.escape(omlx_status)}</span><br>
+Response: {html_module.escape(str(omlx_response_ms))} ms<br>
+Models: {omlx.get('model_count', 0)}
+</div>
+
+<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
 <b>M4 Memory</b><br><br>
 Used: {m4['memory_used_gib']} GiB / {m4['memory_total_gib']} GiB<br>
 Percent: {m4['memory_percent']}
@@ -1695,6 +1718,9 @@ Models Loaded: {model_count}
 
 Detected Models:
 {model_names}
+
+oMLX Models:
+{html_module.escape(omlx_models)}
 
 M4 Uptime:
 {m4['uptime']}
@@ -1748,6 +1774,58 @@ def get_m4_ollama_status():
             "primary": "Unavailable",
             "detected_models": "",
             "model_names": [],
+            "response_ms": "failed",
+        }
+
+
+def get_omlx_status():
+    """Probe the authenticated oMLX model catalog without sending a generation request."""
+    try:
+        config = OMLXConfig.from_env()
+    except OMLXConfigurationError:
+        return {
+            "connected": False,
+            "status": "Credentials not configured",
+            "error": "The dashboard oMLX credential is not configured.",
+            "model_count": 0,
+            "detected_models": "",
+            "response_ms": "not attempted",
+        }
+
+    endpoint = f"{config.base_url}/models"
+    started = time.time()
+    try:
+        response = requests.get(
+            endpoint,
+            headers={"Authorization": f"Bearer {config.api_key}"},
+            timeout=min(5, config.default_timeout_seconds),
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("oMLX model catalog must be an object")
+        models = payload.get("data")
+        if not isinstance(models, list):
+            raise ValueError("oMLX model catalog data must be a list")
+        model_ids = [
+            item.get("id", "")
+            for item in models
+            if isinstance(item, dict) and item.get("id")
+        ]
+        return {
+            "connected": True,
+            "status": "Online",
+            "model_count": len(model_ids),
+            "detected_models": ", ".join(model_ids),
+            "response_ms": int((time.time() - started) * 1000),
+        }
+    except (requests.RequestException, ValueError, TypeError):
+        return {
+            "connected": False,
+            "status": "Offline",
+            "error": "The configured oMLX API did not return a model catalog.",
+            "model_count": 0,
+            "detected_models": "",
             "response_ms": "failed",
         }
 
@@ -6908,7 +6986,8 @@ All monitored OpenClaw services are connected.
 def home():
     backup_success = request.args.get("backup")
     drift = check_ai_drift()
-    services = build_system_health()
+    omlx = get_omlx_status()
+    services = build_system_health(omlx)
     m4 = get_m4_ollama_status()
 
     html = """
@@ -6968,7 +7047,7 @@ __OPENCLAW_SHARED_NAVIGATION__
         </div>
         """
 
-    html += m4_ai_health_panel_html(m4)
+    html += m4_ai_health_panel_html(m4, omlx)
     html += ai_routing_telemetry_panel_html()
 
     html += model_status_panel_html(

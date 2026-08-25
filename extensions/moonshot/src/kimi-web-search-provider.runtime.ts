@@ -1,3 +1,4 @@
+// Moonshot provider module implements model/runtime integration.
 import {
   createProviderHttpError,
   readProviderJsonObjectResponse,
@@ -7,10 +8,11 @@ import {
   buildSearchCacheKey,
   buildUnsupportedSearchFilterResponse,
   DEFAULT_SEARCH_COUNT,
+  MAX_SEARCH_COUNT,
   mergeScopedSearchConfig,
   readCachedSearchPayload,
   readConfiguredSecretString,
-  readNumberParam,
+  readPositiveIntegerParam,
   readProviderEnvValue,
   readStringParam,
   resolveProviderWebSearchPluginConfig,
@@ -24,20 +26,21 @@ import {
   wrapWebContent,
   writeCachedSearchPayload,
 } from "openclaw/plugin-sdk/provider-web-search";
-import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  isRecord,
+  normalizeOptionalString,
+  uniqueStrings,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
 import {
   isNativeMoonshotBaseUrl,
   MOONSHOT_BASE_URL,
   MOONSHOT_CN_BASE_URL,
-  MOONSHOT_DEFAULT_MODEL_ID,
 } from "../provider-catalog.js";
 
 const DEFAULT_KIMI_BASE_URL = MOONSHOT_BASE_URL;
-const DEFAULT_KIMI_SEARCH_MODEL = MOONSHOT_DEFAULT_MODEL_ID;
-/** Models that require explicit thinking disablement for web search.
- * Reasoning variants (kimi-k2-thinking, kimi-k2-thinking-turbo) are excluded
- * because they default to thinking-enabled and disabling it would defeat their
- * purpose; they are also unlikely to be used for web search. */
+// Search owns a separate model default so chat onboarding changes do not silently reroute searches.
+const DEFAULT_KIMI_SEARCH_MODEL = "kimi-k2.6";
+/** Models that require explicit thinking disablement for web search. */
 const KIMI_THINKING_MODELS = new Set(["kimi-k2.6", "kimi-k2.5"]);
 const KIMI_WEB_SEARCH_TOOL = {
   type: "builtin_function",
@@ -84,10 +87,6 @@ type KimiSearchResult = {
   grounded: boolean;
 };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
 function throwMalformedKimiResponse(): never {
   throw new Error("Kimi API error: malformed JSON response");
 }
@@ -99,7 +98,7 @@ function resolveKimiConfig(searchConfig?: SearchConfigRecord): KimiConfig {
 
 function resolveKimiApiKey(kimi?: KimiConfig): string | undefined {
   return (
-    readConfiguredSecretString(kimi?.apiKey, "tools.web.search.kimi.apiKey") ??
+    readConfiguredSecretString(kimi?.apiKey, "plugins.entries.moonshot.config.webSearch.apiKey") ??
     readProviderEnvValue(["KIMI_API_KEY", "MOONSHOT_API_KEY"])
   );
 }
@@ -186,7 +185,7 @@ function extractKimiCitations(data: KimiSearchResponse): string[] {
     }
   }
 
-  return [...new Set(citations)];
+  return uniqueStrings(citations);
 }
 
 function hasKimiSearchResults(data: KimiSearchResponse): boolean {
@@ -217,6 +216,7 @@ async function runKimiSearch(params: {
   baseUrl: string;
   model: string;
   timeoutSeconds: number;
+  signal?: AbortSignal;
 }): Promise<KimiSearchResult> {
   const endpoint = `${params.baseUrl.trim().replace(/\/$/, "")}/chat/completions`;
   const messages: Array<Record<string, unknown>> = [{ role: "user", content: params.query }];
@@ -228,6 +228,7 @@ async function runKimiSearch(params: {
       {
         url: endpoint,
         timeoutSeconds: params.timeoutSeconds,
+        signal: params.signal,
         init: {
           method: "POST",
           headers: {
@@ -342,6 +343,7 @@ async function runKimiSearch(params: {
 export async function executeKimiWebSearchProviderTool(
   ctx: { config?: OpenClawConfig; searchConfig?: SearchConfigRecord },
   args: Record<string, unknown>,
+  opts?: { signal?: AbortSignal },
 ): Promise<Record<string, unknown>> {
   const searchConfig = mergeScopedSearchConfig(
     ctx.searchConfig,
@@ -359,14 +361,19 @@ export async function executeKimiWebSearchProviderTool(
     return {
       error: "missing_kimi_api_key",
       message:
-        "web_search (kimi) needs a Moonshot API key. Set KIMI_API_KEY or MOONSHOT_API_KEY in the Gateway environment, or configure tools.web.search.kimi.apiKey. If you do not want to configure a search API key, use web_fetch for a specific URL or the browser tool for interactive pages.",
+        "web_search (kimi) needs a Moonshot API key. Set KIMI_API_KEY or MOONSHOT_API_KEY in the Gateway environment, or configure plugins.entries.moonshot.config.webSearch.apiKey. If you do not want to configure a search API key, use web_fetch for a specific URL or the browser tool for interactive pages.",
       docs: "https://docs.openclaw.ai/tools/web",
     };
   }
 
   const query = readStringParam(args, "query", { required: true });
   const count =
-    readNumberParam(args, "count", { integer: true }) ?? searchConfig?.maxResults ?? undefined;
+    readPositiveIntegerParam(args, "count", {
+      max: MAX_SEARCH_COUNT,
+      message: `count must be an integer from 1 to ${MAX_SEARCH_COUNT}.`,
+    }) ??
+    searchConfig?.maxResults ??
+    undefined;
   const model = resolveKimiModel(kimiConfig);
   const baseUrl = resolveKimiBaseUrl(kimiConfig, ctx.config);
   const cacheKey = buildSearchCacheKey([
@@ -388,6 +395,7 @@ export async function executeKimiWebSearchProviderTool(
     baseUrl,
     model,
     timeoutSeconds: resolveSearchTimeoutSeconds(searchConfig),
+    signal: opts?.signal,
   });
   if (!result.grounded) {
     return {
@@ -502,11 +510,10 @@ export async function runKimiSearchProviderSetup(
   return next;
 }
 
-export const __testing = {
+export const testing = {
   resolveKimiApiKey,
   resolveKimiModel,
   resolveKimiBaseUrl,
   extractKimiCitations,
-  hasKimiSearchResults,
   extractKimiToolResultContent,
 } as const;

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-OPENCLAW_DIR="/home/gravesab/ai/projects/openclaw"
+OPENCLAW_DIR="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 BACKUP_ROOT="$OPENCLAW_DIR/tools/dashboard/backups/propertymanager_app_backups"
 STAMP="$(date +%Y%m%d-%H%M%S)"
 BACKUP_DIR="$BACKUP_ROOT/backup-$STAMP"

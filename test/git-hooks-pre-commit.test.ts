@@ -1,5 +1,6 @@
+// Git hook tests validate pre-commit hook behavior and scripts.
 import { execFileSync } from "node:child_process";
-import { mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanupTempDirs, makeTempRepoRoot } from "./helpers/temp-repo.js";
@@ -17,6 +18,35 @@ const run = (cwd: string, cmd: string, args: string[] = [], env?: NodeJS.Process
     encoding: "utf8",
     env: env ? { ...baseRunEnv, ...env } : baseRunEnv,
   }).trim();
+};
+
+type FailedCommand = {
+  status: number;
+  stderr: string;
+  stdout: string;
+};
+
+const runFailure = (
+  cwd: string,
+  cmd: string,
+  args: string[] = [],
+  env?: NodeJS.ProcessEnv,
+): FailedCommand => {
+  try {
+    run(cwd, cmd, args, env);
+  } catch (error) {
+    if (error instanceof Error && "status" in error) {
+      const failure = error as Error & { status?: number; stderr?: string; stdout?: string };
+      return {
+        status: failure.status ?? 1,
+        stderr: failure.stderr ?? "",
+        stdout: failure.stdout ?? "",
+      };
+    }
+    throw error;
+  }
+
+  throw new Error("expected command to fail");
 };
 
 function writeExecutable(dir: string, name: string, contents: string): void {
@@ -53,6 +83,35 @@ function installPreCommitFixture(dir: string): string {
   return fakeBinDir;
 }
 
+function installFormattingRecorder(dir: string): string {
+  const logPath = path.join(dir, "hook-tool.log");
+  writeFileSync(
+    path.join(dir, "scripts", "pre-commit", "filter-staged-files.mjs"),
+    readFileSync(path.join(process.cwd(), "scripts", "pre-commit", "filter-staged-files.mjs")),
+    "utf8",
+  );
+  writeFileSync(
+    path.join(dir, "scripts", "pre-commit", "run-node-tool.sh"),
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\n' "$*" >> ${JSON.stringify(logPath)}
+`,
+    {
+      encoding: "utf8",
+      mode: 0o755,
+    },
+  );
+  return logPath;
+}
+
+function installRunNodeToolFixture(dir: string): void {
+  mkdirSync(path.join(dir, "scripts", "pre-commit"), { recursive: true });
+  symlinkSync(
+    path.join(process.cwd(), "scripts", "pre-commit", "run-node-tool.sh"),
+    path.join(dir, "scripts", "pre-commit", "run-node-tool.sh"),
+  );
+}
+
 function splitNonEmptyLines(output: string): string[] {
   const lines: string[] = [];
   for (const line of output.split("\n")) {
@@ -61,6 +120,50 @@ function splitNonEmptyLines(output: string): string[] {
     }
   }
   return lines;
+}
+
+function readFormatterLog(logPath: string): string[] {
+  if (!existsSync(logPath)) {
+    return [];
+  }
+  return splitNonEmptyLines(readFileSync(logPath, "utf8"));
+}
+
+function readNulLog(logPath: string): string[] {
+  if (!existsSync(logPath)) {
+    return [];
+  }
+  return readFileSync(logPath).toString("utf8").split("\0").filter(Boolean);
+}
+
+function stageNulPaths(dir: string, paths: string[]): void {
+  execFileSync("git", ["add", "--pathspec-from-file=-", "--pathspec-file-nul"], {
+    cwd: dir,
+    input: Buffer.from(paths.map((file) => `${file}\0`).join("")),
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
+function installNulFormattingRecorder(dir: string, options: { failOn?: string } = {}): string {
+  const logPath = path.join(dir, "hook-tool.nul");
+  writeFileSync(
+    path.join(dir, "scripts", "pre-commit", "filter-staged-files.mjs"),
+    readFileSync(path.join(process.cwd(), "scripts", "pre-commit", "filter-staged-files.mjs")),
+  );
+  writeFileSync(
+    path.join(dir, "scripts", "pre-commit", "run-node-tool.sh"),
+    `#!/usr/bin/env bash
+set -euo pipefail
+printf '%s\\0' "$@" >> ${JSON.stringify(logPath)}
+for arg in "$@"; do
+  if [ "$arg" = ${JSON.stringify(options.failOn ?? "")} ] && [ -n "$arg" ]; then
+    exit 23
+  fi
+done
+`,
+    { encoding: "utf8", mode: 0o755 },
+  );
+  return logPath;
 }
 
 afterEach(() => {
@@ -88,6 +191,148 @@ describe("git-hooks/pre-commit (integration)", () => {
 
     const staged = splitNonEmptyLines(run(dir, "git", ["diff", "--cached", "--name-only"]));
     expect(staged).toEqual(["--all"]);
+  });
+
+  it("skips formatting staged files while a merge commit is in progress", () => {
+    const dir = makeTempRepoRoot(tempDirs, "openclaw-pre-commit-merge-");
+    run(dir, "git", ["init", "-q", "--initial-branch=main"]);
+    installPreCommitFixture(dir);
+    const logPath = installFormattingRecorder(dir);
+
+    writeFileSync(path.join(dir, "changed.ts"), "export const value = 1;\n", "utf8");
+    run(dir, "git", ["add", "--", "changed.ts"]);
+    run(dir, "git", [
+      "-c",
+      "user.name=Test User",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-q",
+      "-m",
+      "initial",
+    ]);
+    run(dir, "git", ["checkout", "-q", "-b", "side"]);
+    writeFileSync(path.join(dir, "changed.ts"), "export const value = 2;\n", "utf8");
+    run(dir, "git", ["add", "--", "changed.ts"]);
+    run(dir, "git", [
+      "-c",
+      "user.name=Test User",
+      "-c",
+      "user.email=test@example.invalid",
+      "commit",
+      "-q",
+      "-m",
+      "side change",
+    ]);
+    run(dir, "git", ["checkout", "-q", "main"]);
+    run(dir, "git", [
+      "-c",
+      "user.name=Test User",
+      "-c",
+      "user.email=test@example.invalid",
+      "merge",
+      "--no-commit",
+      "--no-ff",
+      "side",
+    ]);
+
+    expect(existsSync(path.join(dir, ".git", "MERGE_HEAD"))).toBe(true);
+    expect(run(dir, "git", ["diff", "--cached", "--name-only"])).toBe("changed.ts");
+
+    run(dir, "bash", ["git-hooks/pre-commit"]);
+
+    expect(readFormatterLog(logPath)).toEqual([]);
+  });
+
+  it.each([
+    ["cherry-pick", "CHERRY_PICK_HEAD", "file"],
+    ["revert", "REVERT_HEAD", "file"],
+    ["rebase head", "REBASE_HEAD", "file"],
+    ["merge rebase state", "rebase-merge", "dir"],
+    ["apply rebase state", "rebase-apply", "dir"],
+  ])("skips formatting staged files while %s metadata is present", (_label, gitPath, kind) => {
+    const dir = makeTempRepoRoot(tempDirs, "openclaw-pre-commit-sequencer-");
+    run(dir, "git", ["init", "-q", "--initial-branch=main"]);
+    installPreCommitFixture(dir);
+    const logPath = installFormattingRecorder(dir);
+
+    writeFileSync(path.join(dir, "changed.ts"), "export const value = 1;\n", "utf8");
+    run(dir, "git", ["add", "--", "changed.ts"]);
+
+    const metadataPath = path.join(dir, ".git", gitPath);
+    if (kind === "dir") {
+      mkdirSync(metadataPath, { recursive: true });
+    } else {
+      writeFileSync(metadataPath, "sequencer state\n", "utf8");
+    }
+
+    run(dir, "bash", ["git-hooks/pre-commit"]);
+
+    expect(readFormatterLog(logPath)).toEqual([]);
+  });
+
+  it("still formats staged files during a normal commit", () => {
+    const dir = makeTempRepoRoot(tempDirs, "openclaw-pre-commit-normal-");
+    run(dir, "git", ["init", "-q", "--initial-branch=main"]);
+    const fakeBinDir = installPreCommitFixture(dir);
+    run(dir, "rm", ["-f", path.join(fakeBinDir, "node")]);
+    const logPath = installFormattingRecorder(dir);
+
+    writeFileSync(path.join(dir, "changed.ts"), "export const value = 1;\n", "utf8");
+    run(dir, "git", ["add", "--", "changed.ts"]);
+
+    run(dir, "bash", ["git-hooks/pre-commit"], {
+      PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+    });
+
+    expect(readFormatterLog(logPath)).toEqual([
+      "oxfmt --write --no-error-on-unmatched-pattern -- changed.ts",
+    ]);
+  });
+
+  it("batches an ARG_MAX-sized NUL path stream without omission or option injection", () => {
+    const dir = makeTempRepoRoot(tempDirs, "openclaw-pre-commit-arg-max-");
+    run(dir, "git", ["init", "-q", "--initial-branch=main"]);
+    installPreCommitFixture(dir);
+    const logPath = installNulFormattingRecorder(dir);
+    const paths = ["--leading-dash.ts", "space name.ts", "unicode-å.ts"];
+    for (let index = 0; index < 1500; index += 1) {
+      paths.push(`${String(index).padStart(4, "0")}-${"x".repeat(210)}.ts`);
+    }
+    for (const file of paths) {
+      writeFileSync(path.join(dir, file), "export const value = 1;\n", "utf8");
+    }
+    stageNulPaths(dir, paths);
+    expect(Buffer.byteLength(paths.map((file) => `${file}\0`).join(""))).toBeGreaterThan(262_144);
+
+    run(dir, "bash", ["git-hooks/pre-commit"], {
+      OPENCLAW_PRE_COMMIT_BATCH_BYTES: "16384",
+    });
+
+    const calls = readNulLog(logPath);
+    const formatted = calls.filter(
+      (entry) => !["oxfmt", "--write", "--no-error-on-unmatched-pattern", "--"].includes(entry),
+    );
+    expect(new Set(formatted)).toEqual(new Set(paths));
+    expect(formatted).toHaveLength(paths.length);
+    expect(calls).toContain("--");
+  });
+
+  it("propagates a formatter failure from a later bounded batch", () => {
+    const dir = makeTempRepoRoot(tempDirs, "openclaw-pre-commit-batch-failure-");
+    run(dir, "git", ["init", "-q", "--initial-branch=main"]);
+    installPreCommitFixture(dir);
+    const paths = ["first.ts", "second.ts", "later-failure.ts"];
+    for (const file of paths) {
+      writeFileSync(path.join(dir, file), "export const value = 1;\n", "utf8");
+    }
+    stageNulPaths(dir, paths);
+    installNulFormattingRecorder(dir, { failOn: "later-failure.ts" });
+
+    const result = runFailure(dir, "bash", ["git-hooks/pre-commit"], {
+      OPENCLAW_PRE_COMMIT_BATCH_BYTES: "110",
+    });
+    expect(result.status).toBe(23);
   });
 
   it("does not run the changed-scope check for non-doc staged changes", () => {
@@ -160,5 +405,58 @@ describe("git-hooks/pre-commit (integration)", () => {
     });
 
     expect(run(dir, "git", ["diff", "--cached", "--name-only"])).toBe("tracked.txt");
+  });
+});
+
+describe("scripts/pre-commit/run-node-tool.sh", () => {
+  it("runs the installed local tool without invoking pnpm", () => {
+    const dir = makeTempRepoRoot(tempDirs, "openclaw-run-node-tool-local-");
+    installRunNodeToolFixture(dir);
+    writeFileSync(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+
+    const fakeBinDir = path.join(dir, "bin");
+    const toolBinDir = path.join(dir, "node_modules", ".bin");
+    mkdirSync(fakeBinDir, { recursive: true });
+    mkdirSync(toolBinDir, { recursive: true });
+    writeExecutable(
+      fakeBinDir,
+      "pnpm",
+      "#!/usr/bin/env bash\necho 'pnpm should not run from run-node-tool' >&2\nexit 99\n",
+    );
+    writeExecutable(toolBinDir, "oxfmt", "#!/usr/bin/env bash\nprintf 'local:%s\\n' \"$*\"\n");
+
+    expect(
+      run(dir, "bash", ["scripts/pre-commit/run-node-tool.sh", "oxfmt", "--write", "a.ts"], {
+        PATH: `${fakeBinDir}:${process.env.PATH ?? ""}`,
+      }),
+    ).toBe("local:--write a.ts");
+  });
+
+  it("fails before pnpm can hydrate dependencies when node_modules is missing", () => {
+    const dir = makeTempRepoRoot(tempDirs, "openclaw-run-node-tool-missing-deps-");
+    installRunNodeToolFixture(dir);
+    writeFileSync(path.join(dir, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n", "utf8");
+
+    const fakeBinDir = path.join(dir, "bin");
+    const markerPath = path.join(dir, "pnpm-called");
+    mkdirSync(fakeBinDir, { recursive: true });
+    writeExecutable(
+      fakeBinDir,
+      "pnpm",
+      `#!/usr/bin/env bash\ntouch ${JSON.stringify(markerPath)}\nexit 99\n`,
+    );
+
+    const result = runFailure(
+      dir,
+      "bash",
+      ["scripts/pre-commit/run-node-tool.sh", "oxfmt", "--write", "a.ts"],
+      { PATH: `${fakeBinDir}:${process.env.PATH ?? ""}` },
+    );
+
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain(
+      "Missing repo dependencies: cannot run oxfmt without node_modules.",
+    );
+    expect(existsSync(markerPath)).toBe(false);
   });
 });

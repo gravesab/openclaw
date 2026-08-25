@@ -20,11 +20,11 @@ from tools.ai_intelligence.execution_engine import (
 from tools.ai_intelligence.routing_models import RoutingRequest
 
 
-CREDENTIALS_PATH = (
-    Path.home()
-    / ".openclaw"
-    / "credentials"
-    / "ai-intelligence.env"
+CREDENTIALS_PATH = Path(
+    os.environ.get(
+        "OPENCLAW_AI_INTELLIGENCE_ENV_FILE",
+        Path.home() / ".openclaw" / "credentials" / "ai-intelligence.env",
+    )
 )
 REQUIRED_DATABASE_KEYS = {
     "OPENCLAW_DB_HOST",

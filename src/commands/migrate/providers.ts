@@ -1,3 +1,4 @@
+/** Migration provider lookup, option shaping, and plan creation helpers. */
 import { getRuntimeConfig } from "../../config/config.js";
 import {
   ensureStandaloneMigrationProviderRegistryLoaded,
@@ -9,11 +10,15 @@ import type { RuntimeEnv } from "../../runtime.js";
 import { buildMigrationContext } from "./context.js";
 import type { MigrateCommonOptions } from "./types.js";
 
+/** Resolves a migration provider from the loaded plugin migration registry. */
 export function resolveMigrationProvider(
   providerId: string,
   config = getRuntimeConfig(),
 ): MigrationProviderPlugin {
-  ensureStandaloneMigrationProviderRegistryLoaded({ cfg: config });
+  ensureStandaloneMigrationProviderRegistryLoaded({
+    cfg: config,
+    providerId,
+  });
   const provider = resolvePluginMigrationProvider({ providerId, cfg: config });
   if (!provider) {
     const available = resolvePluginMigrationProviders({ cfg: config }).map((entry) => entry.id);
@@ -26,19 +31,22 @@ export function resolveMigrationProvider(
   return provider;
 }
 
+/** Builds provider-specific options from shared migrate CLI flags. */
 export function buildMigrationProviderOptions(
   opts: MigrateCommonOptions,
+  providerId = opts.provider,
 ): Record<string, unknown> | undefined {
   const options: Record<string, unknown> = {};
-  if (opts.provider === "codex" && opts.verifyPluginApps === true) {
+  if (providerId === "codex" && opts.verifyPluginApps === true) {
     options.verifyPluginApps = true;
   }
-  if (opts.provider === "codex" && opts.configPatchMode) {
+  if (providerId === "codex" && opts.configPatchMode) {
     options.configPatchMode = opts.configPatchMode;
   }
   return Object.keys(options).length > 0 ? options : undefined;
 }
 
+/** Creates a migration plan after validating provider-specific flag support. */
 export async function createMigrationPlan(
   runtime: RuntimeEnv,
   opts: MigrateCommonOptions & { provider: string },
@@ -49,6 +57,8 @@ export async function createMigrationPlan(
   const provider = resolveMigrationProvider(opts.provider, opts.configOverride);
   const ctx = buildMigrationContext({
     source: opts.source,
+    targetAgentId: opts.targetAgentId,
+    itemKinds: opts.itemKinds,
     includeSecrets: opts.includeSecrets,
     overwrite: opts.overwrite,
     configOverride: opts.configOverride,

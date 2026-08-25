@@ -1,19 +1,23 @@
+// Command config resolver that combines secret materialization with optional plugin auto-enable.
 import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import type { OpenClawConfig } from "../config/types.js";
 import type { RuntimeEnv } from "../runtime.js";
 import {
   type CommandSecretResolutionMode,
-  type CommandSecretsProviderOverrides,
   resolveCommandSecretRefsViaGateway,
 } from "./command-secret-gateway.js";
 
+/** Resolve command-scoped secrets and return both raw resolved and effective config views. */
 export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawConfig>(params: {
   config: TConfig;
   commandName: string;
   targetIds: Set<string>;
   mode?: CommandSecretResolutionMode;
   allowedPaths?: Set<string>;
-  providerOverrides?: CommandSecretsProviderOverrides;
+  forcedActivePaths?: Set<string>;
+  optionalActivePaths?: Set<string>;
+  allowLocalExecSecretRefs?: boolean;
+  scrubUnresolvedSecretRefs?: boolean;
   runtime?: RuntimeEnv;
   autoEnable?: boolean;
   env?: NodeJS.ProcessEnv;
@@ -28,11 +32,18 @@ export async function resolveCommandConfigWithSecrets<TConfig extends OpenClawCo
     targetIds: params.targetIds,
     ...(params.mode ? { mode: params.mode } : {}),
     ...(params.allowedPaths ? { allowedPaths: params.allowedPaths } : {}),
-    ...(params.providerOverrides ? { providerOverrides: params.providerOverrides } : {}),
+    ...(params.forcedActivePaths ? { forcedActivePaths: params.forcedActivePaths } : {}),
+    ...(params.optionalActivePaths ? { optionalActivePaths: params.optionalActivePaths } : {}),
+    ...(params.allowLocalExecSecretRefs !== undefined
+      ? { allowLocalExecSecretRefs: params.allowLocalExecSecretRefs }
+      : {}),
+    ...(params.scrubUnresolvedSecretRefs !== undefined
+      ? { scrubUnresolvedSecretRefs: params.scrubUnresolvedSecretRefs }
+      : {}),
   });
   if (params.runtime) {
     for (const entry of diagnostics) {
-      params.runtime.log(`[secrets] ${entry}`);
+      params.runtime.error(`[secrets] ${entry}`);
     }
   }
   const effectiveConfig = params.autoEnable

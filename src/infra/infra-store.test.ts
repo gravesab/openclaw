@@ -1,5 +1,5 @@
+// Tests infra store file persistence and recovery.
 import fs from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { withTempDir } from "../test-utils/temp-dir.js";
@@ -15,12 +15,7 @@ import {
   resetDiagnosticEventsForTest,
 } from "./diagnostic-events.js";
 import { readSessionStoreJson5 } from "./state-migrations.fs.js";
-import {
-  loadVoiceWakeRoutingConfig,
-  normalizeVoiceWakeTriggerWord,
-  resolveVoiceWakeRouteByTrigger,
-  setVoiceWakeRoutingConfig,
-} from "./voicewake-routing.js";
+import { loadVoiceWakeRoutingConfig, resolveVoiceWakeRouteByTrigger } from "./voicewake-routing.js";
 import {
   defaultVoiceWakeTriggers,
   loadVoiceWakeConfig,
@@ -109,7 +104,7 @@ describe("infra store", () => {
       });
     });
 
-    it("sanitizes malformed persisted config values", async () => {
+    it("ignores retired JSON trigger files at runtime", async () => {
       await withTempDir("openclaw-voicewake-", async (baseDir) => {
         await fs.mkdir(path.join(baseDir, "settings"), { recursive: true });
         await fs.writeFile(
@@ -122,44 +117,25 @@ describe("infra store", () => {
         );
 
         const loaded = await loadVoiceWakeConfig(baseDir);
-        expect(loaded.triggers).toEqual(["wake"]);
+        expect(loaded.triggers).toEqual(defaultVoiceWakeTriggers());
         expect(loaded.updatedAtMs).toBe(0);
       });
     });
   });
 
   describe("voicewake routing store", () => {
-    it("normalizes and persists routing config", async () => {
-      const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-voicewake-routing-"));
-      const saved = await setVoiceWakeRoutingConfig(
-        {
-          defaultTarget: { mode: "current" },
-          routes: [
-            { trigger: "  Hello   Bot  ", target: { agentId: "main" } },
-            { trigger: "", target: { sessionKey: "agent:main:main" } },
-          ],
-        },
-        baseDir,
-      );
-      expect(saved.routes).toEqual([{ trigger: "hello bot", target: { agentId: "main" } }]);
-      expect(saved.updatedAtMs).toBeGreaterThan(0);
-
-      const loaded = await loadVoiceWakeRoutingConfig(baseDir);
-      expect(loaded.routes).toEqual([{ trigger: "hello bot", target: { agentId: "main" } }]);
-    });
-
     it("resolves routes by normalized trigger", () => {
-      const result = resolveVoiceWakeRouteByTrigger({
-        trigger: "  HELLO   BOT ",
-        config: {
-          version: 1,
-          defaultTarget: { mode: "current" },
-          routes: [{ trigger: "hello bot", target: { sessionKey: "agent:main:main" } }],
-          updatedAtMs: 0,
-        },
-      });
-      expect(result).toEqual({ sessionKey: "agent:main:main" });
-      expect(normalizeVoiceWakeTriggerWord("  X  Y ")).toBe("x y");
+      expect(
+        resolveVoiceWakeRouteByTrigger({
+          trigger: "  HELLO   BOT ",
+          config: {
+            version: 1,
+            defaultTarget: { mode: "current" },
+            routes: [{ trigger: "hello bot", target: { sessionKey: "agent:main:main" } }],
+            updatedAtMs: 0,
+          },
+        }),
+      ).toEqual({ sessionKey: "agent:main:main" });
     });
   });
 
@@ -283,6 +259,14 @@ describe("infra store", () => {
       expect(cache.check("a", 120)).toBe(false);
       expect(cache.check("c", 200)).toBe(false);
       expect(cache.size()).toBe(2);
+    });
+
+    it("bounds non-finite ttl and max size options", () => {
+      const cache = createDedupeCache({ ttlMs: Number.NaN, maxSize: Number.NaN });
+
+      expect(cache.check("a", 100)).toBe(false);
+      expect(cache.peek("a", 100)).toBe(false);
+      expect(cache.size()).toBe(0);
     });
 
     it("supports non-mutating existence checks via peek()", () => {

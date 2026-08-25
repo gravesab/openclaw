@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="$HOME/ai/projects/openclaw"
-OLLAMA_URL="http://127.0.0.1:11435"
-MODEL="hermes3:8b"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+OLLAMA_URL="${OPENCLAW_OLLAMA_BASE_URL:-http://192.168.50.117:11434}"
+MODEL="${OPENCLAW_HOMEMANAGER_MODEL:-hermes3:8b}"
 
 PROMPT="$("$BASE/tools/home_manager/home_manager_prompt.sh")"
 RAW_REPORT="$("$BASE/tools/home_manager/home_status_report.sh")"
@@ -64,23 +64,10 @@ def find_percent(label: str):
             return int(match.group(1))
     return None
 
-def find_latency():
-    matches = re.findall(r"Latency_ms:\s*(\d+)", report, re.I)
-    if not matches:
-        return None
-    return int(matches[-1])
-
 internal_disk = find_percent("Disk Usage")
-latency = find_latency()
 
-services_healthy = all(
-    value in report
-    for value in [
-        "Active: active (running)",
-        "Status: online",
-        "Status: healthy",
-        "Response: benchmark ok",
-    ]
+ollama_online = bool(
+    re.search(r"M4 Ollama.*?Status:\s*online", report, re.I | re.S)
 )
 
 attention = []
@@ -94,11 +81,6 @@ if internal_disk is not None:
         attention.append(
             f"Internal disk usage is elevated at {internal_disk}%."
         )
-
-if latency is not None and latency >= 5000:
-    attention.append(
-        f"M4 Ollama benchmark latency is slow at {latency} ms."
-    )
 
 telegram_current_failure = bool(
     re.search(
@@ -126,18 +108,21 @@ else:
 good = [
     "OpenClaw Gateway, Voice Service, and Dashboard are running.",
     "Docker containers are running.",
-    "M4 Ollama is online and its model inventory is available.",
     "The hourly snapshot completed successfully.",
 ]
+
+if ollama_online:
+    good.append(
+        "M4 Ollama is online and its model inventory is available."
+    )
+else:
+    attention.append(
+        "M4 Ollama model inventory is unavailable."
+    )
 
 if internal_disk is not None and internal_disk < 80:
     good.append(
         f"Internal disk usage is healthy at {internal_disk}%."
-    )
-
-if latency is not None and latency < 5000:
-    good.append(
-        f"M4 Ollama benchmark latency is healthy at {latency} ms."
     )
 
 print("1. Overall Status")

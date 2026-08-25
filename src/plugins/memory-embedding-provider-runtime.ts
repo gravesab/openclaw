@@ -1,84 +1,127 @@
-import { normalizeProviderId } from "../agents/provider-id.js";
+// Runtime bridge for plugin-provided memory embedding providers.
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { readConfiguredProviderApiId } from "./embedding-provider-config.js";
 import {
-  resolvePluginCapabilityProvider,
-  resolvePluginCapabilityProviders,
-} from "./capability-provider-runtime.js";
+  getRuntimeEmbeddingProviderAdapter,
+  listRuntimeEmbeddingProviderAdapters,
+  resolveRuntimeEmbeddingProviderLookupIds,
+} from "./embedding-provider-runtime-shared.js";
+import { getEmbeddingProvider } from "./embedding-provider-runtime.js";
+import type {
+  EmbeddingProvider,
+  EmbeddingProviderAdapter,
+  EmbeddingProviderCreateOptions,
+} from "./embedding-provider-types.js";
 import {
   getRegisteredMemoryEmbeddingProvider,
   listRegisteredMemoryEmbeddingProviders,
+  type MemoryEmbeddingProvider,
   type MemoryEmbeddingProviderAdapter,
+  type MemoryEmbeddingProviderCreateOptions,
 } from "./memory-embedding-providers.js";
+
+const LOCAL_EMBEDDING_RUNTIME_FACTS = Symbol.for("openclaw.localEmbeddingRuntimeFacts");
 
 export { listRegisteredMemoryEmbeddingProviders };
 
+/** Lists registered memory embedding provider adapters without registry metadata. */
 export function listRegisteredMemoryEmbeddingProviderAdapters(): MemoryEmbeddingProviderAdapter[] {
   return listRegisteredMemoryEmbeddingProviders().map((entry) => entry.adapter);
 }
+
+/** Lists memory embedding providers from runtime config and registered adapters. */
 export function listMemoryEmbeddingProviders(
   cfg?: OpenClawConfig,
 ): MemoryEmbeddingProviderAdapter[] {
-  const registered = listRegisteredMemoryEmbeddingProviderAdapters();
-  const merged = new Map(registered.map((adapter) => [adapter.id, adapter]));
-  for (const adapter of resolvePluginCapabilityProviders({
+  return listRuntimeEmbeddingProviderAdapters({
     key: "memoryEmbeddingProviders",
     cfg,
-  })) {
-    if (!merged.has(adapter.id)) {
-      merged.set(adapter.id, adapter);
-    }
-  }
-  return [...merged.values()];
+    registered: listRegisteredMemoryEmbeddingProviderAdapters(),
+  });
 }
 
-function readConfiguredProviderApiId(providerId: string, cfg?: OpenClawConfig): string | undefined {
-  const providers = cfg?.models?.providers;
-  if (!providers) {
-    return undefined;
-  }
-  const normalized = normalizeProviderId(providerId);
-  const providerConfig =
-    providers[providerId] ??
-    Object.entries(providers).find(
-      ([candidateId]) => normalizeProviderId(candidateId) === normalized,
-    )?.[1];
-  const api = providerConfig?.api?.trim();
-  if (!api) {
-    return undefined;
-  }
-  const normalizedApi = normalizeProviderId(api);
-  return normalizedApi && normalizedApi !== normalized ? normalizedApi : undefined;
+function resolveConfiguredMemoryEmbeddingProviderId(
+  providerId: string,
+  cfg?: OpenClawConfig,
+): string | undefined {
+  return readConfiguredProviderApiId({ providerId, cfg });
 }
 
 function resolveMemoryEmbeddingProviderLookupIds(id: string, cfg?: OpenClawConfig): string[] {
-  const ids = [id];
-  const apiId = readConfiguredProviderApiId(id, cfg);
-  if (apiId && !ids.some((candidate) => normalizeProviderId(candidate) === apiId)) {
-    ids.push(apiId);
-  }
-  return ids;
+  return resolveRuntimeEmbeddingProviderLookupIds({
+    id,
+    cfg,
+    resolveConfiguredProviderId: resolveConfiguredMemoryEmbeddingProviderId,
+  });
 }
 
+function adaptEmbeddingProvider(provider: EmbeddingProvider): MemoryEmbeddingProvider {
+  const adapted: MemoryEmbeddingProvider = {
+    ...provider,
+    embedQuery: (text, options) => provider.embed(text, { ...options, inputType: "query" }),
+    embedBatch: (texts, options) =>
+      provider.embedBatch(texts, { ...options, inputType: "document" }),
+    embedBatchInputs: (inputs, options) =>
+      provider.embedBatch(inputs, { ...options, inputType: "document" }),
+    ...(provider.close ? { close: () => provider.close?.() } : {}),
+  };
+  const getRuntimeFacts = Reflect.get(provider, LOCAL_EMBEDDING_RUNTIME_FACTS);
+  if (typeof getRuntimeFacts === "function") {
+    Object.defineProperty(adapted, LOCAL_EMBEDDING_RUNTIME_FACTS, {
+      enumerable: false,
+      value: getRuntimeFacts,
+    });
+  }
+  return adapted;
+}
+
+function adaptEmbeddingProviderAdapter(
+  adapter: EmbeddingProviderAdapter,
+): MemoryEmbeddingProviderAdapter {
+  const genericOptions = (
+    options: MemoryEmbeddingProviderCreateOptions,
+  ): EmbeddingProviderCreateOptions => ({
+    ...options,
+    ...(typeof options.outputDimensionality === "number"
+      ? { dimensions: options.outputDimensionality }
+      : {}),
+  });
+  const resolveIndexIdentity = adapter.resolveIndexIdentity;
+
+  return {
+    ...adapter,
+    ...(resolveIndexIdentity
+      ? {
+          resolveIndexIdentity: (options) => resolveIndexIdentity(genericOptions(options)),
+        }
+      : {}),
+    create: async (options) => {
+      const result = await adapter.create(genericOptions(options));
+      return {
+        ...result,
+        provider: result.provider ? adaptEmbeddingProvider(result.provider) : null,
+      };
+    },
+  };
+}
+
+/** Resolves one memory embedding provider by id, alias, or configured API owner. */
 export function getMemoryEmbeddingProvider(
   id: string,
   cfg?: OpenClawConfig,
 ): MemoryEmbeddingProviderAdapter | undefined {
-  const ids = resolveMemoryEmbeddingProviderLookupIds(id, cfg);
-  for (const candidateId of ids) {
-    const registered = getRegisteredMemoryEmbeddingProvider(candidateId);
-    if (registered) {
-      return registered.adapter;
-    }
+  const memoryAdapter = getRuntimeEmbeddingProviderAdapter({
+    key: "memoryEmbeddingProviders",
+    cfg,
+    lookupIds: resolveMemoryEmbeddingProviderLookupIds(id, cfg),
+    getRegisteredProvider: getRegisteredMemoryEmbeddingProvider,
+  });
+  if (memoryAdapter) {
+    return memoryAdapter;
   }
-  for (const candidateId of ids) {
-    const provider = resolvePluginCapabilityProvider({
-      key: "memoryEmbeddingProviders",
-      providerId: candidateId,
-      cfg,
-    });
-    if (provider) {
-      return provider;
-    }
-  }
-  return undefined;
+
+  // Resolve the shipped generic provider contract at its registry owner so all
+  // memory consumers share one query/document and multimodal adaptation path.
+  const embeddingAdapter = getEmbeddingProvider(id, cfg);
+  return embeddingAdapter ? adaptEmbeddingProviderAdapter(embeddingAdapter) : undefined;
 }

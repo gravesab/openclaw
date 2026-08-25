@@ -14,7 +14,7 @@ source_document: "HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md"
 
 This paper defines a direction for making ChatGPT useful, understandable, and trustworthy across ranch operations, health, finances, energy, and institutional knowledge.
 
-Status: Proposed design baseline  
+Status: Proposed design baseline
 Date: August 2, 2026
 
 ## Executive summary

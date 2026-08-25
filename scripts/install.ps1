@@ -23,6 +23,73 @@ function Fail-Install {
     return $false
 }
 
+function Test-BooleanSuccessResult {
+    param([object[]]$Results)
+
+    return ($Results.Count -gt 0 -and $Results[-1] -eq $true)
+}
+
+function Remove-MatchingQuotes {
+    param([string]$Value)
+
+    if ([string]::IsNullOrEmpty($Value) -or $Value.Length -lt 2) {
+        return $Value
+    }
+
+    $first = $Value[0]
+    $last = $Value[$Value.Length - 1]
+    if (($first -eq '"' -and $last -eq '"') -or ($first -eq "'" -and $last -eq "'")) {
+        return $Value.Substring(1, $Value.Length - 2)
+    }
+    return $Value
+}
+
+function Resolve-NodeOptionsWithMinOldSpace {
+    param(
+        [string]$NodeOptions,
+        [int]$MinOldSpaceMb = 8192
+    )
+
+    $parts = @($NodeOptions -split '\s+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $resolved = New-Object System.Collections.Generic.List[string]
+    $foundOldSpace = $false
+    for ($index = 0; $index -lt $parts.Count; $index++) {
+        $part = $parts[$index]
+        $normalizedPart = Remove-MatchingQuotes -Value $part
+        if ($normalizedPart -match '^--max[-_]old[-_]space[-_]size=(?<value>.+)$') {
+            $parsed = 0
+            $parsedValue = Remove-MatchingQuotes -Value $Matches["value"]
+            if (-not [int]::TryParse($parsedValue, [ref]$parsed)) {
+                $parsed = $MinOldSpaceMb
+            }
+            $foundOldSpace = $true
+            $value = [Math]::Max($parsed, $MinOldSpaceMb)
+            $resolved.Add("--max-old-space-size=$value")
+            continue
+        }
+        if ($normalizedPart -match '^--max[-_]old[-_]space[-_]size$') {
+            $foundOldSpace = $true
+            $next = if ($index + 1 -lt $parts.Count) { $parts[$index + 1] } else { $null }
+            $parsed = 0
+            $parsedNext = Remove-MatchingQuotes -Value $next
+            if (-not [int]::TryParse($parsedNext, [ref]$parsed)) {
+                $parsed = $MinOldSpaceMb
+            }
+            $value = [Math]::Max($parsed, $MinOldSpaceMb)
+            $resolved.Add("--max-old-space-size=$value")
+            if ($next) {
+                $index += 1
+            }
+            continue
+        }
+        $resolved.Add($part)
+    }
+    if (-not $foundOldSpace) {
+        $resolved.Add("--max-old-space-size=$MinOldSpaceMb")
+    }
+    return ($resolved -join " ")
+}
+
 function Complete-Install {
     param([bool]$Succeeded)
 
@@ -36,6 +103,84 @@ function Complete-Install {
 
     throw "OpenClaw installation failed with exit code $($script:InstallExitCode)."
 }
+
+function Resolve-InstallerTempDirectory {
+    param([scriptblock]$LongPathResolver)
+
+    $candidates = New-Object System.Collections.Generic.List[string]
+    foreach ($candidate in @($env:TEMP, $env:TMP, [System.IO.Path]::GetTempPath())) {
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            $candidates.Add($candidate)
+        }
+    }
+
+    $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+    if (-not [string]::IsNullOrWhiteSpace($localAppData)) {
+        $candidates.Add((Join-Path $localAppData "Temp"))
+    }
+
+    $userHome = [Environment]::GetFolderPath("UserProfile")
+    if (-not [string]::IsNullOrWhiteSpace($userHome)) {
+        $candidates.Add((Join-Path $userHome "AppData\Local\Temp"))
+    }
+
+    foreach ($candidate in $candidates) {
+        $pathToResolve = $candidate
+        $candidateHasShortAlias = $candidate -match '(?i)~\d'
+        $requiresCanonicalization = (
+            $candidateHasShortAlias -or
+            $candidate.StartsWith('\\?\', [System.StringComparison]::OrdinalIgnoreCase)
+        )
+        if ($pathToResolve.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $pathToResolve = "\\" + $pathToResolve.Substring(8)
+        } elseif ($pathToResolve.StartsWith('\\?\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $pathToResolve = $pathToResolve.Substring(4)
+        }
+        try {
+            if ($LongPathResolver) {
+                $resolvedCandidate = & $LongPathResolver $pathToResolve
+            } else {
+                # Windows PowerShell 5.1: FSO Folder.Path echoes 8.3 aliases; Get-Item.FullName expands them.
+                $resolvedCandidate = (Get-Item -LiteralPath $pathToResolve -ErrorAction Stop).FullName
+            }
+        } catch {
+            if ($requiresCanonicalization) {
+                continue
+            }
+            $resolvedCandidate = $pathToResolve
+        }
+        if ([string]::IsNullOrWhiteSpace($resolvedCandidate)) {
+            continue
+        }
+        if ($candidateHasShortAlias -and $resolvedCandidate -match '(?i)~\d') {
+            continue
+        }
+        if ($resolvedCandidate.StartsWith('\\?\UNC\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $resolvedCandidate = "\\" + $resolvedCandidate.Substring(8)
+        } elseif ($resolvedCandidate.StartsWith('\\?\', [System.StringComparison]::OrdinalIgnoreCase)) {
+            $resolvedCandidate = $resolvedCandidate.Substring(4)
+        }
+        if (
+            Test-Path -LiteralPath $resolvedCandidate -PathType Container
+        ) {
+            return $resolvedCandidate
+        }
+        # Try the next existing root; archive and extraction children do not exist yet.
+    }
+
+    throw "Could not find a usable Windows temporary directory."
+}
+
+function Initialize-InstallerTempDirectory {
+    param([scriptblock]$LongPathResolver)
+
+    $tempDirectory = Resolve-InstallerTempDirectory -LongPathResolver $LongPathResolver
+    $script:InstallerTempDirectory = $tempDirectory
+    $env:TEMP = $tempDirectory
+    $env:TMP = $tempDirectory
+}
+
+Initialize-InstallerTempDirectory
 
 Write-Host ""
 Write-Host "  OpenClaw Installer" -ForegroundColor Cyan
@@ -82,16 +227,82 @@ if ([string]::IsNullOrWhiteSpace($GitDir)) {
 }
 
 # Check for Node.js
+function Test-NodeVersionSupported {
+    param([string]$Version)
+
+    $versionMatch = [regex]::Match($Version, '^v?(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)')
+    if (-not $versionMatch.Success) {
+        return $false
+    }
+    $major = [int]$versionMatch.Groups["major"].Value
+    $minor = [int]$versionMatch.Groups["minor"].Value
+    $patch = [int]$versionMatch.Groups["patch"].Value
+    if ($major -eq 22) {
+        return ($minor -gt 22 -or ($minor -eq 22 -and $patch -ge 3))
+    }
+    if ($major -eq 24) {
+        return ($minor -ge 15)
+    }
+    if ($major -eq 25) {
+        return ($minor -ge 9)
+    }
+    return ($major -gt 25)
+}
+
+function Test-NodeSqliteSupported {
+    param([string]$Version)
+
+    if ([string]::IsNullOrWhiteSpace($Version)) {
+        return $false
+    }
+    $versionMatch = [regex]::Match($Version, '^(?<major>\d+)\.(?<minor>\d+)\.(?<patch>\d+)$')
+    if (-not $versionMatch.Success) {
+        return $false
+    }
+    $major = [int]$versionMatch.Groups["major"].Value
+    $minor = [int]$versionMatch.Groups["minor"].Value
+    $patch = [int]$versionMatch.Groups["patch"].Value
+    return (
+        $major -gt 3 -or
+        (
+            $major -eq 3 -and
+            (
+                $minor -gt 51 -or
+                ($minor -eq 51 -and $patch -ge 3) -or
+                ($minor -eq 50 -and $patch -ge 7) -or
+                ($minor -eq 44 -and $patch -ge 6)
+            )
+        )
+    )
+}
+
 function Check-Node {
     try {
-        $nodeVersion = (node -v 2>$null)
+        $nodeCommand = Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1
+        $nodePath = $nodeCommand.Source
+        $nodeVersion = (& $nodePath -v 2>$null)
+        $sqliteProbe = 'const { DatabaseSync } = require("node:sqlite"); const db = new DatabaseSync(":memory:"); try { process.stdout.write(String(db.prepare("SELECT sqlite_version() AS version").get().version)); } finally { db.close(); }'
+        $sqliteVersion = ($sqliteProbe | & $nodePath - 2>$null)
+        if ($LASTEXITCODE -ne 0) {
+            $sqliteVersion = $null
+        }
         if ($nodeVersion) {
-            $version = [int]($nodeVersion -replace 'v(\d+)\..*', '$1')
-            if ($version -ge 22) {
+            if (
+                (Test-NodeVersionSupported -Version $nodeVersion) -and
+                (Test-NodeSqliteSupported -Version $sqliteVersion)
+            ) {
                 Write-Host "[OK] Node.js $nodeVersion found" -ForegroundColor Green
                 return $true
+            } elseif (Test-NodeVersionSupported -Version $nodeVersion) {
+                $sqliteVersionLabel = if ([string]::IsNullOrWhiteSpace($sqliteVersion)) {
+                    "unavailable"
+                } else {
+                    $sqliteVersion
+                }
+                Write-Host "[!] Node.js $nodeVersion uses SQLite $sqliteVersionLabel; SQLite 3.51.3+, 3.50.7+ within 3.50.x, or 3.44.6+ within 3.44.x is required" -ForegroundColor Yellow
+                return $false
             } else {
-                Write-Host "[!] Node.js $nodeVersion found, but v22+ required" -ForegroundColor Yellow
+                Write-Host "[!] Node.js $nodeVersion found, but Node 22.22.3+, Node 24.15.0+, or Node 25.9.0+ is required" -ForegroundColor Yellow
                 return $false
             }
         }
@@ -102,6 +313,206 @@ function Check-Node {
     return $false
 }
 
+function Get-WindowsPortableArchitecture {
+    # Native ARM64 Windows may run Windows PowerShell under x64 emulation, so
+    # process env vars can report AMD64 even when the host CPU is ARM64.
+    try {
+        $processor = Get-CimInstance -ClassName Win32_Processor -ErrorAction Stop | Select-Object -First 1
+        if ($processor -and $processor.Architecture -eq 12) {
+            return "arm64"
+        }
+    } catch {}
+
+    try {
+        $computerSystem = Get-CimInstance -ClassName Win32_ComputerSystem -ErrorAction Stop | Select-Object -First 1
+        if ($computerSystem -and $computerSystem.SystemType -match "ARM64") {
+            return "arm64"
+        }
+    } catch {}
+
+    foreach ($architecture in @($env:PROCESSOR_ARCHITEW6432, $env:PROCESSOR_ARCHITECTURE)) {
+        if ($architecture -match "ARM64") {
+            return "arm64"
+        }
+    }
+    return "x64"
+}
+
+function Get-OpenClawDepsRoot {
+    $localAppData = $env:LOCALAPPDATA
+    if ([string]::IsNullOrWhiteSpace($localAppData)) {
+        $localAppData = [Environment]::GetFolderPath("LocalApplicationData")
+    }
+    if ([string]::IsNullOrWhiteSpace($localAppData)) {
+        $localAppData = Join-Path ([Environment]::GetFolderPath("UserProfile")) "AppData\Local"
+    }
+    return (Join-Path $localAppData "OpenClaw\deps")
+}
+
+function Get-PortableNodeRoot {
+    return (Join-Path (Get-OpenClawDepsRoot) "portable-node")
+}
+
+function Get-PortableNodeCommandPath {
+    $root = Get-PortableNodeRoot
+    $candidate = Join-Path $root "node.exe"
+    if (Test-Path $candidate) {
+        return $candidate
+    }
+    return $null
+}
+
+function Use-PortableNodeIfPresent {
+    $nodeExe = Get-PortableNodeCommandPath
+    if (-not $nodeExe) {
+        return $false
+    }
+
+    Add-ToProcessPath (Split-Path -Parent $nodeExe)
+    return (Check-Node)
+}
+
+function Ensure-PortableNodeOnUserPath {
+    $nodeExe = Get-PortableNodeCommandPath
+    if (-not $nodeExe) {
+        return
+    }
+
+    $nodeDir = Split-Path -Parent $nodeExe
+    if (Add-ToUserPath $nodeDir) {
+        Write-Host "[!] Added $nodeDir to user PATH (restart terminal if node or openclaw is not found)" -ForegroundColor Yellow
+    }
+}
+
+function Get-WebRequestTimeoutParameters {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CommandName,
+        [Parameter(Mandatory = $true)]
+        [int]$LegacyTimeoutSec
+    )
+
+    $command = Get-Command $CommandName -ErrorAction Stop
+    # PowerShell 7.4+ exposes a per-read limit, which bounds body stalls without rejecting slow
+    # connections. Earlier versions only expose TimeoutSec, so downloads keep a longer allowance.
+    if ($command.Parameters.ContainsKey("OperationTimeoutSeconds")) {
+        return @{
+            OperationTimeoutSeconds = 30
+        }
+    }
+
+    return @{ TimeoutSec = $LegacyTimeoutSec }
+}
+
+function Resolve-PortableNodeDownload {
+    $architecture = Get-WindowsPortableArchitecture
+    $requestTimeouts = Get-WebRequestTimeoutParameters -CommandName "Invoke-RestMethod" -LegacyTimeoutSec 30
+    $index = Invoke-RestMethod -Uri "https://nodejs.org/dist/index.json" @requestTimeouts
+    $release = $index |
+        Where-Object { $_.version -match '^v26\.' } |
+        Select-Object -First 1
+
+    if (-not $release -or -not $release.version) {
+        throw "Could not resolve latest Node.js 26 release metadata."
+    }
+
+    $fileKey = "win-$architecture-zip"
+    if ($release.files -and -not ($release.files -contains $fileKey)) {
+        throw "Node.js $($release.version) does not publish $fileKey."
+    }
+
+    $name = "node-$($release.version)-win-$architecture.zip"
+    return @{
+        Version = $release.version
+        Name = $name
+        Url = "https://nodejs.org/dist/$($release.version)/$name"
+    }
+}
+
+function Expand-PortableNodeArchive {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ZipPath,
+        [Parameter(Mandatory = $true)]
+        [string]$DestinationPath
+    )
+
+    $tarCommand = Get-Command tar -ErrorAction SilentlyContinue
+    if ($tarCommand -and $tarCommand.Source) {
+        New-Item -ItemType Directory -Force -Path $DestinationPath | Out-Null
+        & $tarCommand.Source -xf $ZipPath -C $DestinationPath --strip-components 1
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+
+        $tarExitCode = $LASTEXITCODE
+        if (Test-Path $DestinationPath) {
+            Remove-Item -Recurse -Force $DestinationPath
+        }
+        Write-Host "[!] tar extraction failed with exit code $tarExitCode; trying .NET zip extraction." -ForegroundColor Yellow
+    }
+
+    $fallbackExtract = Join-Path (Split-Path -Parent $DestinationPath) ("portable-node-extract-" + [guid]::NewGuid().ToString("N"))
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        [System.IO.Compression.ZipFile]::ExtractToDirectory($ZipPath, $fallbackExtract)
+
+        $nodeDir = Get-ChildItem -Path $fallbackExtract -Directory |
+            Where-Object { Test-Path (Join-Path $_.FullName "node.exe") } |
+            Select-Object -First 1
+        if (-not $nodeDir) {
+            throw "Node.js archive did not contain node.exe."
+        }
+        Copy-Item -LiteralPath $nodeDir.FullName -Destination $DestinationPath -Recurse -Force
+    } finally {
+        if (Test-Path $fallbackExtract) {
+            Remove-Item -Recurse -Force $fallbackExtract
+        }
+    }
+}
+
+function Install-PortableNode {
+    if (Use-PortableNodeIfPresent) {
+        Ensure-PortableNodeOnUserPath
+        $nodeVersion = (& node -v 2>$null)
+        if ($nodeVersion) {
+            Write-Host "[OK] User-local Node.js already available: $nodeVersion" -ForegroundColor Green
+        }
+        return
+    }
+
+    Write-Host "  No package manager found; bootstrapping user-local portable Node.js..." -ForegroundColor Gray
+
+    $download = Resolve-PortableNodeDownload
+    $portableRoot = Get-PortableNodeRoot
+    $portableParent = Split-Path -Parent $portableRoot
+    $tmpZip = Join-Path $script:InstallerTempDirectory $download.Name
+
+    New-Item -ItemType Directory -Force -Path $portableParent | Out-Null
+    if (Test-Path $portableRoot) {
+        Remove-Item -Recurse -Force $portableRoot
+    }
+
+    try {
+        Write-Host "  Downloading Node.js $($download.Version)..." -ForegroundColor Gray
+        $downloadTimeouts = Get-WebRequestTimeoutParameters -CommandName "Invoke-WebRequest" -LegacyTimeoutSec 600
+        Invoke-WebRequest -UseBasicParsing -Uri $download.Url -OutFile $tmpZip @downloadTimeouts
+        Expand-PortableNodeArchive -ZipPath $tmpZip -DestinationPath $portableRoot
+    } finally {
+        if (Test-Path $tmpZip) {
+            Remove-Item -Force $tmpZip
+        }
+    }
+
+    if (-not (Use-PortableNodeIfPresent)) {
+        throw "Portable Node.js bootstrap completed, but node is still unavailable."
+    }
+    Ensure-PortableNodeOnUserPath
+
+    $nodeVersion = (& node -v 2>$null)
+    Write-Host "[OK] User-local Node.js ready: $nodeVersion" -ForegroundColor Green
+}
+
 # Install Node.js
 function Install-Node {
     Write-Host "[*] Installing Node.js..." -ForegroundColor Yellow
@@ -109,10 +520,11 @@ function Install-Node {
     # Try winget first (Windows 11 / Windows 10 with App Installer)
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Host "  Using winget..." -ForegroundColor Gray
-        winget install OpenJS.NodeJS.LTS --source winget --accept-package-agreements --accept-source-agreements
+        winget install OpenJS.NodeJS.LTS --source winget --accept-package-agreements --accept-source-agreements | Out-Host
 
         # Refresh PATH
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        Refresh-ProcessPath
+        Add-InstalledNodeToProcessPath | Out-Null
         if (Check-Node) {
             Write-Host "[OK] Node.js installed via winget" -ForegroundColor Green
             return $true
@@ -125,27 +537,49 @@ function Install-Node {
     # Try Chocolatey
     if (Get-Command choco -ErrorAction SilentlyContinue) {
         Write-Host "  Using Chocolatey..." -ForegroundColor Gray
-        choco install nodejs-lts -y
+        choco upgrade nodejs-lts -y --install-if-not-installed | Out-Host
 
         # Refresh PATH
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
-        Write-Host "[OK] Node.js installed via Chocolatey" -ForegroundColor Green
-        return $true
+        Refresh-ProcessPath
+        if (Check-Node) {
+            Write-Host "[OK] Node.js installed via Chocolatey" -ForegroundColor Green
+            return $true
+        }
+        Write-Host "[!] Chocolatey completed, but the installed Node.js runtime is unsupported" -ForegroundColor Yellow
+        return $false
     }
 
     # Try Scoop
     if (Get-Command scoop -ErrorAction SilentlyContinue) {
         Write-Host "  Using Scoop..." -ForegroundColor Gray
-        scoop install nodejs-lts
-        Write-Host "[OK] Node.js installed via Scoop" -ForegroundColor Green
-        return $true
+        scoop update | Out-Host
+        scoop install nodejs-lts | Out-Host
+        scoop update nodejs-lts | Out-Host
+
+        # Refresh PATH
+        Refresh-ProcessPath
+        if (Check-Node) {
+            Write-Host "[OK] Node.js installed via Scoop" -ForegroundColor Green
+            return $true
+        }
+        Write-Host "[!] Scoop completed, but the installed Node.js runtime is unsupported" -ForegroundColor Yellow
+        return $false
+    }
+
+    try {
+        Install-PortableNode
+        if (Check-Node) {
+            return $true
+        }
+    } catch {
+        Write-Host "[!] Portable Node.js bootstrap failed: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 
     # Manual download fallback
     Write-Host ""
-    Write-Host "Error: Could not find a package manager (winget, choco, or scoop)" -ForegroundColor Red
+    Write-Host "Error: Could not install Node.js automatically." -ForegroundColor Red
     Write-Host ""
-    Write-Host "Please install Node.js 22+ manually:" -ForegroundColor Yellow
+    Write-Host "Please install Node.js 26 manually:" -ForegroundColor Yellow
     Write-Host "  https://nodejs.org/en/download/" -ForegroundColor Cyan
     Write-Host ""
     Write-Host "Or install winget (App Installer) from the Microsoft Store." -ForegroundColor Gray
@@ -188,9 +622,70 @@ function Add-ToProcessPath {
     $env:Path = "$PathEntry;$env:Path"
 }
 
+function Add-InstalledNodeToProcessPath {
+    foreach ($programFilesRoot in @($env:ProgramW6432, $env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+        if ([string]::IsNullOrWhiteSpace($programFilesRoot)) {
+            continue
+        }
+        $nodeDir = Join-Path $programFilesRoot "nodejs"
+        if (Test-Path (Join-Path $nodeDir "node.exe")) {
+            Add-ToProcessPath $nodeDir
+            return $true
+        }
+    }
+    return $false
+}
+
+function Refresh-ProcessPath {
+    $entries = New-Object System.Collections.Generic.List[string]
+    $pathValues = @(
+        [Environment]::GetEnvironmentVariable("Path", "Machine"),
+        [Environment]::GetEnvironmentVariable("Path", "User"),
+        $env:Path
+    )
+
+    foreach ($pathValue in $pathValues) {
+        foreach ($entry in @($pathValue -split ";")) {
+            if (
+                -not [string]::IsNullOrWhiteSpace($entry) -and
+                -not ($entries | Where-Object { $_ -ieq $entry })
+            ) {
+                $entries.Add($entry)
+            }
+        }
+    }
+    $env:Path = $entries -join ";"
+}
+
+function Add-ToUserPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PathEntry
+    )
+
+    if ([string]::IsNullOrWhiteSpace($PathEntry)) {
+        return $false
+    }
+
+    Add-ToProcessPath $PathEntry
+
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $userEntries = @($userPath -split ";" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($userEntries | Where-Object { $_ -ieq $PathEntry }) {
+        return $false
+    }
+
+    $newUserPath = if ([string]::IsNullOrWhiteSpace($userPath)) {
+        $PathEntry
+    } else {
+        "$userPath;$PathEntry"
+    }
+    [Environment]::SetEnvironmentVariable("Path", $newUserPath, "User")
+    return $true
+}
+
 function Get-PortableGitRoot {
-    $base = Join-Path $env:LOCALAPPDATA "OpenClaw\deps"
-    return (Join-Path $base "portable-git")
+    return (Join-Path (Get-OpenClawDepsRoot) "portable-git")
 }
 
 function Get-PortableGitCommandPath {
@@ -214,20 +709,41 @@ function Use-PortableGitIfPresent {
         return $false
     }
 
-    $portableRoot = Get-PortableGitRoot
-    foreach ($pathEntry in @(
-        (Join-Path $portableRoot "mingw64\bin"),
-        (Join-Path $portableRoot "usr\bin"),
-        (Split-Path -Parent $gitExe)
-    )) {
-        if (Test-Path $pathEntry) {
-            Add-ToProcessPath $pathEntry
-        }
+    foreach ($pathEntry in (Get-PortableGitPathEntries)) {
+        Add-ToProcessPath $pathEntry
     }
     if (Check-Git) {
         return $true
     }
     return $false
+}
+
+function Get-PortableGitPathEntries {
+    $gitExe = Get-PortableGitCommandPath
+    if (-not $gitExe) {
+        return @()
+    }
+
+    $portableRoot = Get-PortableGitRoot
+    $pathEntries = @(
+        (Join-Path $portableRoot "mingw64\bin"),
+        (Join-Path $portableRoot "usr\bin"),
+        (Split-Path -Parent $gitExe)
+    )
+    return ($pathEntries | Where-Object { Test-Path $_ } | Select-Object -Unique)
+}
+
+function Ensure-PortableGitOnUserPath {
+    $added = @()
+    foreach ($pathEntry in (Get-PortableGitPathEntries)) {
+        if (Add-ToUserPath $pathEntry) {
+            $added += $pathEntry
+        }
+    }
+
+    if ($added.Count -gt 0) {
+        Write-Host "[!] Added user-local Git to user PATH (restart terminal if git or git-backed updates are not found)" -ForegroundColor Yellow
+    }
 }
 
 function Resolve-PortableGitDownload {
@@ -236,14 +752,22 @@ function Resolve-PortableGitDownload {
         "User-Agent" = "openclaw-installer"
         "Accept" = "application/vnd.github+json"
     }
-    $release = Invoke-RestMethod -Uri $releaseApi -Headers $headers
+    $requestTimeouts = Get-WebRequestTimeoutParameters -CommandName "Invoke-RestMethod" -LegacyTimeoutSec 30
+    $release = Invoke-RestMethod -Uri $releaseApi -Headers $headers @requestTimeouts
     if (-not $release -or -not $release.assets) {
         throw "Could not resolve latest git-for-windows release metadata."
     }
 
+    $architecture = Get-WindowsPortableArchitecture
+    $assetPattern = if ($architecture -eq "arm64") { '^MinGit-.*-arm64\.zip$' } else { '^MinGit-.*-64-bit\.zip$' }
     $asset = $release.assets |
-        Where-Object { $_.name -match '^MinGit-.*-64-bit\.zip$' -and $_.name -notmatch 'busybox' } |
+        Where-Object { $_.name -match $assetPattern -and $_.name -notmatch 'busybox' } |
         Select-Object -First 1
+    if (-not $asset -and $architecture -eq "arm64") {
+        $asset = $release.assets |
+            Where-Object { $_.name -match '^MinGit-.*-64-bit\.zip$' -and $_.name -notmatch 'busybox' } |
+            Select-Object -First 1
+    }
 
     if (-not $asset) {
         throw "Could not find a MinGit zip asset in the latest git-for-windows release."
@@ -258,6 +782,7 @@ function Resolve-PortableGitDownload {
 
 function Install-PortableGit {
     if (Use-PortableGitIfPresent) {
+        Ensure-PortableGitOnUserPath
         $portableVersion = (& git --version 2>$null)
         if ($portableVersion) {
             Write-Host "[OK] User-local Git already available: $portableVersion" -ForegroundColor Green
@@ -270,8 +795,9 @@ function Install-PortableGit {
     $download = Resolve-PortableGitDownload
     $portableRoot = Get-PortableGitRoot
     $portableParent = Split-Path -Parent $portableRoot
-    $tmpZip = Join-Path $env:TEMP $download.Name
-    $tmpExtract = Join-Path $env:TEMP ("openclaw-portable-git-" + [guid]::NewGuid().ToString("N"))
+    $tempName = "openclaw-portable-git-" + [guid]::NewGuid().ToString("N")
+    $tmpZip = Join-Path $script:InstallerTempDirectory ($tempName + ".zip")
+    $tmpExtract = Join-Path $script:InstallerTempDirectory $tempName
 
     New-Item -ItemType Directory -Force -Path $portableParent | Out-Null
     if (Test-Path $portableRoot) {
@@ -284,8 +810,10 @@ function Install-PortableGit {
 
     try {
         Write-Host "  Downloading $($download.Tag)..." -ForegroundColor Gray
-        Invoke-WebRequest -Uri $download.Url -OutFile $tmpZip
+        $downloadTimeouts = Get-WebRequestTimeoutParameters -CommandName "Invoke-WebRequest" -LegacyTimeoutSec 600
+        Invoke-WebRequest -Uri $download.Url -OutFile $tmpZip @downloadTimeouts
         Expand-Archive -Path $tmpZip -DestinationPath $tmpExtract -Force
+        New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
         Move-Item -Path (Join-Path $tmpExtract "*") -Destination $portableRoot -Force
     } finally {
         if (Test-Path $tmpZip) {
@@ -299,6 +827,7 @@ function Install-PortableGit {
     if (-not (Use-PortableGitIfPresent)) {
         throw "Portable Git bootstrap completed, but git is still unavailable."
     }
+    Ensure-PortableGitOnUserPath
 
     $portableVersion = (& git --version 2>$null)
     Write-Host "[OK] User-local Git ready: $portableVersion" -ForegroundColor Green
@@ -306,7 +835,10 @@ function Install-PortableGit {
 
 function Ensure-Git {
     if (Check-Git) { return $true }
-    if (Use-PortableGitIfPresent) { return $true }
+    if (Use-PortableGitIfPresent) {
+        Ensure-PortableGitOnUserPath
+        return $true
+    }
     try {
         Install-PortableGit
         if (Check-Git) {
@@ -350,6 +882,27 @@ function Invoke-OpenClawCommand {
     }
 
     & $commandPath @Arguments
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "openclaw $($Arguments -join ' ') failed with exit code $exitCode."
+    }
+}
+
+function Invoke-InteractiveOpenClawCommand {
+    param(
+        [Parameter(ValueFromRemainingArguments = $true)]
+        [string[]]$Arguments
+    )
+
+    $commandPath = Get-OpenClawCommandPath
+    if (-not $commandPath) {
+        throw "openclaw command not found on PATH."
+    }
+
+    $process = Start-Process -FilePath $commandPath -ArgumentList $Arguments -NoNewWindow -Wait -PassThru
+    if ($process.ExitCode -ne 0) {
+        throw "openclaw $($Arguments -join ' ') failed with exit code $($process.ExitCode)."
+    }
 }
 
 function Resolve-CommandPath {
@@ -384,6 +937,53 @@ function Get-PnpmCommandPath {
     return (Resolve-CommandPath -Candidates @("pnpm.cmd", "pnpm.exe", "pnpm"))
 }
 
+function Get-WindowsCommandSafeDirectory {
+    $userHome = [Environment]::GetFolderPath("UserProfile")
+    if (-not [string]::IsNullOrWhiteSpace($userHome) -and (Test-Path $userHome)) {
+        return $userHome
+    }
+    if (Test-Path -LiteralPath $script:InstallerTempDirectory -PathType Container) {
+        return $script:InstallerTempDirectory
+    }
+    return $null
+}
+
+function Invoke-CommandFromWindowsSafeDirectory {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CommandPath,
+        [string[]]$Arguments = @()
+    )
+
+    $safeDir = Get-WindowsCommandSafeDirectory
+    $pushedLocation = $false
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($safeDir)) {
+            Push-Location -LiteralPath $safeDir
+            $pushedLocation = $true
+        }
+        & $CommandPath @Arguments
+    } finally {
+        if ($pushedLocation) {
+            Pop-Location
+        }
+    }
+}
+
+function Invoke-NpmCommand {
+    param([string[]]$Arguments = @())
+    Invoke-CommandFromWindowsSafeDirectory -CommandPath (Get-NpmCommandPath) -Arguments $Arguments
+}
+
+function Invoke-CorepackCommand {
+    param([string[]]$Arguments = @())
+    $corepackCommand = Get-CorepackCommandPath
+    if (-not $corepackCommand) {
+        throw "corepack not found on PATH."
+    }
+    Invoke-CommandFromWindowsSafeDirectory -CommandPath $corepackCommand -Arguments $Arguments
+}
+
 function Get-NpmGlobalBinCandidates {
     param(
         [string]$NpmPrefix
@@ -408,7 +1008,7 @@ function Ensure-OpenClawOnPath {
 
     $npmPrefix = $null
     try {
-        $npmPrefix = (& (Get-NpmCommandPath) config get prefix 2>$null).Trim()
+        $npmPrefix = (Invoke-NpmCommand -Arguments @("config", "get", "prefix") 2>$null).Trim()
     } catch {
         $npmPrefix = $null
     }
@@ -419,10 +1019,7 @@ function Ensure-OpenClawOnPath {
             continue
         }
 
-        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-        if (-not ($userPath -split ";" | Where-Object { $_ -ieq $npmBin })) {
-            [Environment]::SetEnvironmentVariable("Path", "$userPath;$npmBin", "User")
-            $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+        if (Add-ToUserPath $npmBin) {
             Write-Host "[!] Added $npmBin to user PATH (restart terminal if command not found)" -ForegroundColor Yellow
         }
         return $true
@@ -441,17 +1038,83 @@ function Ensure-OpenClawOnPath {
     return $false
 }
 
+function Get-RepoPnpmVersion {
+    param([string]$RepoDir)
+
+    if ([string]::IsNullOrWhiteSpace($RepoDir)) {
+        return $null
+    }
+
+    $packageJsonPath = Join-Path $RepoDir "package.json"
+    if (-not (Test-Path $packageJsonPath)) {
+        return $null
+    }
+
+    try {
+        $packageJson = Get-Content -LiteralPath $packageJsonPath -Raw | ConvertFrom-Json
+        if ($packageJson.packageManager -match '^pnpm@(?<version>[^+]+)') {
+            return $Matches["version"]
+        }
+        if ($packageJson.devEngines -and $packageJson.devEngines.packageManager) {
+            $packageManager = $packageJson.devEngines.packageManager
+            if ($packageManager.name -eq "pnpm" -and -not [string]::IsNullOrWhiteSpace($packageManager.version)) {
+                return $packageManager.version
+            }
+        }
+    } catch {
+        return $null
+    }
+
+    return $null
+}
+
+function Test-PnpmCommandMatchesVersion {
+    param(
+        [string]$PnpmVersion,
+        [string]$RepoDir
+    )
+
+    $pnpmCommand = Get-PnpmCommandPath
+    if (-not $pnpmCommand) {
+        return $false
+    }
+    if ([string]::IsNullOrWhiteSpace($PnpmVersion)) {
+        return $true
+    }
+
+    $pushedLocation = $false
+    try {
+        if (-not [string]::IsNullOrWhiteSpace($RepoDir) -and (Test-Path $RepoDir)) {
+            Push-Location -LiteralPath $RepoDir
+            $pushedLocation = $true
+        }
+        $currentVersion = (& $pnpmCommand --version 2>$null)
+        return ($LASTEXITCODE -eq 0 -and $currentVersion -and $currentVersion.Trim() -eq $PnpmVersion)
+    } catch {
+        return $false
+    } finally {
+        if ($pushedLocation) {
+            Pop-Location
+        }
+    }
+}
+
 function Ensure-Pnpm {
-    if (Get-PnpmCommandPath) {
+    param([string]$RepoDir)
+
+    $pnpmVersion = Get-RepoPnpmVersion -RepoDir $RepoDir
+    $pnpmSpec = if ([string]::IsNullOrWhiteSpace($pnpmVersion)) { "pnpm@latest" } else { "pnpm@$pnpmVersion" }
+
+    if (Test-PnpmCommandMatchesVersion -PnpmVersion $pnpmVersion -RepoDir $RepoDir) {
         return
     }
     $corepackCommand = Get-CorepackCommandPath
     if ($corepackCommand) {
         try {
-            & $corepackCommand enable | Out-Null
-            & $corepackCommand prepare pnpm@latest --activate | Out-Null
-            if (Get-PnpmCommandPath) {
-                Write-Host "[OK] pnpm installed via corepack" -ForegroundColor Green
+            Invoke-CorepackCommand -Arguments @("enable") | Out-Null
+            Invoke-CorepackCommand -Arguments @("prepare", $pnpmSpec, "--activate") | Out-Null
+            if (Test-PnpmCommandMatchesVersion -PnpmVersion $pnpmVersion -RepoDir $RepoDir) {
+                Write-Host "[OK] pnpm installed via corepack ($pnpmSpec)" -ForegroundColor Green
                 return
             }
         } catch {
@@ -459,17 +1122,70 @@ function Ensure-Pnpm {
         }
     }
     Write-Host "[*] Installing pnpm..." -ForegroundColor Yellow
-    $prevScriptShell = $env:NPM_CONFIG_SCRIPT_SHELL
-    $env:NPM_CONFIG_SCRIPT_SHELL = "cmd.exe"
+    $pnpmInstalled = $false
     try {
-        & (Get-NpmCommandPath) install -g pnpm
-    } finally {
-        $env:NPM_CONFIG_SCRIPT_SHELL = $prevScriptShell
+        Invoke-NpmCommand -Arguments @("install", "-g", $pnpmSpec)
+        $pnpmInstalled = ($LASTEXITCODE -eq 0)
+    } catch {
+        $pnpmInstalled = $false
+    }
+    if (-not $pnpmInstalled) {
+        Write-Host "[!] pnpm install hit an existing or broken shim; retrying with --force" -ForegroundColor Yellow
+        Invoke-NpmCommand -Arguments @("install", "-g", "--force", $pnpmSpec)
+    }
+    if (-not (Test-PnpmCommandMatchesVersion -PnpmVersion $pnpmVersion -RepoDir $RepoDir)) {
+        throw "pnpm install completed, but $pnpmSpec is not first on PATH."
     }
     Write-Host "[OK] pnpm installed" -ForegroundColor Green
 }
 
 # Install OpenClaw
+function Resolve-LocalNpmPackagePath {
+    param([string]$PackagePath)
+
+    try {
+        return (Resolve-Path -LiteralPath $PackagePath -ErrorAction Stop).ProviderPath
+    } catch {
+        return [System.IO.Path]::GetFullPath($PackagePath)
+    }
+}
+
+function Resolve-LocalNpmPackageInstallSpec {
+    param([string]$InstallSpec)
+
+    if ([string]::IsNullOrWhiteSpace($InstallSpec)) {
+        return $InstallSpec
+    }
+    if ($InstallSpec -match '^file:(?<path>.+)$') {
+        $filePath = $Matches["path"]
+        if (
+            $filePath -match '^/' -or
+            $filePath -match '^\\\\' -or
+            $filePath -match '^[A-Za-z]:[\\/]'
+        ) {
+            return $InstallSpec
+        }
+        return ([System.Uri](Resolve-LocalNpmPackagePath -PackagePath $filePath)).AbsoluteUri
+    }
+    if (
+        $InstallSpec -match '^https?:' -or
+        $InstallSpec -match '^(git\+|github:)' -or
+        $InstallSpec -match '^[A-Za-z]:[\\/]' -or
+        $InstallSpec -match '^\\\\'
+    ) {
+        return $InstallSpec
+    }
+    if ($InstallSpec -notmatch '^\.\.?[\\/]' -and $InstallSpec -notmatch '\.tgz$') {
+        return $InstallSpec
+    }
+
+    try {
+        return (Resolve-LocalNpmPackagePath -PackagePath $InstallSpec)
+    } catch {
+        return $InstallSpec
+    }
+}
+
 function Resolve-NpmOpenClawInstallSpec {
     param(
         [string]$PackageName,
@@ -489,15 +1205,189 @@ function Resolve-NpmOpenClawInstallSpec {
         $trimmedTag -match '^\.\.?[\\/]' -or
         $trimmedTag -match '\.tgz($|[?#])'
     ) {
-        return $trimmedTag
+        return (Resolve-LocalNpmPackageInstallSpec -InstallSpec $trimmedTag)
     }
 
     return "$PackageName@$trimmedTag"
 }
 
+function Test-OpenClawSourcePackageInstallSpec {
+    param([string]$RequestedTag)
+
+    if ([string]::IsNullOrWhiteSpace($RequestedTag)) {
+        return $false
+    }
+
+    $normalizedTag = $RequestedTag.Trim().ToLowerInvariant()
+    if ($normalizedTag.StartsWith("openclaw@")) {
+        $normalizedTag = $normalizedTag.Substring("openclaw@".Length)
+    }
+
+    if ($normalizedTag -eq "main") {
+        return $true
+    }
+    if ($normalizedTag -match '^github:openclaw/openclaw($|[#/])') {
+        return $true
+    }
+
+    if ($normalizedTag.StartsWith("git+")) {
+        $normalizedTag = $normalizedTag.Substring("git+".Length)
+    }
+    return (
+        $normalizedTag -match '^https?://github\.com/openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^ssh://git@github\.com[:/]openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^git://github\.com/openclaw/openclaw(\.git)?($|[?#])' -or
+        $normalizedTag -match '^git@github\.com:openclaw/openclaw(\.git)?($|[?#])'
+    )
+}
+
+function Resolve-NpmConfigPath {
+    param([string]$RawPath)
+    if ([string]::IsNullOrWhiteSpace($RawPath) -or $RawPath -eq "null" -or $RawPath -eq "undefined") {
+        return $null
+    }
+    if (($RawPath.StartsWith("~/") -or $RawPath.StartsWith("~\")) -and -not [string]::IsNullOrWhiteSpace($HOME)) {
+        return (Join-Path $HOME $RawPath.Substring(2))
+    }
+    if (($RawPath.StartsWith('${HOME}/') -or $RawPath.StartsWith('${HOME}\')) -and -not [string]::IsNullOrWhiteSpace($HOME)) {
+        return (Join-Path $HOME $RawPath.Substring(8))
+    }
+    return $RawPath
+}
+
+function Test-NpmConfigFileKey {
+    param(
+        [string]$Path,
+        [string]$Key
+    )
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        return $false
+    }
+    $escapedKey = [regex]::Escape($Key)
+    return [bool](Select-String -LiteralPath $Path -Pattern "^\s*$escapedKey\s*=" -Quiet)
+}
+
+function Test-NpmConfigRawKey {
+    param([string]$Key)
+    $files = New-Object System.Collections.Generic.List[string]
+    $userConfig = if ($env:NPM_CONFIG_USERCONFIG) { $env:NPM_CONFIG_USERCONFIG } else { $env:npm_config_userconfig }
+    if ($userConfig) {
+        $resolvedUserConfig = Resolve-NpmConfigPath $userConfig
+        if ($resolvedUserConfig) { $files.Add($resolvedUserConfig) }
+    } elseif (-not [string]::IsNullOrWhiteSpace($HOME)) {
+        $files.Add((Join-Path $HOME ".npmrc"))
+    }
+
+    $globalConfig = if ($env:NPM_CONFIG_GLOBALCONFIG) { $env:NPM_CONFIG_GLOBALCONFIG } else { $env:npm_config_globalconfig }
+    if ($globalConfig) {
+        $resolvedGlobalConfig = Resolve-NpmConfigPath $globalConfig
+        if ($resolvedGlobalConfig) { $files.Add($resolvedGlobalConfig) }
+    }
+
+    $detectedGlobalConfig = (Invoke-NpmCommand -Arguments @("config", "get", "globalconfig", "--global") 2>$null)
+    if ($LASTEXITCODE -eq 0) {
+        $resolvedDetectedGlobalConfig = Resolve-NpmConfigPath $detectedGlobalConfig
+        if ($resolvedDetectedGlobalConfig) { $files.Add($resolvedDetectedGlobalConfig) }
+    }
+
+    foreach ($file in ($files | Select-Object -Unique)) {
+        if (Test-NpmConfigFileKey -Path $file -Key $Key) {
+            return $true
+        }
+    }
+    return $false
+}
+
+function Add-NpmCacheCandidate {
+    param(
+        [System.Collections.Generic.List[string]]$Candidates,
+        [object]$Path
+    )
+    foreach ($rawPath in @($Path)) {
+        $trimmed = "$rawPath".Trim()
+        if (-not [string]::IsNullOrWhiteSpace($trimmed) -and -not $Candidates.Contains($trimmed)) {
+            $Candidates.Add($trimmed)
+        }
+    }
+}
+
+function Get-NpmDebugLogRootCandidates {
+    $candidates = New-Object System.Collections.Generic.List[string]
+    Add-NpmCacheCandidate -Candidates $candidates -Path $env:NPM_CONFIG_CACHE
+
+    $detectedCache = (Invoke-NpmCommand -Arguments @("config", "get", "cache") 2>$null)
+    if ($LASTEXITCODE -eq 0) {
+        Add-NpmCacheCandidate -Candidates $candidates -Path $detectedCache
+    }
+
+    if ($env:LOCALAPPDATA) {
+        Add-NpmCacheCandidate -Candidates $candidates -Path (Join-Path $env:LOCALAPPDATA "npm-cache")
+    }
+    if ($env:APPDATA) {
+        Add-NpmCacheCandidate -Candidates $candidates -Path (Join-Path $env:APPDATA "npm-cache")
+    }
+    if ($env:USERPROFILE) {
+        Add-NpmCacheCandidate -Candidates $candidates -Path (Join-Path $env:USERPROFILE "AppData\Local\npm-cache")
+    }
+
+    return $candidates
+}
+
+function Get-LatestNpmDebugLogPath {
+    param([object[]]$CacheRoots)
+    foreach ($cacheDir in @($CacheRoots)) {
+        $logDir = Join-Path $cacheDir "_logs"
+        if (-not (Test-Path -LiteralPath $logDir -PathType Container)) {
+            continue
+        }
+        $latestLog = Get-ChildItem -LiteralPath $logDir -Filter "*-debug-*.log" -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+        if ($latestLog) {
+            return $latestLog.FullName
+        }
+    }
+    return $null
+}
+
+function Write-NpmInstallFailureDetails {
+    param(
+        [object[]]$Output,
+        [object[]]$CacheRoots
+    )
+    $printedOutput = $false
+    foreach ($line in @($Output)) {
+        if ($null -eq $line) {
+            continue
+        }
+        $text = "$line"
+        if ([string]::IsNullOrWhiteSpace($text)) {
+            continue
+        }
+        Write-Host $text
+        $printedOutput = $true
+    }
+
+    $latestLog = Get-LatestNpmDebugLogPath -CacheRoots $CacheRoots
+    if ($latestLog) {
+        Write-Host "Latest npm debug log ($latestLog):" -ForegroundColor Yellow
+        Get-Content -LiteralPath $latestLog -Tail 120 -ErrorAction SilentlyContinue | ForEach-Object { Write-Host $_ }
+        return
+    }
+
+    if (-not $printedOutput) {
+        Write-Host "npm produced no console output and no npm debug log was found." -ForegroundColor Yellow
+    }
+}
+
 function Install-OpenClaw {
     if ([string]::IsNullOrWhiteSpace($Tag)) {
         $Tag = "latest"
+    }
+    if (Test-OpenClawSourcePackageInstallSpec -RequestedTag $Tag) {
+        Write-Host "Error: npm installs do not support OpenClaw GitHub source targets like '$Tag'." -ForegroundColor Red
+        Write-Host "Use -InstallMethod git -Tag main for the moving main checkout, or use latest, beta, an exact version, or a built .tgz package." -ForegroundColor Yellow
+        return $false
     }
     if (-not (Ensure-Git)) {
         return $false
@@ -511,9 +1401,12 @@ function Install-OpenClaw {
     $installSpec = Resolve-NpmOpenClawInstallSpec -PackageName $packageName -RequestedTag $Tag
     Write-Host "[*] Installing OpenClaw ($installSpec)..." -ForegroundColor Yellow
     $freshnessArgs = @("--min-release-age=0")
-    $minReleaseAge = (& (Get-NpmCommandPath) config get min-release-age 2>$null)
-    if ($LASTEXITCODE -ne 0 -or -not $minReleaseAge -or $minReleaseAge.Trim() -eq "null" -or $minReleaseAge.Trim() -eq "undefined") {
-        $beforeValue = (& (Get-NpmCommandPath) config get before 2>$null)
+    $minReleaseAge = (Invoke-NpmCommand -Arguments @("config", "get", "min-release-age", "--global") 2>$null)
+    $minReleaseAgeStatus = $LASTEXITCODE
+    if (Test-NpmConfigRawKey -Key "min-release-age") {
+        $freshnessArgs = @("--min-release-age=0")
+    } elseif ($minReleaseAgeStatus -ne 0 -or -not $minReleaseAge -or $minReleaseAge.Trim() -eq "null" -or $minReleaseAge.Trim() -eq "undefined") {
+        $beforeValue = (Invoke-NpmCommand -Arguments @("config", "get", "before", "--global") 2>$null)
         if ($LASTEXITCODE -eq 0 -and $beforeValue -and $beforeValue.Trim() -ne "null" -and $beforeValue.Trim() -ne "undefined") {
             $freshnessArgs = @("--before=$((Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ"))")
         }
@@ -522,21 +1415,26 @@ function Install-OpenClaw {
     $prevUpdateNotifier = $env:NPM_CONFIG_UPDATE_NOTIFIER
     $prevFund = $env:NPM_CONFIG_FUND
     $prevAudit = $env:NPM_CONFIG_AUDIT
-    $prevScriptShell = $env:NPM_CONFIG_SCRIPT_SHELL
-    $prevNodeLlamaSkipDownload = $env:NODE_LLAMA_CPP_SKIP_DOWNLOAD
     $prevBefore = $env:NPM_CONFIG_BEFORE
     $prevMinReleaseAge = $env:NPM_CONFIG_MIN_RELEASE_AGE
     $env:NPM_CONFIG_LOGLEVEL = "error"
     $env:NPM_CONFIG_UPDATE_NOTIFIER = "false"
     $env:NPM_CONFIG_FUND = "false"
     $env:NPM_CONFIG_AUDIT = "false"
-    $env:NPM_CONFIG_SCRIPT_SHELL = "cmd.exe"
-    $env:NODE_LLAMA_CPP_SKIP_DOWNLOAD = "1"
     Remove-Item Env:NPM_CONFIG_BEFORE -ErrorAction SilentlyContinue
     Remove-Item Env:NPM_CONFIG_MIN_RELEASE_AGE -ErrorAction SilentlyContinue
     try {
-        $npmOutput = & (Get-NpmCommandPath) install -g @freshnessArgs "$installSpec" 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        # Resolve cache roots before the install so failure reporting cannot create a newer npm log.
+        $npmDebugLogRoots = @(Get-NpmDebugLogRootCandidates)
+        $npmInstallArguments = @("install", "-g") + $freshnessArgs + @("$installSpec")
+        $npmOutput = Invoke-NpmCommand -Arguments $npmInstallArguments 2>&1
+        $npmInstallStatus = $LASTEXITCODE
+        if ($npmInstallStatus -ne 0) {
+            Write-Host "[!] npm install failed; retrying once" -ForegroundColor Yellow
+            $npmOutput = Invoke-NpmCommand -Arguments $npmInstallArguments 2>&1
+            $npmInstallStatus = $LASTEXITCODE
+        }
+        if ($npmInstallStatus -ne 0) {
             Write-Host "[!] npm install failed" -ForegroundColor Red
             if ($npmOutput -match "spawn git" -or $npmOutput -match "ENOENT.*git") {
                 Write-Host "Error: git is missing from PATH." -ForegroundColor Red
@@ -546,7 +1444,7 @@ function Install-OpenClaw {
                 Write-Host "Re-run with verbose output to see the full error:" -ForegroundColor Yellow
                 Write-Host '  powershell -c "irm https://openclaw.ai/install.ps1 | iex"' -ForegroundColor Cyan
             }
-            $npmOutput | ForEach-Object { Write-Host $_ }
+            Write-NpmInstallFailureDetails -Output $npmOutput -CacheRoots $npmDebugLogRoots
             return $false
         }
     } finally {
@@ -554,8 +1452,6 @@ function Install-OpenClaw {
         $env:NPM_CONFIG_UPDATE_NOTIFIER = $prevUpdateNotifier
         $env:NPM_CONFIG_FUND = $prevFund
         $env:NPM_CONFIG_AUDIT = $prevAudit
-        $env:NPM_CONFIG_SCRIPT_SHELL = $prevScriptShell
-        $env:NODE_LLAMA_CPP_SKIP_DOWNLOAD = $prevNodeLlamaSkipDownload
         $env:NPM_CONFIG_BEFORE = $prevBefore
         $env:NPM_CONFIG_MIN_RELEASE_AGE = $prevMinReleaseAge
     }
@@ -564,6 +1460,24 @@ function Install-OpenClaw {
 }
 
 # Install OpenClaw from GitHub
+function Assert-GitCheckoutHasCommit {
+    param([string]$RepoDir)
+
+    $gitDir = Join-Path $RepoDir ".git"
+    if (-not (Test-Path -LiteralPath $gitDir -PathType Container)) {
+        return
+    }
+
+    $hasHead = $false
+    try {
+        git "--git-dir=$gitDir" "--work-tree=$RepoDir" rev-parse --verify --quiet "HEAD^{commit}" 2>$null | Out-Null
+        $hasHead = ($LASTEXITCODE -eq 0)
+    } catch {}
+    if (-not $hasHead) {
+        throw "Git checkout has no commit: $RepoDir. Move or remove this incomplete checkout, then retry."
+    }
+}
+
 function Install-OpenClawFromGit {
     param(
         [string]$RepoDir,
@@ -572,11 +1486,11 @@ function Install-OpenClawFromGit {
     if (-not (Ensure-Git)) {
         return $false
     }
-    Ensure-Pnpm
 
     $repoUrl = "https://github.com/openclaw/openclaw.git"
     Write-Host "[*] Installing OpenClaw from GitHub ($repoUrl)..." -ForegroundColor Yellow
 
+    Assert-GitCheckoutHasCommit -RepoDir $RepoDir
     if (-not (Test-Path $RepoDir)) {
         git clone $repoUrl $RepoDir
     }
@@ -595,23 +1509,79 @@ function Install-OpenClawFromGit {
     } else {
         Write-Host "[!] Git update disabled; skipping git pull" -ForegroundColor Yellow
     }
+    Ensure-Pnpm -RepoDir $RepoDir
 
     Remove-LegacySubmodule -RepoDir $RepoDir
 
-    $prevPnpmScriptShell = $env:NPM_CONFIG_SCRIPT_SHELL
+    $prevPnpmChildConcurrency = $env:PNPM_CONFIG_CHILD_CONCURRENCY
+    $prevPnpmNetworkConcurrency = $env:PNPM_CONFIG_NETWORK_CONCURRENCY
+    $prevPnpmWorkspaceConcurrency = $env:PNPM_CONFIG_WORKSPACE_CONCURRENCY
+    $prevPnpmVerifyDepsBeforeRun = $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN
+    $prevPnpmSideEffectsCache = $env:PNPM_CONFIG_SIDE_EFFECTS_CACHE
+    $prevNodeOptions = $env:NODE_OPTIONS
     $pnpmCommand = Get-PnpmCommandPath
     if (-not $pnpmCommand) {
         throw "pnpm not found after installation."
     }
-    $env:NPM_CONFIG_SCRIPT_SHELL = "cmd.exe"
+    $env:PNPM_CONFIG_CHILD_CONCURRENCY = "1"
+    $env:PNPM_CONFIG_NETWORK_CONCURRENCY = "4"
+    $env:PNPM_CONFIG_WORKSPACE_CONCURRENCY = "1"
+    $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = "false"
+    $env:PNPM_CONFIG_SIDE_EFFECTS_CACHE = "false"
+    $pushedRepoLocation = $false
     try {
-        & $pnpmCommand -C $RepoDir install
-        if (-not (& $pnpmCommand -C $RepoDir ui:build)) {
+        Push-Location -LiteralPath $RepoDir
+        $pushedRepoLocation = $true
+        $sourceInstallArgs = @(
+            "install",
+            "--prefer-offline",
+            "--config.node-linker=hoisted",
+            "--config.engine-strict=false",
+            "--config.enable-pre-post-scripts=true",
+            "--config.side-effects-cache=false",
+            "--no-frozen-lockfile",
+            "--child-concurrency=$env:PNPM_CONFIG_CHILD_CONCURRENCY",
+            "--network-concurrency=$env:PNPM_CONFIG_NETWORK_CONCURRENCY",
+            "--config.workspace-concurrency=$env:PNPM_CONFIG_WORKSPACE_CONCURRENCY"
+        )
+        & $pnpmCommand @sourceInstallArgs
+        $installSucceeded = ($LASTEXITCODE -eq 0)
+        if (-not $installSucceeded) {
+            Write-Host "[!] pnpm install failed for the Git checkout; clearing node_modules and retrying once" -ForegroundColor Yellow
+            Remove-Item -Recurse -Force node_modules -ErrorAction SilentlyContinue
+            & $pnpmCommand @sourceInstallArgs
+            $installSucceeded = ($LASTEXITCODE -eq 0)
+        }
+        if (-not $installSucceeded) {
+            Write-Host "[!] pnpm install failed for the Git checkout" -ForegroundColor Red
+            return $false
+        }
+        & $pnpmCommand ui:build
+        if ($LASTEXITCODE -ne 0) {
             Write-Host "[!] UI build failed; continuing (CLI may still work)" -ForegroundColor Yellow
         }
-        & $pnpmCommand -C $RepoDir build
+        $env:NODE_OPTIONS = Resolve-NodeOptionsWithMinOldSpace -NodeOptions $prevNodeOptions -MinOldSpaceMb 8192
+        & $pnpmCommand build
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[!] pnpm build failed for the Git checkout" -ForegroundColor Red
+            return $false
+        }
     } finally {
-        $env:NPM_CONFIG_SCRIPT_SHELL = $prevPnpmScriptShell
+        if ($pushedRepoLocation) {
+            Pop-Location
+        }
+        $env:PNPM_CONFIG_CHILD_CONCURRENCY = $prevPnpmChildConcurrency
+        $env:PNPM_CONFIG_NETWORK_CONCURRENCY = $prevPnpmNetworkConcurrency
+        $env:PNPM_CONFIG_WORKSPACE_CONCURRENCY = $prevPnpmWorkspaceConcurrency
+        $env:PNPM_CONFIG_VERIFY_DEPS_BEFORE_RUN = $prevPnpmVerifyDepsBeforeRun
+        $env:PNPM_CONFIG_SIDE_EFFECTS_CACHE = $prevPnpmSideEffectsCache
+        $env:NODE_OPTIONS = $prevNodeOptions
+    }
+
+    $entryPath = Join-Path $RepoDir "dist\\entry.js"
+    if (-not (Test-Path $entryPath)) {
+        Write-Host "[!] OpenClaw build did not produce $entryPath" -ForegroundColor Red
+        return $false
     }
 
     $binDir = Join-Path $env:USERPROFILE ".local\\bin"
@@ -619,13 +1589,10 @@ function Install-OpenClawFromGit {
         New-Item -ItemType Directory -Force -Path $binDir | Out-Null
     }
     $cmdPath = Join-Path $binDir "openclaw.cmd"
-    $cmdContents = "@echo off`r`nnode ""$RepoDir\\dist\\entry.js"" %*`r`n"
+    $cmdContents = "@echo off`r`nnode ""$entryPath"" %*`r`n"
     Set-Content -Path $cmdPath -Value $cmdContents -NoNewline
 
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    if (-not ($userPath -split ";" | Where-Object { $_ -ieq $binDir })) {
-        [Environment]::SetEnvironmentVariable("Path", "$userPath;$binDir", "User")
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
+    if (Add-ToUserPath $binDir) {
         Write-Host "[!] Added $binDir to user PATH (restart terminal if command not found)" -ForegroundColor Yellow
     }
 
@@ -639,10 +1606,10 @@ function Run-Doctor {
     Write-Host "[*] Running doctor to migrate settings..." -ForegroundColor Yellow
     try {
         Invoke-OpenClawCommand doctor --non-interactive
+        Write-Host "[OK] Migration complete" -ForegroundColor Green
     } catch {
-        # Ignore errors from doctor
+        Write-Host "[!] Migration failed; continuing. Run: openclaw doctor --non-interactive" -ForegroundColor Yellow
     }
-    Write-Host "[OK] Migration complete" -ForegroundColor Green
 }
 
 function Test-GatewayServiceLoaded {
@@ -682,7 +1649,7 @@ function Refresh-GatewayServiceIfLoaded {
         Invoke-OpenClawCommand gateway status --json | Out-Null
         Write-Host "[OK] Gateway service refreshed" -ForegroundColor Green
     } catch {
-        Write-Host "[!] Gateway service restart failed; continuing." -ForegroundColor Yellow
+        Write-Host "[!] Gateway service restart failed; continuing. Run: openclaw gateway restart" -ForegroundColor Yellow
     }
 }
 
@@ -757,12 +1724,13 @@ function Main {
         try {
             $npmCommand = Get-NpmCommandPath
             if ($npmCommand) {
-                & $npmCommand uninstall -g openclaw 2>$null | Out-Null
+                Invoke-NpmCommand -Arguments @("uninstall", "-g", "openclaw") 2>$null | Out-Null
                 Write-Host "[OK] Removed npm global install if present" -ForegroundColor Green
             }
         } catch { }
         $finalGitDir = $GitDir
-        if (-not (Install-OpenClawFromGit -RepoDir $GitDir -SkipUpdate:$NoGitUpdate)) {
+        $gitInstallResults = @(Install-OpenClawFromGit -RepoDir $GitDir -SkipUpdate:$NoGitUpdate)
+        if (-not (Test-BooleanSuccessResult -Results $gitInstallResults)) {
             return (Fail-Install)
         }
     } else {
@@ -771,7 +1739,8 @@ function Main {
             Remove-Item -Force $gitWrapper
             Write-Host "[OK] Removed git wrapper (switching to npm)" -ForegroundColor Green
         }
-        if (-not (Install-OpenClaw)) {
+        $npmInstallResults = @(Install-OpenClaw)
+        if (-not (Test-BooleanSuccessResult -Results $npmInstallResults)) {
             return (Fail-Install)
         }
     }
@@ -797,7 +1766,7 @@ function Main {
     }
     if (-not $installedVersion) {
         try {
-            $npmList = & (Get-NpmCommandPath) list -g --depth 0 --json 2>$null | ConvertFrom-Json
+            $npmList = Invoke-NpmCommand -Arguments @("list", "-g", "--depth", "0", "--json") 2>$null | ConvertFrom-Json
             if ($npmList -and $npmList.dependencies -and $npmList.dependencies.openclaw -and $npmList.dependencies.openclaw.version) {
                 $installedVersion = $npmList.dependencies.openclaw.version
             }
@@ -873,7 +1842,7 @@ function Main {
         } else {
             Write-Host "Starting setup..." -ForegroundColor Cyan
             Write-Host ""
-            Invoke-OpenClawCommand onboard
+            Invoke-InteractiveOpenClawCommand onboard
         }
     }
 
@@ -881,5 +1850,5 @@ function Main {
 }
 
 $mainResults = @(Main)
-$installSucceeded = $mainResults.Count -gt 0 -and $mainResults[-1] -eq $true
+$installSucceeded = Test-BooleanSuccessResult -Results $mainResults
 Complete-Install -Succeeded:$installSucceeded

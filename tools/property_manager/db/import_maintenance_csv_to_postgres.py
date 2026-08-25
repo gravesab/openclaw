@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import csv
 import hashlib
 import subprocess
@@ -7,7 +8,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-BASE = Path("/home/gravesab/ai/projects/openclaw")
+BASE = Path(os.environ.get("OPENCLAW_BASE", Path(__file__).resolve().parents[3])).resolve()
 CSV_PATH = BASE / "tools/property_manager/maintenance_log.csv"
 
 def stable_uuid(area: str, item: str) -> str:

@@ -10,14 +10,18 @@ import {
   createHybridChannelConfigAdapter,
   createScopedDmSecurityResolver,
 } from "openclaw/plugin-sdk/channel-config-helpers";
+import type {
+  ChannelAccountSnapshot,
+  ChannelOutboundAdapter,
+} from "openclaw/plugin-sdk/channel-contract";
 import { createChatChannelPlugin, type ChannelPlugin } from "openclaw/plugin-sdk/channel-core";
-import { waitUntilAbort } from "openclaw/plugin-sdk/channel-lifecycle";
+import { waitUntilAbort } from "openclaw/plugin-sdk/channel-outbound";
 import {
   createMessageReceiptFromOutboundResults,
   defineChannelMessageAdapter,
   type MessageReceipt,
   type MessageReceiptPartKind,
-} from "openclaw/plugin-sdk/channel-message";
+} from "openclaw/plugin-sdk/channel-outbound";
 import {
   composeWarningCollectors,
   createConditionalWarningCollector,
@@ -25,21 +29,56 @@ import {
   projectAccountWarningCollector,
 } from "openclaw/plugin-sdk/channel-policy";
 import { createEmptyChannelDirectoryAdapter } from "openclaw/plugin-sdk/directory-runtime";
-import { normalizeLowercaseStringOrEmpty } from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  channelBlockedPatch,
+  channelReadyPatch,
+  channelStoppedPatch,
+} from "openclaw/plugin-sdk/gateway-runtime";
+import { parseStrictNonNegativeInteger } from "openclaw/plugin-sdk/number-runtime";
+import type { OutboundMediaLoadOptions } from "openclaw/plugin-sdk/outbound-media";
+import {
+  createComputedAccountStatusAdapter,
+  createDefaultChannelRuntimeState,
+} from "openclaw/plugin-sdk/status-helpers";
+import {
+  normalizeLowercaseStringOrEmpty,
+  normalizeStringEntriesLower,
+} from "openclaw/plugin-sdk/string-coerce-runtime";
+import {
+  chunkTextForOutbound,
+  findCodeRegions,
+  isInsideCode,
+  sanitizeAssistantVisibleText,
+} from "openclaw/plugin-sdk/text-chunking";
 import { listAccountIds, resolveAccount } from "./accounts.js";
 import { synologyChatApprovalAuth } from "./approval-auth.js";
-import { sendMessage, sendFileUrl } from "./client.js";
+import { SYNOLOGY_CHAT_TEXT_CHUNK_LIMIT, sendHostedFileUrl, sendMessage } from "./client.js";
 import { SynologyChatChannelConfigSchema } from "./config-schema.js";
+import { synologyChatDoctor } from "./doctor.js";
 import {
   collectSynologyGatewayRoutingWarnings,
   registerSynologyWebhookRoute,
   validateSynologyGatewayAccountStartup,
 } from "./gateway-runtime.js";
+import { resolveSynologyHostedMediaRoute } from "./hosted-media-route.js";
+import { prepareSynologyHostedMedia } from "./outbound-media.js";
 import { collectSynologyChatSecurityAuditFindings } from "./security-audit.js";
-import { synologyChatSetupAdapter, synologyChatSetupWizard } from "./setup-surface.js";
+import { buildSynologyChatOutboundSessionKey } from "./session-key.js";
+import { synologyChatSetupContract, synologyChatSetupWizard } from "./setup-surface.js";
 import type { ResolvedSynologyChatAccount } from "./types.js";
 
 const CHANNEL_ID = "synology-chat";
+const SYNOLOGY_MARKDOWN_LINK_RE =
+  /(?<!!)\[((?:\\[^\n]|[^\\\]\n])+)\]\((https?:\/\/(?:\\[^\n]|[^()\s<>\\])+(?:\((?:\\[^\n]|[^()\s<>\\])*\)(?:\\[^\n]|[^()\s<>\\])*)*)(?:\s+(?:"[^"\n]*"|'[^'\n]*'|\([^()\n]*\)))?\)/g;
+
+function areSynologyAttachmentsReady(account: ResolvedSynologyChatAccount): boolean {
+  try {
+    resolveSynologyHostedMediaRoute(account);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const resolveSynologyChatDmPolicy = createScopedDmSecurityResolver<ResolvedSynologyChatAccount>({
   channelKey: CHANNEL_ID,
@@ -55,6 +94,7 @@ type SynologyChannelGatewayContext = {
   cfg: OpenClawConfig;
   accountId: string;
   abortSignal: AbortSignal;
+  setStatus?: (patch: ChannelAccountSnapshot) => void;
   log?: {
     info: (message: string) => void;
     warn: (message: string) => void;
@@ -67,6 +107,9 @@ type SynologyChannelOutboundContext = {
   text?: string;
   mediaUrl?: string;
   accountId?: string | null;
+  mediaAccess?: OutboundMediaLoadOptions["mediaAccess"];
+  mediaLocalRoots?: readonly string[];
+  mediaReadFile?: (filePath: string) => Promise<Buffer>;
 };
 type SynologyChannelSendTextContext = SynologyChannelOutboundContext & { text: string };
 type SynologyChannelSendMediaContext = SynologyChannelOutboundContext & { mediaUrl: string };
@@ -83,6 +126,7 @@ const synologyChatConfigAdapter = createHybridChannelConfigAdapter<ResolvedSynol
   clearBaseFields: [
     "token",
     "incomingUrl",
+    "webhookUrl",
     "nasHost",
     "webhookPath",
     "dangerouslyAllowNameMatching",
@@ -94,8 +138,7 @@ const synologyChatConfigAdapter = createHybridChannelConfigAdapter<ResolvedSynol
     "allowInsecureSsl",
   ],
   resolveAllowFrom: (account) => account.allowedUserIds,
-  formatAllowFrom: (allowFrom) =>
-    allowFrom.map((entry) => normalizeLowercaseStringOrEmpty(String(entry))).filter(Boolean),
+  formatAllowFrom: (allowFrom) => normalizeStringEntriesLower(allowFrom),
 });
 
 const collectSynologyChatSecurityWarnings =
@@ -106,6 +149,9 @@ const collectSynologyChatSecurityWarnings =
     (account) =>
       !account.incomingUrl &&
       "- Synology Chat: incomingUrl is not configured. The bot cannot send replies.",
+    (account) =>
+      !account.webhookUrl &&
+      "- Synology Chat: webhookUrl is not configured. Text and inbound messages still work, but attachments require the exact externally reachable HTTPS callback URL.",
     (account) =>
       account.allowInsecureSsl &&
       "- Synology Chat: SSL verification is disabled (allowInsecureSsl=true). Only use this for local NAS with self-signed certificates.",
@@ -160,6 +206,12 @@ type SynologyChatPlugin = Omit<
   messaging: {
     targetPrefixes?: readonly string[];
     normalizeTarget: (target: string) => string | undefined;
+    inferTargetChatType: NonNullable<
+      ChannelPlugin<ResolvedSynologyChatAccount>["messaging"]
+    >["inferTargetChatType"];
+    resolveOutboundSessionRoute: NonNullable<
+      ChannelPlugin<ResolvedSynologyChatAccount>["messaging"]
+    >["resolveOutboundSessionRoute"];
     targetResolver: {
       looksLikeId: (id: string) => boolean;
       hint: string;
@@ -172,7 +224,10 @@ type SynologyChatPlugin = Omit<
   };
   outbound: {
     deliveryMode: "gateway";
+    chunker: NonNullable<ChannelOutboundAdapter["chunker"]>;
+    chunkerMode: NonNullable<ChannelOutboundAdapter["chunkerMode"]>;
     textChunkLimit: number;
+    sanitizeText: NonNullable<ChannelOutboundAdapter["sanitizeText"]>;
     sendText: (ctx: SynologyChannelSendTextContext) => Promise<SynologyChatOutboundResult>;
     sendMedia: (ctx: SynologyChannelSendMediaContext) => Promise<SynologyChatOutboundResult>;
   };
@@ -209,24 +264,28 @@ function requireIncomingUrl(account: ResolvedSynologyChatAccount): string {
   return account.incomingUrl;
 }
 
+function normalizeSynologyChatTarget(target: string): string | undefined {
+  const trimmed = target.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const unprefixed = trimmed.replace(/^synology(?:[-_]?chat)?:/i, "").trim();
+  const chatUserId = parseStrictNonNegativeInteger(unprefixed);
+  return chatUserId === undefined ? undefined : String(chatUserId);
+}
+
 function createSynologyChatSendResult(params: {
-  messageId: string;
   chatId: string;
   kind: MessageReceiptPartKind;
 }): SynologyChatOutboundResult {
   return {
     channel: CHANNEL_ID,
-    messageId: params.messageId,
+    // The webhook acknowledges delivery without returning a platform message id.
+    // Keep the empty receipt so a chat id cannot become a fabricated message id.
+    messageId: "",
     chatId: params.chatId,
     receipt: createMessageReceiptFromOutboundResults({
-      results: [
-        {
-          channel: CHANNEL_ID,
-          messageId: params.messageId,
-          chatId: params.chatId,
-          conversationId: params.chatId,
-        },
-      ],
+      results: [],
       threadId: params.chatId,
       kind: params.kind,
     }),
@@ -238,12 +297,19 @@ async function sendSynologyChatText(
 ): Promise<SynologyChatOutboundResult> {
   const account = resolveOutboundAccount(ctx.cfg ?? {}, ctx.accountId);
   const incomingUrl = requireIncomingUrl(account);
-  const ok = await sendMessage(incomingUrl, ctx.text, ctx.to, account.allowInsecureSsl);
+  const codeRegions = findCodeRegions(ctx.text);
+  const text = ctx.text.replace(SYNOLOGY_MARKDOWN_LINK_RE, (match, label, url, offset) => {
+    const slashCount = ctx.text.slice(0, offset).match(/\\+$/)?.[0].length ?? 0;
+    if (slashCount % 2 === 1 || isInsideCode(offset, codeRegions) || /[<>|]/.test(label + url)) {
+      return match;
+    }
+    return `<${url.replace(/\\([()])/g, "$1")}|${label.replace(/\\([[\]])/g, "$1")}>`;
+  });
+  const ok = await sendMessage(incomingUrl, text, ctx.to, account.allowInsecureSsl);
   if (!ok) {
     throw new Error("Failed to send message to Synology Chat");
   }
   return createSynologyChatSendResult({
-    messageId: `sc-${Date.now()}`,
     chatId: ctx.to,
     kind: "text",
   });
@@ -254,18 +320,41 @@ async function sendSynologyChatMedia(
 ): Promise<SynologyChatOutboundResult> {
   const account = resolveOutboundAccount(ctx.cfg ?? {}, ctx.accountId);
   const incomingUrl = requireIncomingUrl(account);
-  const ok = await sendFileUrl(incomingUrl, ctx.mediaUrl, ctx.to, account.allowInsecureSsl);
-  if (!ok) {
-    throw new Error("Failed to send media to Synology Chat");
+  const prepared = await prepareSynologyHostedMedia({
+    account,
+    mediaUrl: ctx.mediaUrl,
+    mediaAccess: ctx.mediaAccess,
+    mediaLocalRoots: ctx.mediaLocalRoots,
+    mediaReadFile: ctx.mediaReadFile,
+  });
+  const sendResult = await sendHostedFileUrl(
+    incomingUrl,
+    prepared.url,
+    ctx.to,
+    account.allowInsecureSsl,
+  );
+  if (sendResult.status === "not-dispatched") {
+    await prepared.cleanup();
+    throw new Error(
+      "Synology Chat attachment request did not start. Retry, and check incomingUrl if it fails again.",
+    );
+  }
+  if (sendResult.status === "rejected") {
+    await prepared.cleanup();
+    throw new Error("Synology Chat rejected the attachment request");
+  }
+  if (sendResult.status === "indeterminate") {
+    // A timeout or lost response is indeterminate: the NAS may already have
+    // queued this capability. Retain it until bounded expiry for delayed fetches.
+    throw new Error("Synology Chat attachment request acceptance could not be confirmed");
   }
   return createSynologyChatSendResult({
-    messageId: `sc-${Date.now()}`,
     chatId: ctx.to,
     kind: "media",
   });
 }
 
-export const synologyChatMessageAdapter = defineChannelMessageAdapter({
+const synologyChatMessageAdapter = defineChannelMessageAdapter({
   id: CHANNEL_ID,
   durableFinal: {
     capabilities: {
@@ -280,7 +369,7 @@ export const synologyChatMessageAdapter = defineChannelMessageAdapter({
   },
 });
 
-export function createSynologyChatPlugin(): SynologyChatPlugin {
+function createSynologyChatPlugin(): SynologyChatPlugin {
   return createChatChannelPlugin({
     base: {
       id: CHANNEL_ID,
@@ -306,56 +395,94 @@ export function createSynologyChatPlugin(): SynologyChatPlugin {
       },
       reload: { configPrefixes: [`channels.${CHANNEL_ID}`] },
       configSchema: SynologyChatChannelConfigSchema,
-      setup: synologyChatSetupAdapter,
+      setupContract: synologyChatSetupContract,
       setupWizard: synologyChatSetupWizard,
       config: {
         ...synologyChatConfigAdapter,
       },
       approvalCapability: synologyChatApprovalAuth,
+      doctor: synologyChatDoctor,
       messaging: {
         targetPrefixes: ["synology-chat", "synology_chat", "synology"],
-        normalizeTarget: (target: string) => {
-          const trimmed = target.trim();
-          if (!trimmed) {
-            return undefined;
+        normalizeTarget: normalizeSynologyChatTarget,
+        inferTargetChatType: ({ to }) => (normalizeSynologyChatTarget(to) ? "direct" : undefined),
+        resolveOutboundSessionRoute: ({ agentId, accountId, target }) => {
+          const chatUserId = normalizeSynologyChatTarget(target);
+          if (!chatUserId) {
+            return null;
           }
-          // Strip common prefixes
-          return trimmed.replace(/^synology(?:[-_]?chat)?:/i, "").trim();
+          const resolvedAccountId = accountId?.trim() || DEFAULT_ACCOUNT_ID;
+          const sessionKey = buildSynologyChatOutboundSessionKey({
+            agentId,
+            accountId: resolvedAccountId,
+            chatUserId,
+          });
+          return {
+            sessionKey,
+            baseSessionKey: sessionKey,
+            recipientSessionExact: "delivery-identity",
+            peer: { kind: "direct", id: `chat-api-${chatUserId}` },
+            chatType: "direct",
+            from: `synology-chat:chat-api:${chatUserId}`,
+            to: chatUserId,
+          };
         },
         targetResolver: {
-          looksLikeId: (id: string) => {
-            const trimmed = id?.trim();
-            if (!trimmed) {
-              return false;
-            }
-            // Synology Chat user IDs are numeric
-            return /^\d+$/.test(trimmed) || /^synology(?:[-_]?chat)?:/i.test(trimmed);
-          },
+          looksLikeId: (id: string) => normalizeSynologyChatTarget(id) !== undefined,
           hint: "<userId>",
         },
       },
       directory: createEmptyChannelDirectoryAdapter(),
+      status: createComputedAccountStatusAdapter<ResolvedSynologyChatAccount>({
+        defaultRuntime: createDefaultChannelRuntimeState(DEFAULT_ACCOUNT_ID),
+        buildChannelSummary: ({ snapshot }) => ({
+          webhookPath: snapshot.webhookPath ?? null,
+        }),
+        resolveAccountSnapshot: ({ account }) => ({
+          accountId: account.accountId,
+          enabled: account.enabled,
+          configured: Boolean(account.token && account.incomingUrl),
+          extra: {
+            webhookPath: account.webhookPath,
+            attachmentsReady: areSynologyAttachmentsReady(account),
+          },
+        }),
+      }),
       gateway: {
         startAccount: async (ctx: SynologyChannelGatewayContext) => {
           const { cfg, accountId, log, abortSignal } = ctx;
           const account = resolveAccount(cfg, accountId);
           if (!validateSynologyGatewayAccountStartup({ cfg, account, accountId, log }).ok) {
+            ctx.setStatus?.(
+              channelBlockedPatch("Synology Chat account failed startup validation", {
+                accountId,
+                running: true,
+              }),
+            );
             return waitUntilAbort(abortSignal);
           }
 
           log?.info?.(
             `Starting Synology Chat channel (account: ${accountId}, path: ${account.webhookPath})`,
           );
-          const unregister = registerSynologyWebhookRoute({ account, accountId, log });
+          const cleanup = await registerSynologyWebhookRoute({
+            cfg,
+            account,
+            accountId,
+            log,
+            abortSignal,
+          });
 
           log?.info?.(`Registered HTTP route: ${account.webhookPath} for Synology Chat`);
+          ctx.setStatus?.(channelReadyPatch({ accountId }));
 
           // Keep alive until abort signal fires.
           // The gateway expects a Promise that stays pending while the channel is running.
           // Resolving immediately triggers a restart loop.
-          return waitUntilAbort(abortSignal, () => {
+          return waitUntilAbort(abortSignal, async () => {
             log?.info?.(`Stopping Synology Chat channel (account: ${accountId})`);
-            unregister();
+            await cleanup();
+            ctx.setStatus?.(channelStoppedPatch({ accountId }));
           });
         },
 
@@ -372,8 +499,8 @@ export function createSynologyChatPlugin(): SynologyChatPlugin {
           "**Links**: Use `<URL|display text>` to create clickable links.",
           "  Example: `<https://example.com|Click here>` renders as a clickable link.",
           "",
-          "**File sharing**: Include a publicly accessible URL to share files or images.",
-          "  The NAS will download and attach the file (max 32 MB).",
+          "**File sharing**: Send files through the media attachment field.",
+          "  OpenClaw freezes the bytes and gives the NAS a short-lived download capability (max 32 MB).",
           "",
           "**Limitations**:",
           "- No markdown, bold, italic, or code blocks",
@@ -416,8 +543,10 @@ export function createSynologyChatPlugin(): SynologyChatPlugin {
     },
     outbound: {
       deliveryMode: "gateway" as const,
-      textChunkLimit: 2000,
-
+      chunker: chunkTextForOutbound,
+      chunkerMode: "markdown" as const,
+      textChunkLimit: SYNOLOGY_CHAT_TEXT_CHUNK_LIMIT,
+      sanitizeText: ({ text }) => sanitizeAssistantVisibleText(text),
       sendText: sendSynologyChatText,
       sendMedia: async (ctx) => {
         if (!ctx.mediaUrl) {

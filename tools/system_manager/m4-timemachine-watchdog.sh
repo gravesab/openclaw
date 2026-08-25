@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-BASE="/home/gravesab/ai/projects/openclaw"
+BASE="${OPENCLAW_BASE:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+export OPENCLAW_BASE="$BASE"
 REPORT="$BASE/tools/system_manager/m4-timemachine-report.sh"
 SEND="$BASE/tools/telegram/send-telegram.sh"
 JSON="$BASE/reports/system_manager/m4_timemachine_status.json"
@@ -15,7 +16,7 @@ mkdir -p "$STATE_DIR"
 STATUS="$(python3 - <<'PY'
 import json
 from pathlib import Path
-p=Path("/home/gravesab/ai/projects/openclaw/reports/system_manager/m4_timemachine_status.json")
+p=Path(__import__("os").environ["OPENCLAW_BASE"]) / "reports/system_manager/m4_timemachine_status.json"
 if not p.exists():
     print("missing")
 else:

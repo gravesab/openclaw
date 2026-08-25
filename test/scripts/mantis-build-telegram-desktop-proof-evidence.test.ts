@@ -1,8 +1,9 @@
+// Mantis Build Telegram Desktop Proof Evidence tests cover mantis build telegram desktop proof evidence script behavior.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeTelegramDesktopProofEvidence } from "../../scripts/mantis/build-telegram-desktop-proof-evidence.mjs";
+import { writeTelegramDesktopProofEvidence } from "../../scripts/mantis/build-telegram-desktop-proof-evidence.mts";
 import {
   loadEvidenceManifest,
   renderEvidenceComment,
@@ -16,7 +17,7 @@ afterEach(() => {
   }
 });
 
-function makeLane(name: string) {
+function makeLane(name: "baseline" | "candidate", sha: string) {
   const repo = mkdtempSync(path.join(tmpdir(), `mantis-telegram-${name}-repo-`));
   tempDirs.push(repo);
   const outputDir = path.join(repo, ".artifacts", "qa-e2e", name);
@@ -39,6 +40,7 @@ function makeLane(name: string) {
       },
       report: path.relative(repo, report),
       status: "pass",
+      sutAttestation: { lane: name, sha },
     }),
   );
   return { outputDir, repo };
@@ -46,8 +48,10 @@ function makeLane(name: string) {
 
 describe("scripts/mantis/build-telegram-desktop-proof-evidence", () => {
   it("builds paired native Telegram Desktop GIF evidence for PR comments", () => {
-    const baseline = makeLane("baseline");
-    const candidate = makeLane("candidate");
+    const baselineSha = "a".repeat(40);
+    const candidateSha = "b".repeat(40);
+    const baseline = makeLane("baseline", baselineSha);
+    const candidate = makeLane("candidate", candidateSha);
     const outputDir = mkdtempSync(path.join(tmpdir(), "mantis-telegram-proof-"));
     tempDirs.push(outputDir);
 
@@ -61,7 +65,7 @@ describe("scripts/mantis/build-telegram-desktop-proof-evidence", () => {
       "--baseline-ref",
       "main",
       "--baseline-sha",
-      "aaa",
+      baselineSha,
       "--candidate-repo-root",
       candidate.repo,
       "--candidate-output-dir",
@@ -69,7 +73,7 @@ describe("scripts/mantis/build-telegram-desktop-proof-evidence", () => {
       "--candidate-ref",
       "refs/pull/1/head",
       "--candidate-sha",
-      "bbb",
+      candidateSha,
       "--scenario-label",
       "telegram-desktop-proof",
     ]);
@@ -82,8 +86,9 @@ describe("scripts/mantis/build-telegram-desktop-proof-evidence", () => {
     expect(manifest.artifacts.map((artifact) => artifact.targetPath)).toContain(
       "candidate/telegram-desktop-proof.gif",
     );
+    const artifactUrl = "https://github.com/openclaw/openclaw/actions/runs/1/artifacts/2";
     const body = renderEvidenceComment({
-      artifactUrl: "https://github.com/openclaw/openclaw/actions/runs/1/artifacts/2",
+      artifactUrl,
       manifest,
       marker: "<!-- mantis-telegram-desktop-proof -->",
       rawBase: "https://qa.openclaw.ai/mantis/telegram-desktop/pr-1/run-1",
@@ -92,9 +97,15 @@ describe("scripts/mantis/build-telegram-desktop-proof-evidence", () => {
       treeUrl: "https://qa.openclaw.ai/mantis/telegram-desktop/pr-1/run-1/index.json",
     });
 
+    expect(body).toContain("<!-- mantis-telegram-desktop-proof -->");
+    expect(body).toContain("## Mantis Telegram Desktop Proof");
     expect(body).toContain(
-      "- Artifact: https://github.com/openclaw/openclaw/actions/runs/1/artifacts/2",
+      `- Baseline: \`pass\` at \`${baselineSha}\`, expected baseline visual proof captured`,
     );
+    expect(body).toContain(
+      `- Candidate: \`pass\` at \`${candidateSha}\`, expected candidate visual proof captured`,
+    );
+    expect(body).toContain(`- Artifact: ${artifactUrl}`);
     expect(body).toContain('<table width="100%">');
     expect(body).toContain(
       '<img src="https://qa.openclaw.ai/mantis/telegram-desktop/pr-1/run-1/baseline/telegram-desktop-proof.gif" width="100%"',
@@ -107,5 +118,33 @@ describe("scripts/mantis/build-telegram-desktop-proof-evidence", () => {
     );
     expect(body).not.toContain("undefined/");
     expect(body).not.toContain("| Main | This PR |");
+  });
+
+  it("rejects a candidate session that attests the baseline lane", () => {
+    const baselineSha = "a".repeat(40);
+    const candidateSha = "b".repeat(40);
+    const baseline = makeLane("baseline", baselineSha);
+    const candidate = makeLane("baseline", baselineSha);
+    const outputDir = mkdtempSync(path.join(tmpdir(), "mantis-telegram-proof-mismatch-"));
+    tempDirs.push(outputDir);
+
+    expect(() =>
+      writeTelegramDesktopProofEvidence([
+        "--output-dir",
+        outputDir,
+        "--baseline-repo-root",
+        baseline.repo,
+        "--baseline-output-dir",
+        baseline.outputDir,
+        "--baseline-sha",
+        baselineSha,
+        "--candidate-repo-root",
+        candidate.repo,
+        "--candidate-output-dir",
+        candidate.outputDir,
+        "--candidate-sha",
+        candidateSha,
+      ]),
+    ).toThrow("SUT attestation mismatch for candidate.");
   });
 });

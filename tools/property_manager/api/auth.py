@@ -130,3 +130,12 @@ def auth_status() -> dict:
             and not (API_KEY and hmac.compare_digest(REVIEW_API_KEY, API_KEY))
         ),
     }
+
+
+def server_submitter_identity() -> str:
+    """Return the DEV submitter identity without trusting a caller header.
+
+    This is deliberately separate from the legacy operator-display header used
+    by existing task routes. Work-request provenance must be server-derived.
+    """
+    return os.environ.get("PROPERTYMANAGER_DEV_SUBMITTER_ID", "dev-api-submitters").strip() or "dev-api-submitters"

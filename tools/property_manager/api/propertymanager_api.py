@@ -19,9 +19,11 @@ from decimal_utils import parse_decimal, decimal_to_db
 from errors import error_response, validation_error
 from mapping_proposals import register_mapping_routes
 from maintenance_proposals import register_maintenance_proposal_routes
+from work_requests import register_work_request_routes
 
 app = Flask(__name__)
 register_maintenance_proposal_routes(app)
+register_work_request_routes(app)
 
 # Intentional upload ceiling (aligned with Gunicorn request timeout for large bodies).
 # 32 MiB covers photo/manual attachments without unbounded memory growth.
@@ -513,7 +515,7 @@ def delete_category(category_id: str):
         """
         SELECT COUNT(*)::int AS task_count
         FROM propertymanager.maintenance_tasks
-        WHERE is_active = true
+        WHERE is_active = true AND kind <> 'Work Request'
           AND lower(category_name) = lower(%s)
         """,
         (name,),
@@ -597,7 +599,7 @@ def tasks():
         SELECT
             {TASK_COLUMNS}
         FROM propertymanager.maintenance_tasks
-        WHERE is_active = true
+        WHERE is_active = true AND kind <> 'Work Request'
         ORDER BY area, item
         """
     )
@@ -611,7 +613,7 @@ def task_detail(task_id: str):
         SELECT
             {TASK_COLUMNS}
         FROM propertymanager.maintenance_tasks
-        WHERE id = %s AND is_active = true
+        WHERE id = %s AND is_active = true AND kind <> 'Work Request'
         """,
         (task_id,),
     )
@@ -1106,7 +1108,7 @@ def complete_task(task_id: str):
 
     task = pm_db.execute_one_json(
         """
-        SELECT id, warning_days, asset_id, schedule_kind
+        SELECT id, warning_days, asset_id, schedule_kind, kind, intake_state
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
         """,
@@ -1114,6 +1116,8 @@ def complete_task(task_id: str):
     )
     if task is None:
         return error_response("NOT_FOUND", "Task not found", status=404)
+    if task.get("kind") == "Work Request" or task.get("intake_state"):
+        return error_response("INTAKE_NOT_MAINTENANCE", "Work requests cannot be completed", status=409)
 
     # Calendar next_due on complete: completed_at + warning_days (legacy CSV-era
     # interval). Mac Recalculate Next Due uses Frequency instead (lastDone +

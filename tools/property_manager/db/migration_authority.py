@@ -748,9 +748,13 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
         if type(raw["format_version"]) is not int or raw["format_version"] != 3 or raw["authority"] != "propertymanager":
             raise AuthorityConfigurationError("authority manifest version is invalid")
         snapshots = raw["snapshots"]
-        if type(snapshots) is not dict or list(snapshots) != ["009", "010"] or raw["current_snapshot"] != "010":
+        if type(snapshots) is not dict or list(snapshots) != ["009", "010", "011"] or raw["current_snapshot"] != "011":
             raise AuthorityConfigurationError("snapshot declarations are invalid")
-        expected_versions = {"009": ("001", "002", "003", "004", "005", "006", "009"), "010": ("001", "002", "003", "004", "005", "006", "009", "010")}
+        expected_versions = {
+            "009": ("001", "002", "003", "004", "005", "006", "009"),
+            "010": ("001", "002", "003", "004", "005", "006", "009", "010"),
+            "011": ("001", "002", "003", "004", "005", "006", "009", "010", "011"),
+        }
         parsed_snapshots: dict[str, AuthoritySnapshot] = {}
         for terminal, expected in expected_versions.items():
             record = _require_exact_keys(snapshots[terminal], SNAPSHOT_RECORD_KEYS, "snapshot record")
@@ -783,9 +787,9 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
                 raise AuthorityConfigurationError("reserved migration entry is invalid")
             _safe_contract_text(entry["reason"], "reserved migration reason")
             reserved_versions.append(entry["version"])
-        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "011":
+        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "012":
             raise AuthorityConfigurationError("reserved or next migration version is invalid")
-        return AuthorityManifest(parsed_snapshots, "010", ("007", "008"), "011")
+        return AuthorityManifest(parsed_snapshots, "011", ("007", "008"), "012")
     except AuthorityConfigurationError:
         raise
     except (BoundedInputError, MemoryError, RecursionError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:

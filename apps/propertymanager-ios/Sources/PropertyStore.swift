@@ -314,6 +314,28 @@ final class PropertyStore: ObservableObject {
         }
     }
 
+    func submitWorkRequest(
+        description: String,
+        area: String,
+        assetID: UUID?,
+        materials: [WorkRequestMaterial],
+        photos: [Data],
+        idempotencyKey: String = UUID().uuidString
+    ) async throws -> SubmittedWorkRequest {
+        var attachmentIDs: [String] = []
+        for (index, photo) in photos.enumerated() {
+            attachmentIDs.append(
+                try await client.uploadWorkRequestPhoto(photo, idempotencyKey: "\(idempotencyKey)-photo-\(index)")
+            )
+        }
+        let payload = try WorkRequestPayload.make(
+            description: description, area: area, assetID: assetID, materials: materials, attachmentIDs: attachmentIDs
+        )
+        let result = try await client.submitWorkRequest(payload, idempotencyKey: idempotencyKey)
+        statusMessage = "Submitted work request \(result.requestNumber)"
+        return result
+    }
+
     /// Soft-deactivate: hides from lists; meter history remains on the server.
     func deactivateAsset(id: UUID) async -> Bool {
         do {

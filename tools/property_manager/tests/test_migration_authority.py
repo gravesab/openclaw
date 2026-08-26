@@ -33,8 +33,9 @@ APPROVED_HASHES = {
     "006_phase1_meter_audit.sql": "3d5c09888b0ae9a4898a7497bf01bf2a46ccddbaf3236e94c804b5cf6cb521a0",
     "009_maintenance_proposals.sql": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a",
     "010_handbook_ingestion_v1.sql": "17ba25449a4f3dc8f1f4137313930bfff6fcd213397493a01bc5bc6035230db5",
+    "011_work_request_intake.sql": "ece48f297ab2365b5cd671745f09b26ed9b5ee25911755d5210ffb6b5ee50ed4",
 }
-APPROVED_CONTRACT_HASH = "63063adf5396817e8fa8607a5ccb108cdc3d79a4f9c6a046e6068ee1a6f59a52"
+APPROVED_CONTRACT_HASH = "c694ca23ee54297d862761d2eadd74757bc18ee31d40bcd5a2339585664f0f3a"
 APPROVED_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 APPROVED_RESOURCE_LIMITS = {
     "MAX_MANIFEST_BYTES": 1 * 1024 * 1024,
@@ -55,6 +56,7 @@ APPROVED_REAPPLICATION = {
     "006": True,
     "009": True,
     "010": False,
+    "011": False,
 }
 APPROVED_TABLES = (
     "asset_meter",
@@ -62,9 +64,11 @@ APPROVED_TABLES = (
     "asset_task_mapping_proposals",
     "assets",
     "maintenance_categories",
+    "maintenance_attachment_operations",
     "maintenance_completions",
     "maintenance_proposals",
     "maintenance_task_parts",
+    "maintenance_task_intake_events",
     "maintenance_task_photos",
     "maintenance_tasks",
 )

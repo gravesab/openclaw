@@ -27,13 +27,14 @@ MIGRATIONS = (
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
     "010_handbook_ingestion_v1.sql",
+    "011_work_request_intake.sql",
 )
 REAPPLICABLE_MIGRATIONS = (
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "010"
+EXPECTED_VERSION = "011"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -237,9 +238,9 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             applied.append(filename[:3])
             if filename == "009_maintenance_proposals.sql":
                 self.assertEqual(self._extract_contract(), manifest.snapshots["009"].schema_contract)
-        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010"])
+        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010", "011"])
         self.assertEqual(applied[-1], EXPECTED_VERSION)
-        self.assertEqual(self._extract_contract(), manifest.snapshots["010"].schema_contract)
+        self.assertEqual(self._extract_contract(), manifest.snapshots["011"].schema_contract)
 
         # The 005/006/009 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.
@@ -264,8 +265,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "asset_task_mapping_proposals",
                 "assets",
                 "maintenance_categories",
+                "maintenance_attachment_operations",
                 "maintenance_completions",
                 "maintenance_proposals",
+                "maintenance_task_intake_events",
                 "maintenance_task_parts",
                 "maintenance_task_photos",
                 "maintenance_tasks",
@@ -301,6 +304,14 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "meter_interval_unit",
                 "last_done_meter_value",
                 "next_due_meter_value",
+                "intake_state",
+                "submitted_by",
+                "submitted_at",
+                "triaged_by",
+                "triaged_at",
+                "triage_reason",
+                "converted_task_id",
+                "intake_idempotency_key",
             },
         }
         for table, columns in expected_columns.items():

@@ -49,15 +49,13 @@ def auth_required(*, allow_pin: bool = False) -> Callable:
 
 
 def review_required() -> Callable:
-    """Require the human-review credential and an explicit operator identity."""
+    """Require the human-review credential and bind its server-side identity."""
 
     def decorator(fn: Callable) -> Callable:
         @wraps(fn)
         def wrapper(*args, **kwargs):
             if AUTH_DISABLED:
-                g.operator_identity = request.headers.get(
-                    "X-Operator-Identity", "dev-anonymous-reviewer"
-                )
+                g.operator_identity = review_principal_identity()
                 g.integration_identity = None
                 return fn(*args, **kwargs)
 
@@ -76,14 +74,7 @@ def review_required() -> Callable:
                     "Human review authentication required.",
                     status=401,
                 )
-            operator = request.headers.get("X-Operator-Identity", "").strip()
-            if not operator:
-                return error_response(
-                    "OPERATOR_IDENTITY_REQUIRED",
-                    "X-Operator-Identity header is required for review.",
-                    status=400,
-                )
-            g.operator_identity = operator
+            g.operator_identity = review_principal_identity()
             g.integration_identity = None
             return fn(*args, **kwargs)
 
@@ -139,3 +130,10 @@ def server_submitter_identity() -> str:
     by existing task routes. Work-request provenance must be server-derived.
     """
     return os.environ.get("PROPERTYMANAGER_DEV_SUBMITTER_ID", "dev-api-submitters").strip() or "dev-api-submitters"
+
+
+def review_principal_identity() -> str:
+    """Identify review actions from server configuration, never a caller header."""
+    return os.environ.get(
+        "PROPERTYMANAGER_DEV_REVIEW_PRINCIPAL", "propertymanager-review-api-key"
+    ).strip() or "propertymanager-review-api-key"

@@ -19,11 +19,13 @@ ALTER TABLE propertymanager.maintenance_tasks
 ALTER TABLE propertymanager.maintenance_tasks
     DROP CONSTRAINT IF EXISTS maintenance_tasks_intake_kind_check;
 ALTER TABLE propertymanager.maintenance_tasks
+    -- Keep legacy Work Request rows readable after upgrade.  NOT VALID still
+    -- enforces the invariant for every row created or changed after this point.
     ADD CONSTRAINT maintenance_tasks_intake_kind_check
     CHECK (
         (kind = 'Work Request' AND intake_state IS NOT NULL AND submitted_by IS NOT NULL AND submitted_at IS NOT NULL)
         OR (kind <> 'Work Request' AND intake_state IS NULL)
-    );
+    ) NOT VALID;
 ALTER TABLE propertymanager.maintenance_tasks
     ADD CONSTRAINT maintenance_tasks_converted_task_fkey
     FOREIGN KEY (converted_task_id) REFERENCES propertymanager.maintenance_tasks(id) ON DELETE SET NULL;
@@ -62,12 +64,16 @@ CREATE TABLE IF NOT EXISTS propertymanager.maintenance_attachment_operations (
     expires_at timestamptz NOT NULL,
     created_at timestamptz NOT NULL DEFAULT now(),
     uploaded_at timestamptz,
+    allocation_idempotency_key text,
     CONSTRAINT maintenance_attachment_operations_state_check
         CHECK (state IN ('issued', 'uploaded', 'attached', 'expired')),
     CONSTRAINT maintenance_attachment_operations_size_check CHECK (max_bytes > 0)
 );
 CREATE INDEX IF NOT EXISTS maintenance_attachment_operations_owner_state_idx
     ON propertymanager.maintenance_attachment_operations (created_by, state, expires_at);
+CREATE UNIQUE INDEX IF NOT EXISTS maintenance_attachment_operations_allocation_idempotency_idx
+    ON propertymanager.maintenance_attachment_operations (created_by, allocation_idempotency_key)
+    WHERE allocation_idempotency_key IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS propertymanager.maintenance_task_intake_events (
     id uuid PRIMARY KEY,

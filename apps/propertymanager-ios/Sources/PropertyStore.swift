@@ -314,23 +314,28 @@ final class PropertyStore: ObservableObject {
         }
     }
 
-    func submitWorkRequest(
-        description: String,
-        area: String,
-        assetID: UUID?,
-        materials: [WorkRequestMaterial],
-        photos: [Data],
-        idempotencyKey: String = UUID().uuidString
-    ) async throws -> SubmittedWorkRequest {
-        var attachmentIDs: [String] = []
-        for (index, photo) in photos.enumerated() {
+    func uploadWorkRequestPhotos(
+        _ photos: [Data],
+        existingAttachmentIDs: [String],
+        idempotencyKey: String
+    ) async throws -> [String] {
+        var attachmentIDs = existingAttachmentIDs
+        let firstUploadIndex = attachmentIDs.count
+        for (index, photo) in photos.dropFirst(attachmentIDs.count).enumerated() {
             attachmentIDs.append(
-                try await client.uploadWorkRequestPhoto(photo, idempotencyKey: "\(idempotencyKey)-photo-\(index)")
+                try await client.uploadWorkRequestPhoto(
+                    photo,
+                    idempotencyKey: "\(idempotencyKey)-photo-\(firstUploadIndex + index)"
+                )
             )
         }
-        let payload = try WorkRequestPayload.make(
-            description: description, area: area, assetID: assetID, materials: materials, attachmentIDs: attachmentIDs
-        )
+        return attachmentIDs
+    }
+
+    func submitWorkRequest(
+        _ payload: WorkRequestSubmission,
+        idempotencyKey: String
+    ) async throws -> SubmittedWorkRequest {
         let result = try await client.submitWorkRequest(payload, idempotencyKey: idempotencyKey)
         statusMessage = "Submitted work request \(result.requestNumber)"
         return result

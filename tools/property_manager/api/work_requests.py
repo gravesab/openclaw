@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
@@ -122,6 +122,13 @@ def _normalize_materials(raw: object) -> list[dict]:
     return normalized
 
 
+def _attachment_values_cte(attachment_ids: list[str]) -> tuple[str, list[str]]:
+    """Build a UUID values relation for the single intake transaction."""
+    if not attachment_ids:
+        return "SELECT NULL::uuid AS id WHERE false", []
+    return "VALUES " + ", ".join("(%s::uuid)" for _ in attachment_ids), attachment_ids
+
+
 def register_work_request_routes(app: Flask) -> None:
     @app.post("/v1/work-requests/attachments")
     @auth_required()
@@ -137,16 +144,44 @@ def register_work_request_routes(app: Flask) -> None:
             return validation_error("byte_size must be an integer", field="byte_size")
         if max_bytes < 1 or max_bytes > MAX_PHOTO_BYTES:
             return validation_error("Photo size is outside the allowed range", field="byte_size")
-        operation_id = str(uuid4())
         submitter = server_submitter_identity()
-        pm_db.execute(
-            """
-            INSERT INTO propertymanager.maintenance_attachment_operations
-                (id, created_by, content_type, max_bytes, expires_at)
-            VALUES (%s, %s, %s, %s, now() + interval '20 minutes')
-            """,
-            (operation_id, submitter, JPEG_CONTENT_TYPE, max_bytes),
+        idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
+        if not idempotency_key or len(idempotency_key) > 200:
+            return validation_error("Idempotency-Key is required", field="Idempotency-Key")
+        existing = pm_db.execute_one_json(
+            """SELECT id, content_type, max_bytes
+               FROM propertymanager.maintenance_attachment_operations
+               WHERE created_by = %s AND allocation_idempotency_key = %s""",
+            (submitter, idempotency_key),
         )
+        if existing:
+            if existing.get("content_type") != JPEG_CONTENT_TYPE or int(existing.get("max_bytes") or 0) != max_bytes:
+                return error_response("IDEMPOTENCY_CONFLICT", "Attachment retry payload does not match", status=409)
+            return jsonify({"attachment_id": existing["id"], "content_type": JPEG_CONTENT_TYPE,
+                            "max_bytes": max_bytes, "expires_in_seconds": ATTACHMENT_TTL_MINUTES * 60,
+                            "idempotent_replay": True})
+        operation_id = str(uuid4())
+        try:
+            pm_db.execute(
+                """
+                INSERT INTO propertymanager.maintenance_attachment_operations
+                    (id, created_by, content_type, max_bytes, expires_at, allocation_idempotency_key)
+                VALUES (%s, %s, %s, %s, now() + interval '20 minutes', %s)
+                """,
+                (operation_id, submitter, JPEG_CONTENT_TYPE, max_bytes, idempotency_key),
+            )
+        except Exception:
+            existing = pm_db.execute_one_json(
+                """SELECT id, content_type, max_bytes
+                   FROM propertymanager.maintenance_attachment_operations
+                   WHERE created_by = %s AND allocation_idempotency_key = %s""",
+                (submitter, idempotency_key),
+            )
+            if existing and existing.get("content_type") == JPEG_CONTENT_TYPE and int(existing.get("max_bytes") or 0) == max_bytes:
+                return jsonify({"attachment_id": existing["id"], "content_type": JPEG_CONTENT_TYPE,
+                                "max_bytes": max_bytes, "expires_in_seconds": ATTACHMENT_TTL_MINUTES * 60,
+                                "idempotent_replay": True})
+            raise
         return jsonify({"attachment_id": operation_id, "content_type": JPEG_CONTENT_TYPE,
                         "max_bytes": max_bytes, "expires_in_seconds": ATTACHMENT_TTL_MINUTES * 60}), 201
 
@@ -154,12 +189,17 @@ def register_work_request_routes(app: Flask) -> None:
     @auth_required()
     def upload_work_request_attachment(attachment_id: str):
         operation = pm_db.execute_one_json(
-            """SELECT id, created_by, content_type, max_bytes, state, expires_at
+            """SELECT id, created_by, content_type, max_bytes, state, expires_at, allocation_idempotency_key
                FROM propertymanager.maintenance_attachment_operations WHERE id = %s""",
             (attachment_id,),
         )
         if operation is None or operation.get("created_by") != server_submitter_identity():
             return error_response("NOT_FOUND", "Attachment operation not found", status=404)
+        idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
+        if not idempotency_key or operation.get("allocation_idempotency_key") != idempotency_key:
+            return error_response("ATTACHMENT_RETRY_UNAUTHORIZED", "Attachment retry key is invalid", status=409)
+        if operation.get("state") in {"uploaded", "attached"}:
+            return jsonify({"attachment_id": attachment_id, "status": "uploaded", "idempotent_replay": True})
         if operation.get("state") != "issued":
             return error_response("ATTACHMENT_NOT_UPLOADABLE", "Attachment cannot be uploaded", status=409)
         if operation.get("expires_at") and str(operation["expires_at"]) < datetime.now(timezone.utc).isoformat():
@@ -219,7 +259,8 @@ def register_work_request_routes(app: Flask) -> None:
         attachment_ids = payload.get("attachment_ids") or []
         if not isinstance(attachment_ids, list) or any(not isinstance(value, str) for value in attachment_ids):
             return validation_error("attachment_ids must be an array of opaque IDs", field="attachment_ids")
-        attachment_operations: dict[str, dict] = {}
+        if len(set(attachment_ids)) != len(attachment_ids):
+            return validation_error("attachment_ids must not contain duplicates", field="attachment_ids")
         for attachment_id in attachment_ids:
             operation = pm_db.execute_one_json(
                 """SELECT id, content_type, storage_path, byte_size, sha256 FROM propertymanager.maintenance_attachment_operations
@@ -228,21 +269,65 @@ def register_work_request_routes(app: Flask) -> None:
             )
             if operation is None:
                 return error_response("ATTACHMENT_UNAVAILABLE", "An attachment is unavailable", status=409)
-            attachment_operations[attachment_id] = operation
         request_id = str(uuid4())
         now = datetime.now(timezone.utc)
-        try:
-            pm_db.execute(
-                """INSERT INTO propertymanager.maintenance_tasks
-                    (id, area, item, category_name, priority, frequency, task_description,
-                     warning_days, critical_days, last_done, next_due, is_active, kind,
-                     intake_state, submitted_by, submitted_at, intake_idempotency_key,
-                     schedule_kind, completion_history, tools_required)
-                   VALUES (%s, %s, %s, 'House', 'Medium', 'As Needed', %s,
-                           0, 0, %s, %s, true, 'Work Request', 'submitted', %s, %s, %s,
-                           'calendar', '[]'::jsonb, '[]'::jsonb)""",
-                (request_id, area or 'Unassigned', 'Work request', description, now, now, submitter, now, idempotency_key),
+        attachment_values, attachment_params = _attachment_values_cte(attachment_ids)
+        statements = [
+            "requested_attachments(id) AS (" + attachment_values + ")",
+            "locked_attachments AS ("
+            "SELECT o.id, o.storage_path, o.content_type, o.byte_size, o.sha256 "
+            "FROM propertymanager.maintenance_attachment_operations o "
+            "JOIN requested_attachments r ON r.id = o.id "
+            "WHERE o.created_by = %s AND o.state = 'uploaded' AND o.expires_at > now() FOR UPDATE"
+            ")",
+            "attachment_guard AS ("
+            "SELECT 1 AS ok FROM locked_attachments HAVING count(*) = %s"
+            ")",
+            "created_request AS ("
+            "INSERT INTO propertymanager.maintenance_tasks "
+            "(id, area, item, category_name, priority, frequency, task_description, warning_days, critical_days, "
+            "last_done, next_due, is_active, kind, asset_id, intake_state, submitted_by, submitted_at, "
+            "intake_idempotency_key, schedule_kind, completion_history, tools_required) "
+            "SELECT %s, %s, 'Work request', 'House', 'Medium', 'As Needed', %s, 0, 0, %s, %s, true, "
+            "'Work Request', %s, 'submitted', %s, %s, %s, 'calendar', '[]'::jsonb, '[]'::jsonb "
+            "FROM attachment_guard RETURNING id"
+            ")",
+            "intake_event AS ("
+            "INSERT INTO propertymanager.maintenance_task_intake_events (id, task_id, from_state, to_state, actor, reason) "
+            "SELECT %s, id, NULL, 'submitted', %s, 'submitted from mobile intake' FROM created_request"
+            ")",
+        ]
+        params: list[object] = [
+            *attachment_params, submitter, len(attachment_ids), request_id, area or "Unassigned", description,
+            now, now, asset_id, submitter, now, idempotency_key, str(uuid4()), submitter,
+        ]
+        for position, material in enumerate(materials):
+            statements.append(
+                f"draft_material_{position} AS ("
+                "INSERT INTO propertymanager.maintenance_task_parts "
+                "(id, task_id, name, quantity, unit, notes, sort_order, provenance, created_at, updated_at) "
+                "SELECT %s, id, %s, %s, %s, %s, %s, 'request_draft', now(), now() FROM created_request"
+                ")"
             )
+            params.extend([
+                material["id"], material["name"], material["quantity"], material["unit"],
+                material["notes"], material["sort_order"],
+            ])
+        statements.extend([
+            "attached_operations AS ("
+            "UPDATE propertymanager.maintenance_attachment_operations o SET state = 'attached' "
+            "FROM locked_attachments a WHERE o.id = a.id AND o.state = 'uploaded' RETURNING o.id"
+            ")",
+            "attached_photos AS ("
+            "INSERT INTO propertymanager.maintenance_task_photos "
+            "(id, task_id, file_name, storage_path, content_type, byte_size, sha256, sanitized_at) "
+            "SELECT a.id, r.id, '', a.storage_path, a.content_type, a.byte_size, a.sha256, now() "
+            "FROM created_request r JOIN locked_attachments a ON true JOIN attached_operations u ON u.id = a.id"
+            ")",
+            "SELECT row_to_json(created_request) FROM created_request",
+        ])
+        try:
+            created = pm_db.execute_top_level_one_json("WITH " + ",\n".join(statements), tuple(params))
         except Exception:
             existing = pm_db.execute_one_json(
                 """SELECT id, area, item, task_description, asset_id, intake_state, submitted_by, submitted_at,
@@ -253,32 +338,10 @@ def register_work_request_routes(app: Flask) -> None:
             if existing:
                 return jsonify(_public_request(existing, replay=True))
             raise
-        if asset_id:
-            pm_db.execute("UPDATE propertymanager.maintenance_tasks SET asset_id = %s WHERE id = %s", (asset_id, request_id))
-        pm_db.execute(
-            """INSERT INTO propertymanager.maintenance_task_intake_events
-                (id, task_id, from_state, to_state, actor, reason)
-               VALUES (%s, %s, NULL, 'submitted', %s, 'submitted from mobile intake')""",
-            (str(uuid4()), request_id, submitter),
-        )
-        for material in materials:
-            pm_db.execute(
-                """INSERT INTO propertymanager.maintenance_task_parts
-                    (id, task_id, name, quantity, unit, notes, sort_order, provenance, created_at, updated_at)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, 'request_draft', now(), now())""",
-                (material["id"], request_id, material["name"], material["quantity"], material["unit"], material["notes"], material["sort_order"]),
-            )
-        for attachment_id in attachment_ids:
-            operation = attachment_operations[attachment_id]
-            pm_db.execute(
-                """INSERT INTO propertymanager.maintenance_task_photos
-                    (id, task_id, file_name, storage_path, content_type, byte_size, sha256, sanitized_at)
-                   VALUES (%s, %s, '', %s, %s, %s, %s, now())""",
-                (attachment_id, request_id, operation["storage_path"], operation["content_type"], operation["byte_size"], operation["sha256"]),
-            )
-            pm_db.execute("UPDATE propertymanager.maintenance_attachment_operations SET state = 'attached' WHERE id = %s", (attachment_id,))
-        created = _request_row(request_id)
-        return jsonify(_public_request(created or {"id": request_id, "intake_state": "submitted"})), 201
+        if created is None:
+            return error_response("ATTACHMENT_UNAVAILABLE", "An attachment is unavailable", status=409)
+        created_row = _request_row(request_id)
+        return jsonify(_public_request(created_row or {"id": request_id, "intake_state": "submitted"})), 201
 
     @app.get("/v1/work-requests/<request_id>")
     @auth_required()
@@ -306,46 +369,59 @@ def register_work_request_routes(app: Flask) -> None:
         reason = str(payload.get("reason") or "").strip()
         if not all((area, asset_id, category, priority, reason)):
             return validation_error("area, asset_id, category_name, priority, and reason are required")
-        pm_db.execute(
-            """UPDATE propertymanager.maintenance_tasks
-               SET area = %s, asset_id = %s, category_name = %s, priority = %s,
-                   intake_state = 'triaged', triaged_by = %s, triaged_at = now(), triage_reason = %s, updated_at = now()
-               WHERE id = %s AND kind = 'Work Request' AND intake_state = 'submitted'""",
-            (area, asset_id, category, priority, g.operator_identity, reason, request_id),
+        triaged = pm_db.execute_top_level_one_json(
+            """WITH triaged_request AS (
+                   UPDATE propertymanager.maintenance_tasks
+                   SET area = %s, asset_id = %s, category_name = %s, priority = %s,
+                       intake_state = 'triaged', triaged_by = %s, triaged_at = now(), triage_reason = %s, updated_at = now()
+                   WHERE id = %s AND kind = 'Work Request' AND intake_state = 'submitted'
+                   RETURNING id
+               ), intake_event AS (
+                   INSERT INTO propertymanager.maintenance_task_intake_events
+                       (id, task_id, from_state, to_state, actor, reason)
+                   SELECT %s, id, 'submitted', 'triaged', %s, %s FROM triaged_request
+               )
+               SELECT row_to_json(triaged_request) FROM triaged_request""",
+            (area, asset_id, category, priority, g.operator_identity, reason, request_id,
+             str(uuid4()), g.operator_identity, reason),
         )
-        pm_db.execute(
-            """INSERT INTO propertymanager.maintenance_task_intake_events
-                (id, task_id, from_state, to_state, actor, reason)
-               VALUES (%s, %s, 'submitted', 'triaged', %s, %s)""",
-            (str(uuid4()), request_id, g.operator_identity, reason),
-        )
+        if triaged is None:
+            return error_response("INVALID_INTAKE_STATE", "Only submitted requests can be triaged", status=409)
         return jsonify(_public_request(_request_row(request_id) or row))
 
     @app.post("/v1/work-requests/<request_id>/convert")
     @review_required()
     def convert_work_request(request_id: str):
-        row = _request_row(request_id)
-        if row is None:
-            return error_response("NOT_FOUND", "Work request not found", status=404)
-        if row.get("intake_state") != "triaged":
-            return error_response("INVALID_INTAKE_STATE", "Only triaged requests can be converted", status=409)
         maintenance_id = str(uuid4())
-        pm_db.execute_script([
-            ("""INSERT INTO propertymanager.maintenance_tasks
-                (id, area, item, category_name, priority, frequency, task_description,
-                 warning_days, critical_days, last_done, next_due, is_active, kind,
-                 asset_id, schedule_kind, origin, completion_history, tools_required)
-               VALUES (%s, %s, %s, %s, %s, 'As Needed', %s,
-                       30, 45, now(), now() + interval '30 days', true, 'Scheduled',
-                       %s, 'calendar', 'owner', '[]'::jsonb, '[]'::jsonb)""",
-             (maintenance_id, row.get("area"), "Work request: " + str(row.get("task_description") or "")[:120],
-              row.get("category_name"), row.get("priority"), row.get("task_description"), row.get("asset_id"))),
-            ("""UPDATE propertymanager.maintenance_tasks
-                SET intake_state = 'converted', converted_task_id = %s, updated_at = now()
-                WHERE id = %s AND intake_state = 'triaged'""", (maintenance_id, request_id)),
-            ("""INSERT INTO propertymanager.maintenance_task_intake_events
-                (id, task_id, from_state, to_state, actor, reason)
-                VALUES (%s, %s, 'triaged', 'converted', %s, 'explicit maintenance conversion')""",
-             (str(uuid4()), request_id, g.operator_identity)),
-        ])
-        return jsonify({"request": _public_request(_request_row(request_id) or row), "maintenance_task_id": maintenance_id})
+        converted = pm_db.execute_top_level_one_json(
+            """WITH claimed_request AS (
+                   UPDATE propertymanager.maintenance_tasks
+                   SET intake_state = 'converted', converted_task_id = %s, updated_at = now()
+                   WHERE id = %s AND kind = 'Work Request' AND intake_state = 'triaged'
+                   RETURNING area, task_description, category_name, priority, asset_id, id
+               ), scheduled_task AS (
+                   INSERT INTO propertymanager.maintenance_tasks
+                       (id, area, item, category_name, priority, frequency, task_description,
+                        warning_days, critical_days, last_done, next_due, is_active, kind,
+                        asset_id, schedule_kind, origin, completion_history, tools_required)
+                   SELECT %s, area, 'Work request: ' || left(coalesce(task_description, ''), 120),
+                          category_name, priority, 'As Needed', task_description,
+                          30, 45, now(), now() + interval '30 days', true, 'Scheduled',
+                          asset_id, 'calendar', 'owner', '[]'::jsonb, '[]'::jsonb
+                   FROM claimed_request RETURNING id
+               ), intake_event AS (
+                   INSERT INTO propertymanager.maintenance_task_intake_events (id, task_id, from_state, to_state, actor, reason)
+                   SELECT %s, id, 'triaged', 'converted', %s, 'explicit maintenance conversion' FROM claimed_request
+               )
+               SELECT row_to_json(scheduled_task) FROM scheduled_task""",
+            (maintenance_id, request_id, maintenance_id, str(uuid4()), g.operator_identity),
+        )
+        if converted is None:
+            row = _request_row(request_id)
+            if row is None:
+                return error_response("NOT_FOUND", "Work request not found", status=404)
+            return error_response("INVALID_INTAKE_STATE", "Only triaged requests can be converted", status=409)
+        return jsonify({
+            "request": _public_request(_request_row(request_id) or {"id": request_id, "intake_state": "converted"}),
+            "maintenance_task_id": maintenance_id,
+        })

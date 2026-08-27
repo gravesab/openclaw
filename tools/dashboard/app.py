@@ -44,6 +44,11 @@ from tools.ai_intelligence.ollama_config import OllamaConfig
 from tools.ai_intelligence.omlx_config import OMLXConfig, OMLXConfigurationError
 from tools.dashboard.pm_asset_page import register_pm_asset_routes
 from tools.dashboard.document_inventory import ensure_document_inventory
+from tools.property_manager.mcp_boundary import (
+    MCP_DATABASE_URL_ENV,
+    MCP_ENABLED_ENV,
+    MCP_ENVIRONMENT_ENV,
+)
 
 app = Flask(__name__)
 register_pm_asset_routes(app)
@@ -1024,7 +1029,23 @@ def check_service(name, command, scope):
     return (name, scope, "Offline / Warning", "#b91c1c")
 
 
-def build_system_health(omlx=None):
+def get_propertymanager_mcp_status():
+    """Report whether the DEV-only, on-demand MCP can be started safely.
+
+    PropertyManager MCP uses stdio and is launched by its client, so there is
+    no persistent process to probe. Its health is the readiness of its narrow
+    DEV-only configuration contract; the database URL itself is never exposed.
+    """
+    if os.environ.get(MCP_ENABLED_ENV) != "1":
+        return {"ready": False, "status": "Disabled"}
+    if os.environ.get(MCP_ENVIRONMENT_ENV) != "development":
+        return {"ready": False, "status": "DEV-only gate not satisfied"}
+    if not os.environ.get(MCP_DATABASE_URL_ENV, "").strip():
+        return {"ready": False, "status": "Credentials not configured"}
+    return {"ready": True, "status": "Ready (on demand)"}
+
+
+def build_system_health(omlx=None, propertymanager_mcp=None):
     checks = []
 
     checks.append(
@@ -1102,6 +1123,16 @@ def build_system_health(omlx=None):
         )
     )
 
+    propertymanager_mcp = propertymanager_mcp or get_propertymanager_mcp_status()
+    checks.append(
+        (
+            "PropertyManager MCP",
+            "On-demand stdio server",
+            propertymanager_mcp["status"],
+            "#16a34a" if propertymanager_mcp["ready"] else "#b91c1c",
+        )
+    )
+
     return sorted(checks, key=lambda service: service[0].casefold())
 
 
@@ -1114,9 +1145,9 @@ def service_scope_panel_html(services):
     return f"""
     <div class='panel'>
         <h2>Service Health by Scope</h2>
-        <p>User services, system services, containers, and HTTP endpoints are
-        checked differently. The scope below identifies which control plane owns
-        each item.</p>
+        <p>User services, system services, containers, HTTP endpoints, and
+        on-demand stdio servers are checked differently. The scope below
+        identifies which control plane owns each item.</p>
         <table style="width:100%;text-align:left;border-collapse:collapse">
           <thead><tr><th>Service</th><th>Scope</th><th>Status</th></tr></thead>
           <tbody>{rows}</tbody>
@@ -6987,7 +7018,8 @@ def home():
     backup_success = request.args.get("backup")
     drift = check_ai_drift()
     omlx = get_omlx_status()
-    services = build_system_health(omlx)
+    propertymanager_mcp = get_propertymanager_mcp_status()
+    services = build_system_health(omlx, propertymanager_mcp)
     m4 = get_m4_ollama_status()
 
     html = """

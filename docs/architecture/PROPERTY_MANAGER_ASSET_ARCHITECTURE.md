@@ -68,7 +68,7 @@ flowchart LR
 | Client                           | Role                                                                                                                                            |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Mac                              | Asset admin, manual import with meter intervals, meter entry, completion meter capture, mapping approval, optional Apple Calendar day-plan push |
-| iPhone / iPad                    | Field meter entry, voice, QR deep link                                                                                                          |
+| iPhone / iPad                    | Field meter entry, voice, QR deep link, and authenticated work-request submission                                                               |
 | Dashboard `/pm/asset/<qr_token>` | QR landing, meter display, authenticated update                                                                                                 |
 | Telegram                         | Natural-language meter updates (via API)                                                                                                        |
 | RanchBrain CLI                   | Display current meter and PM remaining from API                                                                                                 |
@@ -190,6 +190,23 @@ Append-only history. Corrections and rejections are new rows; accepted rows are 
 - One-time historical backfill: `tools/property_manager/db/normalize_task_titles.py` (`--dry-run` / `--apply`); do not mass-rewrite without operator approval.
 
 **Hybrid (`both`):** Use only when the manual (or operator) intentionally keeps calendar dates with a meter trigger ("whichever comes first"). Engine evaluates calendar due and meter due independently; task is due when **either** threshold is met. Do not silently upgrade `calendar` → `both` when only a meter trigger is added.
+
+### Mobile work requests (proposed)
+
+`maintenance_tasks.kind = 'Work Request'` is an intake record, not a scheduled-maintenance variant. It has a separate, server-enforced intake state (`submitted`, `triaged`, `converted`, or `closed`) and never enters due, overdue, recurrence, completion, meter, or Calendar calculations while it remains an intake record.
+
+| Field / relation          | Contract                                                                                                                                                                                                                            |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_description`        | Required large multiline report. Preserve the submitter's words; later triage notes are separate rather than overwriting the report.                                                                                                |
+| `asset_id` / `area`       | `asset_id` is optional at intake; require an area/location when no asset is known. Triage resolves the relationship before conversion to maintenance work.                                                                          |
+| intake audit              | Server-derived submitter identity, submitted/updated timestamps, idempotency key, and state-transition actor/reason.                                                                                                                |
+| `maintenance_task_photos` | One or more optional request attachments. Store an opaque attachment ID and controlled metadata; do not return `storage_path` or host filesystem details to clients.                                                                |
+| `maintenance_task_parts`  | Optional requested parts/materials planning lines: name, quantity, unit, note, and optional vendor/part reference. They carry no inventory or financial posting authority.                                                          |
+| conversion                | An authorized, atomic server operation creates or activates the normal maintenance task after category, priority, scheduling, and asset rules have been satisfied. It retains a link to the original request and its audit history. |
+
+The mobile flow is: **Describe work → optional photos → optional draft parts/materials → review → submit → triage**. It must use an authenticated `POST` endpoint with an idempotency key. Attachment bytes upload through a server-issued operation; the final submit payload uses opaque attachment IDs, never client filesystem paths or storage paths.
+
+The first implementation may use the existing task, photo, and parts tables only if a migration adds the explicit intake state, request audit fields, safe attachment metadata, and a non-destructive conversion link. It must not repurpose calendar dates, frequency, owner origin, or a category string to infer request workflow state.
 
 ### Completion extensions (`maintenance_completions`)
 

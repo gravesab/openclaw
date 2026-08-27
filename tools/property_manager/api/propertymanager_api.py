@@ -19,9 +19,11 @@ from decimal_utils import parse_decimal, decimal_to_db
 from errors import error_response, validation_error
 from mapping_proposals import register_mapping_routes
 from maintenance_proposals import register_maintenance_proposal_routes
+from work_requests import register_work_request_routes
 
 app = Flask(__name__)
 register_maintenance_proposal_routes(app)
+register_work_request_routes(app)
 
 # Intentional upload ceiling (aligned with Gunicorn request timeout for large bodies).
 # 32 MiB covers photo/manual attachments without unbounded memory growth.
@@ -238,15 +240,19 @@ def normalize_part_payload(raw: dict, *, sort_order: int) -> dict:
 
 
 def fetch_task_or_404(task_id: str) -> dict | None:
-    return pm_db.execute_one_json(
+    row = pm_db.execute_one_json(
         f"""
         SELECT
             {TASK_COLUMNS}
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
+          AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
+    if row and (row.get("kind") == "Work Request" or row.get("intake_state") is not None):
+        return None
+    return row
 
 
 def enrich_tasks(rows: list[dict]) -> list[dict]:
@@ -513,7 +519,7 @@ def delete_category(category_id: str):
         """
         SELECT COUNT(*)::int AS task_count
         FROM propertymanager.maintenance_tasks
-        WHERE is_active = true
+        WHERE is_active = true AND kind <> 'Work Request' AND intake_state IS NULL
           AND lower(category_name) = lower(%s)
         """,
         (name,),
@@ -564,6 +570,7 @@ def delete_category(category_id: str):
                 area = %s,
                 updated_at = now()
             WHERE is_active = true
+              AND kind <> 'Work Request' AND intake_state IS NULL
               AND lower(category_name) = lower(%s)
             """,
             (destination_name, destination_name, name),
@@ -597,7 +604,7 @@ def tasks():
         SELECT
             {TASK_COLUMNS}
         FROM propertymanager.maintenance_tasks
-        WHERE is_active = true
+        WHERE is_active = true AND kind <> 'Work Request'
         ORDER BY area, item
         """
     )
@@ -612,6 +619,7 @@ def task_detail(task_id: str):
             {TASK_COLUMNS}
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
+          AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
@@ -627,6 +635,14 @@ def upsert_task():
     payload = request.get_json(silent=True)
     if not isinstance(payload, dict):
         return jsonify({"error": "JSON object body required"}), 400
+
+    requested_kind = str(payload.get("kind") or "Scheduled").strip() or "Scheduled"
+    if requested_kind.casefold() == "work request":
+        return error_response(
+            "INTAKE_ROUTE_REQUIRED",
+            "Work requests may be created only through the work-request intake API",
+            status=409,
+        )
 
     task_id = str(payload.get("id") or uuid4())
     origin = normalize_origin(payload.get("origin"))
@@ -721,7 +737,7 @@ def upsert_task():
 
     pm_db.execute(
         """
-        INSERT INTO propertymanager.maintenance_tasks (
+        INSERT INTO propertymanager.maintenance_tasks AS current_task (
             id, area, item, category_name, priority, frequency,
             task_description, response_instructions, supplies_needed,
             notes, result_notes, estimated_minutes,
@@ -781,6 +797,7 @@ def upsert_task():
             completion_history = EXCLUDED.completion_history,
             tools_required = EXCLUDED.tools_required,
             updated_at = now()
+        WHERE current_task.kind <> 'Work Request' AND current_task.intake_state IS NULL
         """,
         (
             task_id,
@@ -803,7 +820,7 @@ def upsert_task():
             bool(payload.get("include_in_daily_briefing", True)),
             bool(payload.get("alert_if_overdue", True)),
             bool(payload.get("is_active", True)),
-            str(payload.get("kind") or "Scheduled"),
+            requested_kind,
             str(payload.get("manufacturer") or ""),
             source_manual,
             origin,
@@ -817,6 +834,17 @@ def upsert_task():
             json.dumps(tools),
         ),
     )
+
+    # The ON CONFLICT predicate is the atomic authority boundary. Re-fetch
+    # before any meter or parts side effect so an intake-record collision fails
+    # closed even when another request created that row after our earlier reads.
+    updated = fetch_task_or_404(task_id)
+    if updated is None:
+        return error_response(
+            "INTAKE_ROUTE_REQUIRED",
+            "Work requests may be changed only through the work-request API",
+            status=409,
+        )
 
     if asset_id and schedule_kind in {"meter", "both"}:
         meter_row = ms.fetch_meter_row(str(asset_id))
@@ -939,6 +967,7 @@ def patch_task(task_id: str):
         SET {set_clause},
             updated_at = now()
         WHERE id = %s AND is_active = true
+          AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         values,
     )
@@ -962,6 +991,7 @@ def delete_task(task_id: str):
         SET is_active = false,
             updated_at = now()
         WHERE id = %s AND is_active = true
+          AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
@@ -1025,7 +1055,7 @@ def replace_task_parts(task_id: str):
         """
         UPDATE propertymanager.maintenance_tasks
         SET updated_at = now()
-        WHERE id = %s
+        WHERE id = %s AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
@@ -1087,7 +1117,7 @@ def create_task_part(task_id: str):
         """
         UPDATE propertymanager.maintenance_tasks
         SET updated_at = now()
-        WHERE id = %s
+        WHERE id = %s AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
@@ -1106,7 +1136,7 @@ def complete_task(task_id: str):
 
     task = pm_db.execute_one_json(
         """
-        SELECT id, warning_days, asset_id, schedule_kind
+        SELECT id, warning_days, asset_id, schedule_kind, kind, intake_state
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
         """,
@@ -1114,6 +1144,8 @@ def complete_task(task_id: str):
     )
     if task is None:
         return error_response("NOT_FOUND", "Task not found", status=404)
+    if task.get("kind") == "Work Request" or task.get("intake_state"):
+        return error_response("INTAKE_NOT_MAINTENANCE", "Work requests cannot be completed", status=409)
 
     # Calendar next_due on complete: completed_at + warning_days (legacy CSV-era
     # interval). Mac Recalculate Next Due uses Frequency instead (lastDone +

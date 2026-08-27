@@ -103,14 +103,20 @@ def approve_mapping_proposal(proposal_id: str):
     operator = g.operator_identity or "unknown"
 
     if task_id:
-        pm_db.execute(
+        changed = pm_db.execute(
             """
             UPDATE propertymanager.maintenance_tasks
             SET asset_id = %s, updated_at = now()
-            WHERE id = %s
+            WHERE id = %s AND kind <> 'Work Request' AND intake_state IS NULL
             """,
             (asset_id, str(task_id)),
         )
+        if changed != 1:
+            return error_response(
+                "INTAKE_NOT_MAINTENANCE",
+                "Work requests cannot be changed through asset mapping proposals",
+                status=409,
+            )
         meter_row = ms.fetch_meter_row(asset_id)
         current = ms._as_decimal((meter_row or {}).get("current_value"))
         ms.recalc_tasks_for_asset(asset_id, current)

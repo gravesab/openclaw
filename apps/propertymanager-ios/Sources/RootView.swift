@@ -51,6 +51,13 @@ struct RootView: View {
                 }
 
                 NavigationStack {
+                    WorkRequestIntakeView()
+                }
+                .tabItem {
+                    Label("Request", systemImage: "square.and.pencil")
+                }
+
+                NavigationStack {
                     SettingsView()
                 }
                 .tabItem {

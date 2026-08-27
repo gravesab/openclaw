@@ -4,38 +4,34 @@ import UIKit
 
 struct WorkRequestIntakeView: View {
     @EnvironmentObject private var store: PropertyStore
-    @State private var description = ""
-    @State private var area = ""
-    @State private var assetID: UUID?
-    @State private var materials: [WorkRequestMaterial] = []
+    @State private var draft = WorkRequestIntakeDraft()
     @State private var photoItems: [PhotosPickerItem] = []
     @State private var photos: [Data] = []
     @State private var isSubmitting = false
     @State private var confirmation: SubmittedWorkRequest?
-    @State private var idempotencyKey = UUID().uuidString
 
     var body: some View {
         Form {
             Section("Describe the work") {
-                TextEditor(text: $description)
+                TextEditor(text: $draft.description)
                     .frame(minHeight: 180)
                     .accessibilityLabel("Describe the work")
             }
             Section("Location") {
-                Picker("Asset", selection: $assetID) {
+                Picker("Asset", selection: $draft.assetID) {
                     Text("No asset selected").tag(UUID?.none)
                     ForEach(store.assets) { asset in
                         Text(asset.name).tag(UUID?.some(asset.id))
                     }
                 }
-                TextField("Area or location", text: $area)
+                TextField("Area or location", text: $draft.area)
             }
             Section("Photos") {
                 PhotosPicker("Add photos", selection: $photoItems, maxSelectionCount: 5, matching: .images)
                 if !photos.isEmpty { Text("\(photos.count) photo(s) ready to upload") }
             }
             Section("Draft parts or materials") {
-                ForEach($materials) { $material in
+                ForEach($draft.materials) { $material in
                     VStack(alignment: .leading) {
                         TextField("Name", text: $material.name)
                         HStack {
@@ -45,7 +41,7 @@ struct WorkRequestIntakeView: View {
                         TextField("Note", text: $material.note)
                     }
                 }
-                Button("Add material") { materials.append(WorkRequestMaterial()) }
+                Button("Add material") { draft.materials.append(WorkRequestMaterial()) }
             }
             Section {
                 Button(isSubmitting ? "Submitting…" : "Submit work request") {
@@ -64,6 +60,7 @@ struct WorkRequestIntakeView: View {
                           let image = UIImage(data: data) else { return nil }
                     return image.jpegData(compressionQuality: 0.9)
                 }
+                draft.replacePhotoSelection()
             }
         }
         .alert("Work request submitted", isPresented: Binding(get: { confirmation != nil }, set: { if !$0 { confirmation = nil } })) {
@@ -77,11 +74,17 @@ struct WorkRequestIntakeView: View {
         isSubmitting = true
         defer { isSubmitting = false }
         do {
-            confirmation = try await store.submitWorkRequest(
-                description: description, area: area, assetID: assetID, materials: materials, photos: photos,
-                idempotencyKey: idempotencyKey
+            draft.attachmentIDs = try await store.uploadWorkRequestPhotos(
+                photos,
+                existingAttachmentIDs: draft.attachmentIDs,
+                idempotencyKey: draft.idempotencyKey
             )
-            idempotencyKey = UUID().uuidString
+            confirmation = try await draft.submit { payload, idempotencyKey in
+                try await store.submitWorkRequest(payload, idempotencyKey: idempotencyKey)
+            }
+            draft.resetAfterSuccessfulSubmission()
+            photoItems = []
+            photos = []
         } catch {
             store.errorMessage = error.localizedDescription
         }

@@ -6048,7 +6048,7 @@
           "version": "011",
           "order": 9,
           "filename": "011_work_request_intake.sql",
-          "sha256": "ece48f297ab2365b5cd671745f09b26ed9b5ee25911755d5210ffb6b5ee50ed4",
+          "sha256": "d1cf62f1ba92047cc0d5a156158be04422c3e4f1ad01afbf8174ac3b601e4fda",
           "reapplication_permitted": false
         }
       ],
@@ -8349,6 +8349,15 @@
                 "precision": null,
                 "scale": null,
                 "type": "timestamp with time zone"
+              },
+              {
+                "default": null,
+                "generated": null,
+                "name": "allocation_idempotency_key",
+                "nullable": true,
+                "precision": null,
+                "scale": null,
+                "type": "text"
               }
             ],
             "constraints": [
@@ -8387,6 +8396,22 @@
               }
             ],
             "indexes": [
+              {
+                "keys": [
+                  {
+                    "expression": "created_by",
+                    "order": "ASC"
+                  },
+                  {
+                    "expression": "allocation_idempotency_key",
+                    "order": "ASC"
+                  }
+                ],
+                "method": "btree",
+                "name": "maintenance_attachment_operations_allocation_idempotency_idx",
+                "predicate": "allocation_idempotency_key IS NOT NULL",
+                "unique": true
+              },
               {
                 "keys": [
                   {
@@ -9943,7 +9968,7 @@
                   "submitted_at",
                   "submitted_by"
                 ],
-                "definition": "CHECK ((kind = 'Work Request' AND intake_state IS NOT NULL AND submitted_by IS NOT NULL AND submitted_at IS NOT NULL) OR (kind <> 'Work Request' AND intake_state IS NULL))",
+                "definition": "CHECK (kind = 'Work Request' AND intake_state IS NOT NULL AND submitted_by IS NOT NULL AND submitted_at IS NOT NULL OR kind <> 'Work Request' AND intake_state IS NULL) NOT VALID",
                 "kind": "check",
                 "name": "maintenance_tasks_intake_kind_check",
                 "on_delete": null,

@@ -165,7 +165,7 @@ def enrich_asset(row: dict) -> dict:
         SELECT id, item, schedule_kind, meter_interval_value, meter_interval_unit,
                last_done_meter_value, next_due_meter_value, next_due, warning_days
         FROM propertymanager.maintenance_tasks
-        WHERE is_active = true AND asset_id = %s
+        WHERE is_active = true AND asset_id = %s AND kind <> 'Work Request'
         ORDER BY item
         """,
         (asset_id,),

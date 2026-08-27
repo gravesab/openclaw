@@ -233,11 +233,33 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         manifest = load_manifest()
         for filename in MIGRATIONS:
             self._prove_container_identity()
+            if filename == "011_work_request_intake.sql":
+                # 002 allowed these legacy rows.  011 must retain them rather
+                # than rejecting an otherwise valid pre-intake DEV database.
+                self._psql(
+                    """INSERT INTO propertymanager.maintenance_tasks
+                        (id, area, item, warning_days, critical_days, last_done, next_due, kind)
+                       VALUES ('00000000-0000-0000-0000-000000000099', 'Legacy', 'Work request', 0, 0, now(), now(), 'Work Request')"""
+                )
             migration = (MIGRATION_DIR / filename).read_bytes()
             self._psql(migration.decode())
             applied.append(filename[:3])
             if filename == "009_maintenance_proposals.sql":
                 self.assertEqual(self._extract_contract(), manifest.snapshots["009"].schema_contract)
+            if filename == "011_work_request_intake.sql":
+                self.assertEqual(
+                    self._psql(
+                        "SELECT intake_state IS NULL FROM propertymanager.maintenance_tasks "
+                        "WHERE id='00000000-0000-0000-0000-000000000099';"
+                    ),
+                    "t",
+                )
+                with self.assertRaises(AssertionError):
+                    self._psql(
+                        """INSERT INTO propertymanager.maintenance_tasks
+                            (id, area, item, warning_days, critical_days, last_done, next_due, kind)
+                           VALUES ('00000000-0000-0000-0000-000000000098', 'New', 'Work request', 0, 0, now(), now(), 'Work Request')"""
+                    )
         self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010", "011"])
         self.assertEqual(applied[-1], EXPECTED_VERSION)
         self.assertEqual(self._extract_contract(), manifest.snapshots["011"].schema_contract)

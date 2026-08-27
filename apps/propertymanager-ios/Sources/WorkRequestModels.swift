@@ -28,6 +28,40 @@ struct WorkRequestSubmission: Codable {
     }
 }
 
+struct WorkRequestIntakeDraft {
+    var description = ""
+    var area = ""
+    var assetID: UUID?
+    var materials: [WorkRequestMaterial] = []
+    var attachmentIDs: [String] = []
+    var idempotencyKey = UUID().uuidString
+
+    func payload() throws -> WorkRequestSubmission {
+        try WorkRequestPayload.make(
+            description: description,
+            area: area,
+            assetID: assetID,
+            materials: materials,
+            attachmentIDs: attachmentIDs
+        )
+    }
+
+    func submit(
+        using sender: (WorkRequestSubmission, String) async throws -> SubmittedWorkRequest
+    ) async throws -> SubmittedWorkRequest {
+        try await sender(try payload(), idempotencyKey)
+    }
+
+    mutating func replacePhotoSelection() {
+        attachmentIDs = []
+        idempotencyKey = UUID().uuidString
+    }
+
+    mutating func resetAfterSuccessfulSubmission() {
+        self = WorkRequestIntakeDraft()
+    }
+}
+
 struct WorkRequestMaterialPayload: Codable {
     let name: String
     let quantity: String

@@ -149,63 +149,94 @@ versioned Livestock read/query API or an equivalently versioned read model.
 They must not receive direct access to Livestock Management databases,
 filesystems, caches, indexes, or unrestricted search.
 
-The first contract is `LivestockReadModelV1`. Its foundational first slice
-supports only authorized tenant-scoped animals, identifiers, routine lifecycle
-facts, and dashboard summaries. Once the stated vertical gates are complete,
-the same versioned contract may add authorized care conditions and events, care
-schedules, input plans, allocations, consumption, operational-cost
-attributions, and indicators for active care, upcoming treatments, feed needs,
-recent surgeries, and cost trends. Herd assignments, herd-targeted facts,
-attachments, exports, notifications, sale, death, and transfer facts remain
-absent until their separate contracts are enabled.
+`LivestockReadModelV1` is the canonical, versioned Ranch OS Livestock
+read/query contract. It is a local, transport-free Python boundary; this name
+does not authorize an HTTP route, socket, database driver, service, client
+integration, or credential. UI and AI consume this contract or a future
+approved adapter for it, never a direct Livestock repository or PostgreSQL.
+
+The closed V1 fact-family vocabulary is:
+
+| Enum value                      | Contract subject                                                      | Initial availability                                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `herd_overview`                 | Tenant-scoped aggregate herd overview                                 | Available when its bounded overview projection is supplied.                                                                    |
+| `animal_list`                   | Controlled animal summaries                                           | Available.                                                                                                                     |
+| `animal_detail`                 | One controlled animal detail                                          | Available when its detail projection is supplied.                                                                              |
+| `identifiers`                   | Animal identifier history                                             | Explicitly unavailable until identifier-history, retirement, reuse, and active-uniqueness rules are approved.                  |
+| `routine_lifecycle_events`      | Immutable intake, tagged, and weight history                          | Explicitly unavailable until taxonomy, event ordering, correction/supersession, and confirmation-authority rules are approved. |
+| `care_history`                  | Veterinary care, surgeries, treatments, medications, and schedules    | Unavailable pending the Livestock care vertical slice; Ranch Health remains human-only.                                        |
+| `feeding_consumption_history`   | Feed, hay, mineral, supplement, and consumption history               | Unavailable pending the controlled input vertical slice.                                                                       |
+| `operational_cost_attributions` | Livestock operational cost attribution and optional Finance reference | Unavailable pending the cost vertical slice; Ranch Finance remains the canonical ledger.                                       |
+
+Herd assignments, attachments, exports, notifications, sale, death, and
+transfer facts remain outside V1 until their separate contracts are approved.
+The initially enabled V1 families are only `herd_overview`, `animal_list`, and
+`animal_detail`; every other closed family returns the non-sensitive
+`unavailable` result shape.
 
 ### Query request
 
-The caller supplies an API version, an authorized tenant selection request,
-requested fact family, bounded filters, opaque cursor, and page size. The
-server derives `TenantContext` from the verified principal and current Ranch OS
-membership; it ignores a caller's attempt to assert a role or tenant authority.
+The local request shape is `LivestockReadQueryV1`:
 
-Valid foundational fact families are `animal`, `identifier`,
-`routine_lifecycle_event`, and `dashboard_summary`. Care-enabled fact families
-are `care_condition`, `care_event`, and `care_schedule`; input-enabled families
-are `input_plan`, `input_allocation`, and `input_consumption`; cost-enabled
-families are `operational_cost_attribution` and `cost_trend`. The API exposes a
-family only after its vertical-slice gate is complete. Filters and sort fields
-are allowlisted. Cursors are opaque, tenant-bound, query-bound, and expire
-under server policy.
+```text
+fact_family: LivestockFactFamily       # one closed enum value above
+page_size: integer                     # 1 through 100 inclusive
+cursor: opaque string | null           # no offset field exists
+```
+
+The caller may request a tenant selection but cannot assert tenant authority,
+role, capability, identity, or session. The future ingress first derives a
+`TenantContext` from a real OpenClaw-authoritative `VerifiedPrincipal` and
+current Ranch OS membership. It is the sole deployed constructor path for that
+principal. Fixture constructors exist only in local tests and must not be
+loadable or configurable in deployed runtime.
+
+The repository treats a cursor as opaque, tenant-bound, query-bound, and
+server-expiring. A V1 query does not use offset pagination. Future filters or
+sort fields require their own closed V1 enum and contract update; they are not
+free-form request values.
 
 ### Query response
 
-Every successful response contains:
+Every successful `LivestockReadResponse` contains:
 
-- `schema_version` and `read_model_version`;
-- a bounded tenant context reference containing the resolved tenant identifier,
-  environment, and correlation identifier, but no credential or session secret;
-- `results` containing only facts authorized for that context;
-- `page` with an opaque next cursor or an explicit end-of-results indicator;
-- `provenance` for each fact: source type, immutable source identifier, source
-  or read-model version, and observation or update time;
-- `uncertainty` when the fact is missing, stale, incomplete, conflicting, or
-  unavailable under the selected contract.
+```text
+schema_version: "v1"
+read_model_version: "LivestockReadModelV1"
+tenant_id, environment, correlation_id: resolved context references only
+fact_family: requested closed enum value
+availability: available | unavailable
+items: [LivestockReadItemV1]
+next_cursor: opaque string | null
+source_as_of, projection_revision: bounded projection metadata
+```
+
+Every `LivestockReadItemV1` carries a closed explicit status—`current`,
+`stale`, `incomplete`, or `conflicting`—and tenant-safe provenance: source
+type, immutable source identifier, source version, and observation time. An
+unavailable family returns `availability: unavailable`, `items: []`, and
+`next_cursor: null`; it never returns a guessed or partial fact. A successful
+empty available result has the same `items: []` and `next_cursor: null` shape,
+with `availability: available`.
 
 Care and input facts retain source, actor, occurrence or due time, and explicit
 supersession information where applicable. Cost facts retain allocation basis,
 source/provenance, and an optional Finance reference only; they do not return
 or fabricate a Finance bill, payment, tax, budget, or ledger entry.
 
-No result is a successful empty result set with `results: []` and an explicit
+No result is a successful empty result set with `items: []` and an explicit
 end-of-results indicator. It is not a fabricated animal, inferred lifecycle
 state, or cross-tenant fallback.
 
-Authorization and validation failures use stable, sanitized errors:
+Authorization and validation failures use stable, sanitized closed codes:
 
-| Condition                                                 | Result                                 |
-| --------------------------------------------------------- | -------------------------------------- |
-| Missing, malformed, expired, or ambiguous tenant context  | Deny with `tenant_context_invalid`.    |
-| Selected tenant is not an active membership               | Deny with `tenant_not_authorized`.     |
-| Active membership lacks the requested read capability     | Deny with `livestock_read_forbidden`.  |
-| Unknown fact family, filter, sort, cursor, or API version | Reject with `livestock_query_invalid`. |
+| Condition                                                        | Result                                                   |
+| ---------------------------------------------------------------- | -------------------------------------------------------- |
+| Missing, malformed, expired, or ambiguous tenant context         | Deny with `tenant_context_invalid`.                      |
+| Selected tenant is not an active membership                      | Deny with `tenant_not_authorized`.                       |
+| Active membership lacks the requested read capability            | Deny with `livestock_read_forbidden`.                    |
+| Unknown fact family, invalid page bound/cursor, or media type    | Reject with `livestock_query_invalid`.                   |
+| Repository result has a mismatched tenant, family, or page bound | Fail closed with `livestock_projection_tenant_mismatch`. |
 
 An AI consumer must preserve returned provenance and uncertainty when answering.
 It must state uncertainty when the response supplies it and must not use

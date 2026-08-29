@@ -34,13 +34,13 @@ Tenant roles are:
 The initial capability matrix is explicit. Role names group these capabilities;
 they do not independently grant authority.
 
-| Capability | Owner | Manager | Viewer |
-| --- | --- | --- | --- |
-| Read, search, or list tenant memories | Yes | Yes | Yes |
-| Create, update, or link tenant memories | Yes | Yes | No |
-| Archive, delete, or export tenant data | Yes | No | No |
-| Manage memberships or tenant settings | Yes | No | No |
-| Run a service workload | Explicit tenant and operation grant required | Explicit tenant and operation grant required | Explicit tenant and operation grant required |
+| Capability                              | Owner                                        | Manager                                      | Viewer                                       |
+| --------------------------------------- | -------------------------------------------- | -------------------------------------------- | -------------------------------------------- |
+| Read, search, or list tenant memories   | Yes                                          | Yes                                          | Yes                                          |
+| Create, update, or link tenant memories | Yes                                          | Yes                                          | No                                           |
+| Archive, delete, or export tenant data  | Yes                                          | No                                           | No                                           |
+| Manage memberships or tenant settings   | Yes                                          | No                                           | No                                           |
+| Run a service workload                  | Explicit tenant and operation grant required | Explicit tenant and operation grant required | Explicit tenant and operation grant required |
 
 An asset belongs to a tenant, not to the user who created it. Tenant-owned
 records retain `created_by_user_id` and `updated_by_user_id` for attribution,
@@ -60,6 +60,15 @@ for Ranch OS. It must provide an immutable principal identifier and type,
 lifecycle state, environment, assurance profile, session reference, validity
 window, correlation identifier, and any applicable service or delegation
 reference. It must not provide an authoritative tenant, role, or capability.
+
+The shared value type rejects an empty principal identifier or environment,
+naive or malformed validity timestamps, and a non-positive validity window as
+an explicit tenancy/context failure. Immutability is not proof of provenance:
+in a deployed runtime, only the OpenClaw-authoritative ingress may construct
+this type after it has verified the assertion. No constructor, fixture, local
+identity, configuration value, or client-provided principal is an alternative
+deployed authority path. Fixtures may construct the identical value only in
+isolated tests.
 
 Ranch OS, not OpenClaw, must resolve active membership, requested tenant,
 role, and operation-specific capability from its authoritative store. A
@@ -116,12 +125,12 @@ pass arbitrary tenant filters into those methods.
 
 The future DEV relational foundation uses these authoritative entities:
 
-| Entity | Required fields | Rules |
-| --- | --- | --- |
-| `tenants` | `id`, `slug`, `display_name`, `status`, timestamps | `slug` is globally unique; status changes are server-authorized and audited. |
-| `users` | `id`, immutable external identity reference, `status`, timestamps | One global human identity per authenticated person; no shared human accounts. |
-| `tenant_memberships` | `tenant_id`, `user_id`, `role`, `status`, timestamps | Unique active membership per tenant/user; role and lifecycle changes are server-authorized and audited. |
-| tenant-owned resource | `id`, `tenant_id`, audit fields, resource fields | `tenant_id` is non-null and immutable after creation except through a separately approved transfer workflow. |
+| Entity                | Required fields                                                   | Rules                                                                                                        |
+| --------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `tenants`             | `id`, `slug`, `display_name`, `status`, timestamps                | `slug` is globally unique; status changes are server-authorized and audited.                                 |
+| `users`               | `id`, immutable external identity reference, `status`, timestamps | One global human identity per authenticated person; no shared human accounts.                                |
+| `tenant_memberships`  | `tenant_id`, `user_id`, `role`, `status`, timestamps              | Unique active membership per tenant/user; role and lifecycle changes are server-authorized and audited.      |
+| tenant-owned resource | `id`, `tenant_id`, audit fields, resource fields                  | `tenant_id` is non-null and immutable after creation except through a separately approved transfer workflow. |
 
 Tenant-owned resources include assets, maintenance tasks, documents, memories,
 financial records, livestock records, health records, search/vector records, file metadata,
@@ -231,14 +240,14 @@ apply.
 
 Every data-bearing subsystem carries the same boundary:
 
-| Subsystem | Required isolation |
-| --- | --- |
-| Files and documents | Store beneath a tenant-specific namespace such as `tenants/<tenant-id>/...`; authorize before issuing paths or downloads; reject traversal and cross-tenant moves. |
-| Search and vectors | Persist `tenant_id` with each record and require it as a mandatory retrieval predicate before ranking, previewing, or generating context. |
-| Background jobs | Store `tenant_id`, initiating actor or service identity, and correlation ID in each job; workers re-establish and authorize context before reading or writing. |
-| Caches | Prefix and validate keys with `tenant_id`; never cache a tenant result under a global or user-only key. |
-| Exports and notifications | Bind recipient, source records, generated files, and delivery attempts to the active tenant; reauthorize at delivery when access can have changed. |
-| Audit and observability | Record tenant, actor, service identity, operation, and correlation ID; queries and dashboards are tenant-scoped unless an explicitly authorized platform-administration view is introduced. |
+| Subsystem                 | Required isolation                                                                                                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Files and documents       | Store beneath a tenant-specific namespace such as `tenants/<tenant-id>/...`; authorize before issuing paths or downloads; reject traversal and cross-tenant moves.                          |
+| Search and vectors        | Persist `tenant_id` with each record and require it as a mandatory retrieval predicate before ranking, previewing, or generating context.                                                   |
+| Background jobs           | Store `tenant_id`, initiating actor or service identity, and correlation ID in each job; workers re-establish and authorize context before reading or writing.                              |
+| Caches                    | Prefix and validate keys with `tenant_id`; never cache a tenant result under a global or user-only key.                                                                                     |
+| Exports and notifications | Bind recipient, source records, generated files, and delivery attempts to the active tenant; reauthorize at delivery when access can have changed.                                          |
+| Audit and observability   | Record tenant, actor, service identity, operation, and correlation ID; queries and dashboards are tenant-scoped unless an explicitly authorized platform-administration view is introduced. |
 
 The current RanchBrain alpha stores memories and indexes in local files. It is
 single-tenant until the tenant-specific data-root and repository boundary are

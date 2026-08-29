@@ -87,7 +87,7 @@ class PropertyManagerWsgiConfigurationTests(unittest.TestCase):
                 # Verify the health contract without contacting PostgreSQL.
                 api_module = sys.modules["propertymanager_api"]
                 with mock.patch.object(
-                    api_module, "_probe_postgres_and_schema", return_value=(True, True)
+                    api_module, "_probe_postgres_and_schema", return_value=(True, True, True)
                 ):
                     response = module.application.test_client().get("/health")
                 self.assertEqual(response.status_code, 200)

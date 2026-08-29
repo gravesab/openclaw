@@ -34,8 +34,9 @@ APPROVED_HASHES = {
     "009_maintenance_proposals.sql": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a",
     "010_handbook_ingestion_v1.sql": "17ba25449a4f3dc8f1f4137313930bfff6fcd213397493a01bc5bc6035230db5",
     "011_work_request_intake.sql": "d1cf62f1ba92047cc0d5a156158be04422c3e4f1ad01afbf8174ac3b601e4fda",
+    "012_dev_schema_forward_repair.sql": "f9d369a84c18bedf2b68990451bae84963774f398e7f68bf8c4a00f90aa2493f",
 }
-APPROVED_CONTRACT_HASH = "a05a93d9aef096e684272207205e6e13601bee165ce3e4a0762af78bf2c0880b"
+APPROVED_CONTRACT_HASH = "341d0d2f7543e71bbd3af8d69d9b1349aa7bb58275f15b8cb3f698864498adfd"
 APPROVED_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 APPROVED_RESOURCE_LIMITS = {
     "MAX_MANIFEST_BYTES": 1 * 1024 * 1024,
@@ -57,6 +58,7 @@ APPROVED_REAPPLICATION = {
     "009": True,
     "010": False,
     "011": False,
+    "012": False,
 }
 APPROVED_TABLES = (
     "asset_manual",
@@ -75,6 +77,7 @@ APPROVED_TABLES = (
     "maintenance_task_parts",
     "maintenance_task_photos",
     "maintenance_tasks",
+    "schema_migrations",
 )
 
 
@@ -535,23 +538,23 @@ class ManifestFingerprintTests(AuthorityFixture):
         for name, expected in APPROVED_RESOURCE_LIMITS.items():
             self.assertEqual(getattr(authority, name), expected, name)
         self.assertEqual(
-            {spec.version: spec.reapplication_permitted for spec in self.manifest.snapshots["011"].canonical},
+            {spec.version: spec.reapplication_permitted for spec in self.manifest.snapshots["012"].canonical},
             APPROVED_REAPPLICATION,
         )
         self.assertEqual(self.manifest.reserved_versions, ("007", "008"))
-        self.assertEqual(self.manifest.next_canonical_version, "012")
+        self.assertEqual(self.manifest.next_canonical_version, "013")
         self.assertNotIn("007", {spec.version for spec in self.manifest.canonical})
         self.assertNotIn("008", {spec.version for spec in self.manifest.canonical})
 
     def test_complete_independent_canonical_oracle(self):
-        current = self.manifest.snapshots["011"].schema_contract
+        current = self.manifest.snapshots["012"].schema_contract
         encoded = json.dumps(current, sort_keys=True, separators=(",", ":")).encode()
         self.assertEqual(hashlib.sha256(encoded).hexdigest(), APPROVED_CONTRACT_HASH)
         tables = current["tables"]
         self.assertEqual(tuple(tables), APPROVED_TABLES)
-        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 230)
-        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 89)
-        self.assertEqual(sum(len(table["indexes"]) for table in tables.values()), 48)
+        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 234)
+        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 91)
+        self.assertEqual(sum(len(table["indexes"]) for table in tables.values()), 50)
         self.assertEqual(
             len(EXPECTED_SCHEMA_ORACLE["canonical_data"]["maintenance_categories"]["rows"]),
             8,
@@ -592,7 +595,7 @@ class ManifestFingerprintTests(AuthorityFixture):
 
     def test_manifest_has_independently_pinned_contract_and_migrations(self):
         raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-        current = raw["snapshots"]["011"]
+        current = raw["snapshots"]["012"]
         encoded = json.dumps(current["schema_contract"], sort_keys=True, separators=(",", ":")).encode()
         self.assertEqual(hashlib.sha256(encoded).hexdigest(), APPROVED_CONTRACT_HASH)
         self.assertEqual(
@@ -601,9 +604,9 @@ class ManifestFingerprintTests(AuthorityFixture):
         )
         contract = current["schema_contract"]
         self.assertEqual(tuple(contract["tables"]), APPROVED_TABLES)
-        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 230)
-        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 89)
-        self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 48)
+        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 234)
+        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 91)
+        self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 50)
         migration_created_indexes = {
             "maintenance_task_parts_task_id_idx", "maintenance_task_photos_task_id_idx",
             "assets_external_id_idx", "assets_qr_token_idx", "assets_name_lower_idx",
@@ -798,7 +801,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
             APPROVED_EMPTY_SHA256,
         )
         raw = json.loads(self.manifest_path.read_text())
-        for position, entry in enumerate(raw["snapshots"]["011"]["canonical_migrations"]):
+        for position, entry in enumerate(raw["snapshots"]["012"]["canonical_migrations"]):
             data = b"x" * authority.MAX_MIGRATION_BYTES if position < 4 else b""
             (self.db / entry["filename"]).write_bytes(data)
             entry["sha256"] = (
@@ -821,12 +824,12 @@ class FilesystemAuthorityTests(AuthorityFixture):
         with mock.patch.object(authority, "_read_regular_at", side_effect=record):
             result = self.file_audit()
         self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_VERIFIED)
-        successors = [entry["filename"] for entry in raw["snapshots"]["011"]["canonical_migrations"][4:]]
+        successors = [entry["filename"] for entry in raw["snapshots"]["012"]["canonical_migrations"][4:]]
         self.assertTrue(all(name not in calls for name in successors))
 
     def test_exhausted_budget_rejects_nonempty_replacement_without_opening(self):
         raw = self.configure_exact_cumulative_boundary()
-        target = self.db / raw["snapshots"]["011"]["canonical_migrations"][4]["filename"]
+        target = self.db / raw["snapshots"]["012"]["canonical_migrations"][4]["filename"]
         calls = []
         original = authority._read_regular_at
 
@@ -846,8 +849,8 @@ class FilesystemAuthorityTests(AuthorityFixture):
 
     def test_exhausted_budget_rejects_incorrect_empty_checksum_without_opening(self):
         raw = self.configure_exact_cumulative_boundary()
-        target = self.db / raw["snapshots"]["011"]["canonical_migrations"][4]["filename"]
-        raw["snapshots"]["011"]["canonical_migrations"][4]["sha256"] = "0" * 64
+        target = self.db / raw["snapshots"]["012"]["canonical_migrations"][4]["filename"]
+        raw["snapshots"]["012"]["canonical_migrations"][4]["sha256"] = "0" * 64
         self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
         calls = []
         original = authority._read_regular_at
@@ -867,7 +870,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
         for case in cases:
             with self.subTest(case=case):
                 raw = self.configure_exact_cumulative_boundary()
-                target = self.db / raw["snapshots"]["011"]["canonical_migrations"][4]["filename"]
+                target = self.db / raw["snapshots"]["012"]["canonical_migrations"][4]["filename"]
                 external_link = self.root / "zero-successor-hard-link"
                 calls = []
                 original = authority._read_regular_at
@@ -906,7 +909,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
 
     def test_cumulative_migration_limit_rejects_first_excess_without_later_reads(self):
         raw = json.loads(self.manifest_path.read_text())
-        for position, entry in enumerate(raw["snapshots"]["011"]["canonical_migrations"]):
+        for position, entry in enumerate(raw["snapshots"]["012"]["canonical_migrations"]):
             data = b"x" * authority.MAX_MIGRATION_BYTES if position < 4 else b"x"
             (self.db / entry["filename"]).write_bytes(data)
             entry["sha256"] = hashlib.sha256(data).hexdigest()
@@ -922,12 +925,12 @@ class FilesystemAuthorityTests(AuthorityFixture):
             result = self.file_audit()
         self.assertEqual(result.status, authority.AuditStatus.MIGRATION_FILES_INVALID)
         self.assertIn("migration_size_invalid", {item.code for item in result.diagnostics})
-        self.assertNotIn(raw["snapshots"]["011"]["canonical_migrations"][4]["filename"], calls)
-        self.assertNotIn(raw["snapshots"]["011"]["canonical_migrations"][5]["filename"], calls)
+        self.assertNotIn(raw["snapshots"]["012"]["canonical_migrations"][4]["filename"], calls)
+        self.assertNotIn(raw["snapshots"]["012"]["canonical_migrations"][5]["filename"], calls)
 
     def test_cumulative_accounting_rejects_replacement_before_read(self):
         raw = json.loads(self.manifest_path.read_text())
-        for position, entry in enumerate(raw["snapshots"]["011"]["canonical_migrations"]):
+        for position, entry in enumerate(raw["snapshots"]["012"]["canonical_migrations"]):
             if position < 4:
                 data = b"x" * (authority.MAX_MIGRATION_BYTES - 1)
             elif position == 4:
@@ -937,7 +940,7 @@ class FilesystemAuthorityTests(AuthorityFixture):
             (self.db / entry["filename"]).write_bytes(data)
             entry["sha256"] = hashlib.sha256(data).hexdigest()
         self.manifest_path.write_text(json.dumps(raw), encoding="utf-8")
-        target = self.db / raw["snapshots"]["011"]["canonical_migrations"][4]["filename"]
+        target = self.db / raw["snapshots"]["012"]["canonical_migrations"][4]["filename"]
 
         result = authority._audit_migration_files_at(
             self.db,

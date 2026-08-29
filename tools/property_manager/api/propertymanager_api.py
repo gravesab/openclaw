@@ -36,6 +36,7 @@ ATTACHMENTS_ROOT = os.environ.get(
 )
 
 logger = logging.getLogger("propertymanager_api")
+EXPECTED_SCHEMA_VERSION = "012"
 
 TASK_COLUMNS = """
     id, area, item, category_name, priority, frequency,
@@ -310,8 +311,8 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     return enriched
 
 
-def _probe_postgres_and_schema() -> tuple[bool, bool]:
-    """Return (postgres_reachable, schema_available). Never raises."""
+def _probe_postgres_and_schema() -> tuple[bool, bool, bool]:
+    """Return reachability, base-schema availability, and verified 012 status."""
     try:
         row = pm_db.execute_one_json(
             """
@@ -319,27 +320,96 @@ def _probe_postgres_and_schema() -> tuple[bool, bool]:
                 to_regclass('propertymanager.assets')::text AS assets_table,
                 to_regclass('propertymanager.asset_meter')::text AS meter_table,
                 to_regclass('propertymanager.maintenance_tasks')::text AS tasks_table,
-                to_regclass('propertymanager.maintenance_proposals')::text AS proposals_table
+                to_regclass('propertymanager.maintenance_proposals')::text AS proposals_table,
+                (
+                    SELECT count(*) = 8
+                    FROM information_schema.tables
+                    WHERE table_schema = 'propertymanager'
+                      AND table_name IN (
+                          'asset_manual', 'asset_manual_version', 'asset_manual_chunk',
+                          'asset_manual_state_event', 'maintenance_attachment_operations',
+                          'maintenance_task_intake_events', 'maintenance_task_photos',
+                          'schema_migrations'
+                      )
+                ) AS required_tables,
+                (
+                    SELECT count(*) = 8
+                    FROM information_schema.columns
+                    WHERE table_schema = 'propertymanager'
+                      AND table_name = 'maintenance_tasks'
+                      AND column_name IN (
+                          'intake_state', 'submitted_by', 'submitted_at', 'triaged_by',
+                          'triaged_at', 'triage_reason', 'converted_task_id',
+                          'intake_idempotency_key'
+                      )
+                ) AS intake_columns,
+                (
+                    SELECT count(*) = 11
+                    FROM information_schema.columns
+                    WHERE table_schema = 'propertymanager'
+                      AND table_name = 'maintenance_task_photos'
+                      AND column_name IN (
+                          'id', 'task_id', 'file_name', 'storage_path', 'created_at',
+                          'original_file_name', 'content_type', 'byte_size', 'sha256',
+                          'content', 'sanitized_at'
+                      )
+                ) AS photo_columns,
+                (
+                    SELECT count(*) = 5
+                    FROM pg_indexes
+                    WHERE schemaname = 'propertymanager'
+                      AND indexname IN (
+                          'asset_manual_version_one_active_idx',
+                          'asset_manual_chunk_search_idx',
+                          'maintenance_tasks_work_request_idempotency_idx',
+                          'maintenance_attachment_operations_allocation_idempotency_idx',
+                          'maintenance_task_photos_task_file_name_uidx'
+                      )
+                ) AS required_indexes
             """
         )
         if row is None:
-            return True, False
+            return True, False, False
         schema_ok = bool(
             row.get("assets_table")
             and row.get("meter_table")
             and row.get("tasks_table")
             and row.get("proposals_table")
         )
-        return True, schema_ok
+        required_objects = bool(
+            row.get("required_tables")
+            and row.get("intake_columns")
+            and row.get("photo_columns")
+            and row.get("required_indexes")
+        )
+        if not (schema_ok and required_objects):
+            return True, schema_ok, False
+        marker = pm_db.execute_one_json(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM propertymanager.schema_migrations
+                WHERE version = %s
+            ) AS migration_applied
+            """,
+            (EXPECTED_SCHEMA_VERSION,),
+        )
+        return True, schema_ok, bool(marker and marker.get("migration_applied"))
     except Exception:
         logger.exception("health check: postgres/schema probe failed")
-        return False, False
+        return False, False, False
 
 
 @app.get("/health")
 def health():
-    postgres_reachable, schema_available = _probe_postgres_and_schema()
-    healthy = postgres_reachable and schema_available
+    postgres_reachable, schema_available, schema_current = _probe_postgres_and_schema()
+    healthy = postgres_reachable and schema_available and schema_current
+    if schema_current:
+        schema_contract_status = "migration_012_applied"
+    elif postgres_reachable:
+        schema_contract_status = "migration_012_not_verified"
+    else:
+        schema_contract_status = "unavailable"
     body = {
         "status": "ok" if healthy else "degraded",
         "service": "propertymanager-api",
@@ -348,8 +418,8 @@ def health():
         "postgres_reachable": postgres_reachable,
         "schema_available": schema_available,
         "db_mode": "docker_exec" if pm_db.use_docker() else "tcp",
-        "schema_version": "009",
-        "attachments_root": ATTACHMENTS_ROOT,
+        "schema_version": EXPECTED_SCHEMA_VERSION if schema_current else None,
+        "schema_contract_status": schema_contract_status,
         "max_content_length": MAX_UPLOAD_BYTES,
         **auth_status(),
     }

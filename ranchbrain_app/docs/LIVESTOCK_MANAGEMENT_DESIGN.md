@@ -68,20 +68,20 @@ Future after separate approval:
 Tenant --< LivestockAnimal --< AnimalHerdAssignment >-- Herd
 ```
 
-| Entity | Required fields | Rules |
-| --- | --- | --- |
-| `livestock_animals` | `id`, `tenant_id`, `display_name`, `species_code`, `production_type_code`, optional `breed_id`, `status`, audit fields | Ranch OS record ownership is immutable outside a future transfer workflow. Classification codes must resolve through the approved catalog. |
-| `animal_identifiers` | `id`, `tenant_id`, `animal_id`, `identifier_type`, `value`, `normalized_value`, `status`, `effective_at`, `retired_at`, audit fields | Active identifiers use a tenant-scoped partial unique constraint on `(tenant_id, identifier_type, normalized_value)`. |
-| `livestock_lifecycle_events` | `id`, `tenant_id`, `animal_id`, `event_type`, `occurred_at`, `recorded_at`, actor and audit fields | Only routine append-only operational events are in the first slice. |
-| `livestock_care_conditions` | `id`, `tenant_id`, `animal_id`, condition reference or recorded description, status, onset time, provenance, audit fields | Represents veterinary conditions in the livestock domain. Condition history remains auditable. |
-| `livestock_care_events` | `id`, `tenant_id`, `animal_id`, optional `condition_id`, `event_type`, `occurred_at`, `recorded_at`, actor, provenance, optional `supersedes_event_id` | Event types include observation, treatment, surgery, vaccination, and medication administration. Events are immutable. |
-| `livestock_care_schedules` | `id`, `tenant_id`, animal or future herd target, planned care type, due window, status, provenance, audit fields | A schedule is an operational plan, not proof that care occurred; completion creates a distinct care event. |
-| `livestock_input_plans` | `id`, `tenant_id`, animal or future herd target, input type, planned quantity and unit, schedule, provenance, audit fields | Input types include feed, hay, mineral, supplement, and approved future catalog entries. |
-| `livestock_input_allocations` | `id`, `tenant_id`, input-plan reference, animal or future herd target, quantity and unit, allocated time, supplier or batch reference when applicable, provenance | Allocation is an authorized operational record, not a Finance posting. |
-| `livestock_input_consumption` | `id`, `tenant_id`, allocation or input-plan reference, animal or future herd target, quantity and unit, observed time, provenance, optional `supersedes_event_id` | Consumption is immutable operational history; corrections supersede rather than overwrite. |
-| `livestock_cost_attributions` | `id`, `tenant_id`, animal, future herd, input, or care-event target; amount, currency, cost basis, source/provenance, optional Finance reference, audit fields | An operational attribution only. It never creates a bill, payment, budget, tax treatment, or accounting entry. |
-| `herds` | Deferred | Herd semantics require separate approval. |
-| `animal_herd_assignments` | Deferred | Effective-time, overlap, and one-active-assignment rules require separate approval. |
+| Entity                        | Required fields                                                                                                                                                   | Rules                                                                                                                                      |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| `livestock_animals`           | `id`, `tenant_id`, `display_name`, `species_code`, `production_type_code`, optional `breed_id`, `status`, audit fields                                            | Ranch OS record ownership is immutable outside a future transfer workflow. Classification codes must resolve through the approved catalog. |
+| `animal_identifiers`          | `id`, `tenant_id`, `animal_id`, `identifier_type`, `value`, `normalized_value`, `status`, `effective_at`, `retired_at`, audit fields                              | Active identifiers use a tenant-scoped partial unique constraint on `(tenant_id, identifier_type, normalized_value)`.                      |
+| `livestock_lifecycle_events`  | `id`, `tenant_id`, `animal_id`, `event_type`, `occurred_at`, `recorded_at`, actor and audit fields                                                                | Only routine append-only operational events are in the first slice.                                                                        |
+| `livestock_care_conditions`   | `id`, `tenant_id`, `animal_id`, condition reference or recorded description, status, onset time, provenance, audit fields                                         | Represents veterinary conditions in the livestock domain. Condition history remains auditable.                                             |
+| `livestock_care_events`       | `id`, `tenant_id`, `animal_id`, optional `condition_id`, `event_type`, `occurred_at`, `recorded_at`, actor, provenance, optional `supersedes_event_id`            | Event types include observation, treatment, surgery, vaccination, and medication administration. Events are immutable.                     |
+| `livestock_care_schedules`    | `id`, `tenant_id`, animal or future herd target, planned care type, due window, status, provenance, audit fields                                                  | A schedule is an operational plan, not proof that care occurred; completion creates a distinct care event.                                 |
+| `livestock_input_plans`       | `id`, `tenant_id`, animal or future herd target, input type, planned quantity and unit, schedule, provenance, audit fields                                        | Input types include feed, hay, mineral, supplement, and approved future catalog entries.                                                   |
+| `livestock_input_allocations` | `id`, `tenant_id`, input-plan reference, animal or future herd target, quantity and unit, allocated time, supplier or batch reference when applicable, provenance | Allocation is an authorized operational record, not a Finance posting.                                                                     |
+| `livestock_input_consumption` | `id`, `tenant_id`, allocation or input-plan reference, animal or future herd target, quantity and unit, observed time, provenance, optional `supersedes_event_id` | Consumption is immutable operational history; corrections supersede rather than overwrite.                                                 |
+| `livestock_cost_attributions` | `id`, `tenant_id`, animal, future herd, input, or care-event target; amount, currency, cost basis, source/provenance, optional Finance reference, audit fields    | An operational attribution only. It never creates a bill, payment, budget, tax treatment, or accounting entry.                             |
+| `herds`                       | Deferred                                                                                                                                                          | Herd semantics require separate approval.                                                                                                  |
+| `animal_herd_assignments`     | Deferred                                                                                                                                                          | Effective-time, overlap, and one-active-assignment rules require separate approval.                                                        |
 
 The initial status vocabulary is `active` and `archived`. `sold`, `deceased`,
 and `transferred` are not first-slice statuses. Sale and death events require
@@ -95,11 +95,11 @@ The Livestock Management UI and domain API must use controlled catalog values.
 Neither may accept arbitrary free-text animal type, species, production type,
 or breed values that bypass the approved catalog.
 
-| Classification | Initial dropdown values | Rules |
-| --- | --- | --- |
-| Species | `chicken`, `goat`, `bison`, `cattle`, `sheep`, `horse` | `species_code` is required and stored as a stable catalog code. Future entries require an approved catalog change. |
-| Production type | `beef`, `dairy`, `layer`, `broiler`, `breeding`, `companion` | `production_type_code` is required and must be an allowed catalog value for the selected species. Future entries require an approved catalog change. |
-| Breed | Optional catalog selection | A breed belongs to one species and can be selected only after its species is selected. A missing catalog entry remains unset; it is not replaced with free text. |
+| Classification  | Initial dropdown values                                       | Rules                                                                                                                                                            |
+| --------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Species         | `chicken`, `goat`, `bison`, `cattle`, `sheep`, `pig`, `horse` | `species_code` is required and stored as a stable catalog code. Future entries require an approved catalog change.                                               |
+| Production type | `beef`, `dairy`, `layer`, `broiler`, `breeding`, `companion`  | `production_type_code` is required and must be an allowed catalog value for the selected species. Future entries require an approved catalog change.             |
+| Breed           | Optional catalog selection                                    | A breed belongs to one species and can be selected only after its species is selected. A missing catalog entry remains unset; it is not replaced with free text. |
 
 Catalog records use stable codes and display labels. A future catalog addition,
 retirement, or label correction must preserve historical animal classifications
@@ -115,19 +115,19 @@ routine-lifecycle rows are enabled in the foundational first slice; care, input,
 and cost actions remain unavailable until their vertical-slice requirements in
 **DEV rollout and proof** are met.
 
-| Capability | Owner | Manager | Viewer |
-| --- | --- | --- | --- |
-| List, search, and view livestock records | Yes | Yes | Yes |
-| Create or update animals and identifiers | Yes | Yes | No |
-| Record routine lifecycle events | Yes | Yes | No |
-| Record veterinary observations or routine care | Yes | Yes, when explicitly granted | No |
-| Record medication administration, vaccination, or surgery | Yes, with explicit capability and required confirmation | Only with explicit capability and required confirmation | No |
-| Create or revise care schedules and input plans | Yes | Yes, when explicitly granted | No |
-| Record input allocation or consumption | Yes | Yes, when explicitly granted | No |
-| Create a cost attribution or Finance-record reference | Yes, with explicit capability and confirmation where policy requires | Only with explicit capability and confirmation where policy requires | No |
-| Archive records | Yes | No | No |
-| Export tenant livestock data | Deferred; owner-only when separately enabled | Deferred; owner-only when separately enabled | No |
-| Record sale, death, or transfer | Deferred | Deferred | No |
+| Capability                                                | Owner                                                                | Manager                                                              | Viewer |
+| --------------------------------------------------------- | -------------------------------------------------------------------- | -------------------------------------------------------------------- | ------ |
+| List, search, and view livestock records                  | Yes                                                                  | Yes                                                                  | Yes    |
+| Create or update animals and identifiers                  | Yes                                                                  | Yes                                                                  | No     |
+| Record routine lifecycle events                           | Yes                                                                  | Yes                                                                  | No     |
+| Record veterinary observations or routine care            | Yes                                                                  | Yes, when explicitly granted                                         | No     |
+| Record medication administration, vaccination, or surgery | Yes, with explicit capability and required confirmation              | Only with explicit capability and required confirmation              | No     |
+| Create or revise care schedules and input plans           | Yes                                                                  | Yes, when explicitly granted                                         | No     |
+| Record input allocation or consumption                    | Yes                                                                  | Yes, when explicitly granted                                         | No     |
+| Create a cost attribution or Finance-record reference     | Yes, with explicit capability and confirmation where policy requires | Only with explicit capability and confirmation where policy requires | No     |
+| Archive records                                           | Yes                                                                  | No                                                                   | No     |
+| Export tenant livestock data                              | Deferred; owner-only when separately enabled                         | Deferred; owner-only when separately enabled                         | No     |
+| Record sale, death, or transfer                           | Deferred                                                             | Deferred                                                             | No     |
 
 Medication, surgery, and cost-sensitive actions must have operation-specific
 capability checks, confirmation classification, provenance, and audit evidence.
@@ -141,8 +141,8 @@ Every repository, service, worker, search query, attachment operation, export, c
 ## Lifecycle and data integrity
 
 Current operational state is a projection of authorized lifecycle history, not a
-free-form overwrite. The first slice accepts only allowlisted routine
-operational event types. Each event records `occurred_at` as a timezone-aware
+free-form overwrite. The first slice accepts only `intake`, `tagged`, and
+`weight_recorded` routine operational event types. Each event records `occurred_at` as a timezone-aware
 instant and `recorded_at` as the authoritative server timestamp. Event ordering
 uses `occurred_at`, then `recorded_at`, then immutable event ID as a stable
 tiebreaker.

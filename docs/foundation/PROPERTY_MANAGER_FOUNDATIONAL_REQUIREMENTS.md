@@ -230,12 +230,18 @@ Requirements:
 
 ### Maintenance completion and meter capture
 
-When completing a meter-scheduled maintenance task:
+When completing any maintenance task linked to an activated asset meter:
 
 1. The system must **display the current meter reading** (from API, not stale cache).
 2. The operator must **confirm the displayed reading** or **enter a new reading**.
 3. Silent default to a stale or cached meter value is **prohibited**.
 4. Completion creates or links an `asset_meter_reading` with `entry_method=completion` and captures `meter_value_at_completion` on the completion record.
+5. A numeric reading of `0` is valid; blank or malformed input is not.
+
+If the linked asset has only a proposed meter, completion must stop and require
+the operator to activate that meter explicitly. Completion must never activate a
+proposed meter silently. Capturing a meter on a calendar-scheduled task records
+the operational reading but does not promote or alter its calendar schedule.
 
 ---
 

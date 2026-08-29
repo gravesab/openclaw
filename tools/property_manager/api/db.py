@@ -409,14 +409,24 @@ def execute_top_level_one_json(query: str, params: Any = None) -> dict[str, Any]
     PostgreSQL requires data-modifying CTEs to be attached to the top-level
     statement, so callers must make their final SELECT emit ``row_to_json``.
     """
-    sql = _mogrify(query, params)
-    result = _docker_psql(sql)
-    if result.returncode != 0:
-        _raise_psql_failure(result)
-    text = (result.stdout or "").strip()
-    if not text:
-        return None
-    payload = json.loads(text)
+    if use_docker():
+        sql = _mogrify(query, params)
+        result = _docker_psql(sql)
+        if result.returncode != 0:
+            _raise_psql_failure(result)
+        text = (result.stdout or "").strip()
+        if not text:
+            return None
+        payload = json.loads(text)
+    else:
+        with connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, params)
+                row = cursor.fetchone()
+            connection.commit()
+        if row is None:
+            return None
+        payload = next(iter(row.values())) if isinstance(row, dict) else row[0]
     if not isinstance(payload, dict):
         return None
     return {key: _jsonable(value) for key, value in payload.items()}

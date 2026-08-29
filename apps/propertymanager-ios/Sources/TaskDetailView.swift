@@ -5,8 +5,7 @@ struct TaskDetailView: View {
     @Environment(\.dismiss) private var dismiss
     let taskID: UUID
 
-    @State private var note = ""
-    @State private var showCompleteConfirm = false
+    @State private var showCompletionSheet = false
     @State private var showDeleteConfirm = false
     @State private var showEdit = false
 
@@ -145,10 +144,8 @@ struct TaskDetailView: View {
                     }
 
                     Section("Mark complete") {
-                        TextField("Optional completion note", text: $note, axis: .vertical)
-                            .lineLimit(3...6)
                         Button {
-                            showCompleteConfirm = true
+                            showCompletionSheet = true
                         } label: {
                             if store.isCompleting {
                                 ProgressView()
@@ -188,18 +185,12 @@ struct TaskDetailView: View {
                     TaskEditView(task: task)
                         .environmentObject(store)
                 }
-                .confirmationDialog(
-                    "Mark \(task.item) done?",
-                    isPresented: $showCompleteConfirm,
-                    titleVisibility: .visible
-                ) {
-                    Button("Mark Done", role: .none) {
-                        Task {
-                            _ = await store.complete(task: task, note: note)
-                            note = ""
-                        }
+                .sheet(isPresented: $showCompletionSheet) {
+                    TaskCompletionSheet(task: task) {
+                        showCompletionSheet = false
+                        dismiss()
                     }
-                    Button("Cancel", role: .cancel) {}
+                    .environmentObject(store)
                 }
                 .confirmationDialog(
                     "Delete \(task.item)?",

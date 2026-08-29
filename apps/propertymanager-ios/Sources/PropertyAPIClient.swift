@@ -88,6 +88,13 @@ final class PropertyAPIClient {
         return try decoder.decode(APIHealth.self, from: data)
     }
 
+    func authCheck() async throws {
+        let url = try makeURL("/auth/check")
+        let request = authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+    }
+
     // MARK: - Categories
 
     func fetchCategories() async throws -> [MaintenanceCategory] {
@@ -135,15 +142,20 @@ final class PropertyAPIClient {
     }
 
     func replaceParts(taskID: UUID, parts: [[String: Any]]) async throws -> MaintenanceTask {
-        let url = try makeURL("/tasks/\(taskID.uuidString)/parts")
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        applyAuth(to: &request)
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["parts": parts])
+        let request = try replacePartsRequest(taskID: taskID, parts: parts)
         let (data, response) = try await URLSession.shared.data(for: request)
         try validate(response, data: data)
         return try decoder.decode(MaintenanceTask.self, from: data)
+    }
+
+    func replacePartsRequest(taskID: UUID, parts: [[String: Any]]) throws -> URLRequest {
+        let url = try makeURL("/tasks/\(taskID.uuidString)/parts")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PUT"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: parts)
+        return request
     }
 
     func deleteTask(id: UUID) async throws {

@@ -1231,8 +1231,19 @@ def complete_task(task_id: str):
             meter_value = parse_decimal(meter_value_raw, field="meter_value_at_completion")
         except ValueError as exc:
             return validation_error(str(exc), field="meter_value_at_completion")
+        if not meter_value.is_finite() or meter_value < 0:
+            return validation_error(
+                "meter_value_at_completion must be a finite nonnegative number",
+                field="meter_value_at_completion",
+            )
 
-    confirm_current = bool(payload.get("confirm_current_meter"))
+    confirm_current_raw = payload.get("confirm_current_meter", False)
+    if not isinstance(confirm_current_raw, bool):
+        return validation_error(
+            "confirm_current_meter must be a boolean",
+            field="confirm_current_meter",
+        )
+    confirm_current = confirm_current_raw
 
     try:
         meter_result = ms.complete_task_meter(
@@ -1254,48 +1265,44 @@ def complete_task(task_id: str):
     elif meter_value is not None:
         meter_val_db = decimal_to_db(meter_value)
 
-    statements: list[tuple] = [
-        (
-            """
-            INSERT INTO propertymanager.maintenance_completions
-                (id, task_id, completed_at, note, meter_value_at_completion, meter_reading_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (
-                completion_id,
-                task_id,
-                completed_at,
-                note,
-                meter_val_db,
-                (meter_result or {}).get("meter_reading_id"),
-            ),
-        ),
-    ]
-
     if meter_result and meter_result.get("applied_meter"):
-        statements.append(
+        try:
+            applied = ms.apply_task_completion_transaction(
+                task_id=task_id,
+                completion_id=completion_id,
+                completed_at=completed_at,
+                next_due=next_due,
+                note=note,
+                meter_result=meter_result,
+                operator_identity=getattr(g, "operator_identity", None),
+                integration_identity=getattr(g, "integration_identity", None),
+            )
+        except RuntimeError as exc:
+            return error_response("DB_ERROR", str(exc), status=500)
+        if not applied:
+            return error_response(
+                "COMPLETION_CONFLICT",
+                "Task or meter changed before completion; reload and confirm the current reading.",
+                status=409,
+            )
+    else:
+        statements: list[tuple] = [
             (
                 """
-                UPDATE propertymanager.maintenance_tasks
-                SET last_done = %s,
-                    next_due = %s,
-                    last_done_meter_value = %s,
-                    next_due_meter_value = %s,
-                    result_notes = COALESCE(%s, result_notes),
-                    updated_at = now()
-                WHERE id = %s
+                INSERT INTO propertymanager.maintenance_completions
+                    (id, task_id, completed_at, note, meter_value_at_completion, meter_reading_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    completed_at,
-                    next_due,
-                    meter_val_db,
-                    meter_result.get("next_due_meter_value"),
-                    note,
+                    completion_id,
                     task_id,
+                    completed_at,
+                    note,
+                    meter_val_db,
+                    (meter_result or {}).get("meter_reading_id"),
                 ),
-            )
-        )
-    else:
+            ),
+        ]
         statements.append(
             (
                 """
@@ -1310,10 +1317,10 @@ def complete_task(task_id: str):
             )
         )
 
-    try:
-        pm_db.execute_script(statements)
-    except RuntimeError as exc:
-        return error_response("DB_ERROR", str(exc), status=500)
+        try:
+            pm_db.execute_script(statements)
+        except RuntimeError as exc:
+            return error_response("DB_ERROR", str(exc), status=500)
 
     updated = pm_db.execute_one_json(
         f"""
@@ -1331,6 +1338,13 @@ def complete_task(task_id: str):
 
 register_asset_routes(app)
 register_mapping_routes(app)
+
+
+@app.get("/auth/check")
+@auth_required()
+def auth_check():
+    """Verify the configured runtime credential without exposing identity details."""
+    return jsonify({"authenticated": True})
 
 
 if __name__ == "__main__":

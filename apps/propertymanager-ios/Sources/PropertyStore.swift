@@ -179,6 +179,7 @@ final class PropertyStore: ObservableObject {
         errorMessage = nil
         statusMessage = "Testing connection…"
         do {
+            try await client.authCheck()
             let health = try await client.health()
             // Refresh without wiping the connection probe message until the end.
             await refresh(clearStatus: false)

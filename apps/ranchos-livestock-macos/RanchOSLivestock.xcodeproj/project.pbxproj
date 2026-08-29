@@ -1,0 +1,420 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		33ECEE1751A8A518AAA2E479 /* LivestockFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */; };
+		6AD78D1FE6581C440F3F3BD9 /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
+		9D35B073E35A22AE1F2F7558 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
+		C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
+		CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		468802BCD0A6F345A0D5DFC4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 4915C77E17BC66628A7DC298 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 55761CE9C6F69E36DE5E949C;
+			remoteInfo = RanchOSLivestock;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchOSLivestock.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockFoundationTests.swift; sourceTree = "<group>"; };
+		2A2860A1F261143CB11FF3FE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockApp.swift; sourceTree = "<group>"; };
+		B36A1F34997943B0E0F0810E /* LivestockRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockRepository.swift; sourceTree = "<group>"; };
+		B868FD8D507ED4A71444C1CD /* RanchOSLivestockTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSLivestockTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockModels.swift; sourceTree = "<group>"; };
+		FD2F52D32BEAB94A8513033F /* LivestockViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockViews.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		E349D1CE995707BFF27DC0EA = {
+			isa = PBXGroup;
+			children = (
+				E944E450123AAC69A3E4DF1E /* Sources */,
+				FF9B939E7CFC78BBB96F85F4 /* Tests */,
+				EE81580B74D33383E801E675 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		E944E450123AAC69A3E4DF1E /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				2A2860A1F261143CB11FF3FE /* Info.plist */,
+				D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */,
+				B36A1F34997943B0E0F0810E /* LivestockRepository.swift */,
+				FD2F52D32BEAB94A8513033F /* LivestockViews.swift */,
+				6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		EE81580B74D33383E801E675 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */,
+				B868FD8D507ED4A71444C1CD /* RanchOSLivestockTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		FF9B939E7CFC78BBB96F85F4 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		55761CE9C6F69E36DE5E949C /* RanchOSLivestock */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 2D22F6A85FB600D01984CAC7 /* Build configuration list for PBXNativeTarget "RanchOSLivestock" */;
+			buildPhases = (
+				74A62444987654E76743E077 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOSLivestock;
+			packageProductDependencies = (
+			);
+			productName = RanchOSLivestock;
+			productReference = 00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */;
+			productType = "com.apple.product-type.application";
+		};
+		8CB561BD755C93AEC63C80F6 /* RanchOSLivestockTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B4C55A315D64F0B4057980AE /* Build configuration list for PBXNativeTarget "RanchOSLivestockTests" */;
+			buildPhases = (
+				916C36B2C420B93CEE52C3F2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				D115014A367ECBEE59E822F3 /* PBXTargetDependency */,
+			);
+			name = RanchOSLivestockTests;
+			packageProductDependencies = (
+			);
+			productName = RanchOSLivestockTests;
+			productReference = B868FD8D507ED4A71444C1CD /* RanchOSLivestockTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		4915C77E17BC66628A7DC298 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					55761CE9C6F69E36DE5E949C = {
+						DevelopmentTeam = ZYJVHJWT3P;
+						ProvisioningStyle = Automatic;
+					};
+					8CB561BD755C93AEC63C80F6 = {
+						DevelopmentTeam = ZYJVHJWT3P;
+					};
+				};
+			};
+			buildConfigurationList = 56FE89212ED9DA79898211F1 /* Build configuration list for PBXProject "RanchOSLivestock" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = E349D1CE995707BFF27DC0EA;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = EE81580B74D33383E801E675 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				55761CE9C6F69E36DE5E949C /* RanchOSLivestock */,
+				8CB561BD755C93AEC63C80F6 /* RanchOSLivestockTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		74A62444987654E76743E077 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6AD78D1FE6581C440F3F3BD9 /* LivestockModels.swift in Sources */,
+				C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */,
+				CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */,
+				9D35B073E35A22AE1F2F7558 /* RanchOSLivestockApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		916C36B2C420B93CEE52C3F2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				33ECEE1751A8A518AAA2E479 /* LivestockFoundationTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		D115014A367ECBEE59E822F3 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 55761CE9C6F69E36DE5E949C /* RanchOSLivestock */;
+			targetProxy = 468802BCD0A6F345A0D5DFC4 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		02EB20BD63B2B97B5830F59D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Release;
+		};
+		1013FADC16F14B2B9B526798 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.dev;
+				PRODUCT_NAME = RanchOSLivestock;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		4F72CE9E16FD42FE6E9335E1 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.dev.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/RanchOSLivestock.app/Contents/MacOS/RanchOSLivestock";
+			};
+			name = Debug;
+		};
+		6E0B92D20A3503E3A09714F2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.dev;
+				PRODUCT_NAME = RanchOSLivestock;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		AA63A29DFE1213411CE29BC6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.dev.tests;
+				SDKROOT = macosx;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/RanchOSLivestock.app/Contents/MacOS/RanchOSLivestock";
+			};
+			name = Release;
+		};
+		BE6F35D6D626E33409D6B33D /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = macosx;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.10;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		2D22F6A85FB600D01984CAC7 /* Build configuration list for PBXNativeTarget "RanchOSLivestock" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1013FADC16F14B2B9B526798 /* Debug */,
+				6E0B92D20A3503E3A09714F2 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		56FE89212ED9DA79898211F1 /* Build configuration list for PBXProject "RanchOSLivestock" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BE6F35D6D626E33409D6B33D /* Debug */,
+				02EB20BD63B2B97B5830F59D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		B4C55A315D64F0B4057980AE /* Build configuration list for PBXNativeTarget "RanchOSLivestockTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				4F72CE9E16FD42FE6E9335E1 /* Debug */,
+				AA63A29DFE1213411CE29BC6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 4915C77E17BC66628A7DC298 /* Project object */;
+}

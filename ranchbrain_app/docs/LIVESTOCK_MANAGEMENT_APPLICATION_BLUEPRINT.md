@@ -20,18 +20,18 @@ request a tenant but cannot establish access. A user with multiple memberships
 must select an authorized tenant. Missing, invalid, stale, or unauthorized
 context fails closed.
 
-| Screen | Purpose | First-slice availability |
-| --- | --- | --- |
-| Herd overview | Shows authorized herd counts and herd indicators for active care, upcoming treatments, feed needs, recent surgeries, and cost trends. | Deferred until the herd and assignment contract is approved. |
-| Animal list | Lists authorized animals with status, controlled classification, identifier summary, filtering, and pagination. | Required. |
-| Animal detail | Shows one authorized animal, identifiers, current projected status, routine lifecycle history, care history, enabled input activity, cost-attribution references, and provenance. | Animal and lifecycle facts required; care, input, and cost panels require their vertical-slice gates. |
-| Add/edit animal | Creates or updates authorized animal identity and controlled classifications. | Required for owners and managers. |
-| Lifecycle history | Shows immutable routine events and their corrections or supersession links. | Required. |
-| Care history and schedule | Shows veterinary observations, conditions, treatments, surgeries, vaccinations, medication administration, due care, immutable corrections, and permitted attachments. | Deferred until the care vertical slice meets its security and audit gates. |
-| Feed and input operations | Shows feed, hay, mineral, supplement, and approved input plans, allocations, consumption, supplier or batch references, and authorized animal or herd attribution. | Deferred until the input vertical slice meets its security and audit gates. |
-| Operational costs | Shows livestock operational-cost attributions, source/provenance, allocation target, trend context, and an optional canonical Finance reference. | Deferred until the cost vertical slice meets its security, confirmation, and Finance-link gates. |
-| Herd assignment | Assigns an animal to a herd and shows placement history. | Deferred until effective-time and overlap rules are approved. |
-| Dashboard | Shows tenant-scoped operational counts, unresolved routine work, and permitted recent activity. | Required only for data available in the first slice. |
+| Screen                    | Purpose                                                                                                                                                                           | First-slice availability                                                                              |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Herd overview             | Shows authorized herd counts and herd indicators for active care, upcoming treatments, feed needs, recent surgeries, and cost trends.                                             | Deferred until the herd and assignment contract is approved.                                          |
+| Animal list               | Lists authorized animals with status, controlled classification, identifier summary, filtering, and pagination.                                                                   | Required.                                                                                             |
+| Animal detail             | Shows one authorized animal, identifiers, current projected status, routine lifecycle history, care history, enabled input activity, cost-attribution references, and provenance. | Animal and lifecycle facts required; care, input, and cost panels require their vertical-slice gates. |
+| Add/edit animal           | Creates or updates authorized animal identity and controlled classifications.                                                                                                     | Required for owners and managers.                                                                     |
+| Lifecycle history         | Shows immutable routine events and their corrections or supersession links.                                                                                                       | Required.                                                                                             |
+| Care history and schedule | Shows veterinary observations, conditions, treatments, surgeries, vaccinations, medication administration, due care, immutable corrections, and permitted attachments.            | Deferred until the care vertical slice meets its security and audit gates.                            |
+| Feed and input operations | Shows feed, hay, mineral, supplement, and approved input plans, allocations, consumption, supplier or batch references, and authorized animal or herd attribution.                | Deferred until the input vertical slice meets its security and audit gates.                           |
+| Operational costs         | Shows livestock operational-cost attributions, source/provenance, allocation target, trend context, and an optional canonical Finance reference.                                  | Deferred until the cost vertical slice meets its security, confirmation, and Finance-link gates.      |
+| Herd assignment           | Assigns an animal to a herd and shows placement history.                                                                                                                          | Deferred until effective-time and overlap rules are approved.                                         |
+| Dashboard                 | Shows tenant-scoped operational counts, unresolved routine work, and permitted recent activity.                                                                                   | Required only for data available in the first slice.                                                  |
 
 The UI must hide or disable unauthorized actions and must not treat that as the
 authorization decision. The domain API independently rejects every disallowed
@@ -47,7 +47,7 @@ The add/edit flow uses catalog-backed dropdowns. It must not expose a free-text
 type, species, production type, or breed field.
 
 1. Species is required. The initial choices are `chicken`, `goat`, `bison`,
-   `cattle`, `sheep`, and `horse`.
+   `cattle`, `sheep`, `pig`, and `horse`.
 2. Production type is required after species selection. The initial choices are
    `beef`, `dairy`, `layer`, `broiler`, `breeding`, and `companion`; the UI
    shows only choices allowed by the selected species.
@@ -80,8 +80,9 @@ tenant user cannot create a personal catalog value as a workaround.
 
 ### Record a routine status change
 
-1. An owner or manager opens an authorized animal detail view and selects an
-   allowlisted routine lifecycle event.
+1. An owner or manager opens an authorized animal detail view and selects one
+   of the first-slice routine lifecycle events: `intake`, `tagged`, or
+   `weight_recorded`.
 2. The UI records the event time as a timezone-aware value and sends it as a
    proposed routine event; it does not patch animal status directly.
 3. The domain API validates the event type, `TenantContext`, ordering, and
@@ -199,11 +200,11 @@ state, or cross-tenant fallback.
 
 Authorization and validation failures use stable, sanitized errors:
 
-| Condition | Result |
-| --- | --- |
-| Missing, malformed, expired, or ambiguous tenant context | Deny with `tenant_context_invalid`. |
-| Selected tenant is not an active membership | Deny with `tenant_not_authorized`. |
-| Active membership lacks the requested read capability | Deny with `livestock_read_forbidden`. |
+| Condition                                                 | Result                                 |
+| --------------------------------------------------------- | -------------------------------------- |
+| Missing, malformed, expired, or ambiguous tenant context  | Deny with `tenant_context_invalid`.    |
+| Selected tenant is not an active membership               | Deny with `tenant_not_authorized`.     |
+| Active membership lacks the requested read capability     | Deny with `livestock_read_forbidden`.  |
 | Unknown fact family, filter, sort, cursor, or API version | Reject with `livestock_query_invalid`. |
 
 An AI consumer must preserve returned provenance and uncertainty when answering.

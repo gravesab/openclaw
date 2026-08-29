@@ -34,7 +34,7 @@ APPROVED_HASHES = {
     "009_maintenance_proposals.sql": "9a4e8e530042861562a8c521d6b6daaa987b8bfb4baf093b49b70e5a3af4f17a",
     "010_handbook_ingestion_v1.sql": "17ba25449a4f3dc8f1f4137313930bfff6fcd213397493a01bc5bc6035230db5",
     "011_work_request_intake.sql": "d1cf62f1ba92047cc0d5a156158be04422c3e4f1ad01afbf8174ac3b601e4fda",
-    "012_dev_schema_forward_repair.sql": "f9d369a84c18bedf2b68990451bae84963774f398e7f68bf8c4a00f90aa2493f",
+    "012_dev_schema_forward_repair.sql": "a7907cfc520b2cdddd4c0f104d6074b2676733ae41a4e8f670170552852ce59b",
 }
 APPROVED_CONTRACT_HASH = "341d0d2f7543e71bbd3af8d69d9b1349aa7bb58275f15b8cb3f698864498adfd"
 APPROVED_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"

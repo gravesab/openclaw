@@ -10179,7 +10179,7 @@
           "version": "012",
           "order": 10,
           "filename": "012_dev_schema_forward_repair.sql",
-          "sha256": "f9d369a84c18bedf2b68990451bae84963774f398e7f68bf8c4a00f90aa2493f",
+          "sha256": "a7907cfc520b2cdddd4c0f104d6074b2676733ae41a4e8f670170552852ce59b",
           "reapplication_permitted": false
         }
       ],

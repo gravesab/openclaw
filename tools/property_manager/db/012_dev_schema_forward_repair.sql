@@ -6,6 +6,10 @@ BEGIN;
 SELECT pg_advisory_xact_lock(hashtext('propertymanager:012_dev_schema_forward_repair'));
 
 DO $$
+DECLARE
+    byte_size_type text;
+    sha256_type text;
+    invalid_sha256 boolean;
 BEGIN
     IF to_regclass('propertymanager.maintenance_tasks') IS NULL
        OR to_regclass('propertymanager.maintenance_task_parts') IS NULL
@@ -25,6 +29,60 @@ BEGIN
           )
     ) NOT IN (0, 4) THEN
         RAISE EXCEPTION 'migration 012 refuses a partial handbook schema';
+    END IF;
+
+    SELECT format_type(a.atttypid, NULL)
+    INTO byte_size_type
+    FROM pg_attribute a
+    WHERE a.attrelid = 'propertymanager.maintenance_task_photos'::regclass
+      AND a.attname = 'byte_size'
+      AND a.attnum > 0
+      AND NOT a.attisdropped;
+
+    SELECT format_type(a.atttypid, NULL)
+    INTO sha256_type
+    FROM pg_attribute a
+    WHERE a.attrelid = 'propertymanager.maintenance_task_photos'::regclass
+      AND a.attname = 'sha256'
+      AND a.attnum > 0
+      AND NOT a.attisdropped;
+
+    IF byte_size_type IS NOT NULL AND byte_size_type NOT IN ('integer', 'bigint') THEN
+        RAISE EXCEPTION 'migration 012 refuses unsupported photo byte_size type %', byte_size_type;
+    END IF;
+    IF sha256_type IS NOT NULL AND sha256_type NOT IN ('text', 'bytea') THEN
+        RAISE EXCEPTION 'migration 012 refuses unsupported photo sha256 type %', sha256_type;
+    END IF;
+
+    IF byte_size_type IS NOT NULL AND EXISTS (
+        SELECT 1
+        FROM propertymanager.maintenance_task_photos
+        WHERE byte_size < 0
+           OR (byte_size_type = 'bigint' AND byte_size > 2147483647)
+    ) THEN
+        RAISE EXCEPTION 'migration 012 refuses photo byte_size outside canonical integer range';
+    END IF;
+
+    IF sha256_type = 'bytea' THEN
+        EXECUTE
+            'SELECT EXISTS (
+                SELECT 1 FROM propertymanager.maintenance_task_photos
+                WHERE sha256 IS NOT NULL AND octet_length(sha256) <> 32
+            )'
+        INTO invalid_sha256;
+        IF invalid_sha256 THEN
+            RAISE EXCEPTION 'migration 012 refuses malformed binary photo sha256';
+        END IF;
+    ELSIF sha256_type = 'text' THEN
+        EXECUTE
+            'SELECT EXISTS (
+                SELECT 1 FROM propertymanager.maintenance_task_photos
+                WHERE sha256 IS NOT NULL AND sha256 !~ ''^[0-9a-f]{64}$''
+            )'
+        INTO invalid_sha256;
+        IF invalid_sha256 THEN
+            RAISE EXCEPTION 'migration 012 refuses malformed text photo sha256';
+        END IF;
     END IF;
 END
 $$;
@@ -229,14 +287,43 @@ CREATE TABLE propertymanager.maintenance_task_photos_012_new (
     sanitized_at timestamptz
 );
 
-INSERT INTO propertymanager.maintenance_task_photos_012_new (
-    id, task_id, file_name, storage_path, created_at, original_file_name,
-    content_type, byte_size, sha256, content, sanitized_at
-)
-SELECT
-    id, task_id, file_name, storage_path, created_at, original_file_name,
-    content_type, byte_size, sha256, content, sanitized_at
-FROM propertymanager.maintenance_task_photos;
+DO $$
+DECLARE
+    sha256_type text;
+    sha256_expression text;
+BEGIN
+    SELECT format_type(a.atttypid, NULL)
+    INTO sha256_type
+    FROM pg_attribute a
+    WHERE a.attrelid = 'propertymanager.maintenance_task_photos'::regclass
+      AND a.attname = 'sha256'
+      AND a.attnum > 0
+      AND NOT a.attisdropped;
+
+    IF sha256_type = 'bytea' THEN
+        sha256_expression :=
+            'CASE WHEN sha256 IS NULL THEN NULL ELSE encode(sha256, ''hex'') END';
+    ELSIF sha256_type = 'text' THEN
+        sha256_expression := 'sha256';
+    ELSE
+        RAISE EXCEPTION 'migration 012 refuses unsupported photo sha256 type %', sha256_type;
+    END IF;
+
+    EXECUTE format(
+        $copy$
+        INSERT INTO propertymanager.maintenance_task_photos_012_new (
+            id, task_id, file_name, storage_path, created_at, original_file_name,
+            content_type, byte_size, sha256, content, sanitized_at
+        )
+        SELECT
+            id, task_id, file_name, storage_path, created_at, original_file_name,
+            content_type, byte_size::integer, %s, content, sanitized_at
+        FROM propertymanager.maintenance_task_photos
+        $copy$,
+        sha256_expression
+    );
+END
+$$;
 
 DROP TABLE propertymanager.maintenance_task_photos;
 ALTER TABLE propertymanager.maintenance_task_photos_012_new
@@ -304,6 +391,7 @@ DO $$
 DECLARE
     required_tables integer;
     intake_columns integer;
+    canonical_photo_columns integer;
 BEGIN
     SELECT count(*) INTO required_tables
     FROM information_schema.tables
@@ -325,8 +413,26 @@ BEGIN
           'intake_idempotency_key'
       );
 
-    IF required_tables <> 8 OR intake_columns <> 8 THEN
+    SELECT count(*) INTO canonical_photo_columns
+    FROM information_schema.columns
+    WHERE table_schema = 'propertymanager'
+      AND table_name = 'maintenance_task_photos'
+      AND (
+          (column_name = 'byte_size' AND data_type = 'integer')
+          OR (column_name = 'sha256' AND data_type = 'text')
+      );
+
+    IF required_tables <> 8 OR intake_columns <> 8 OR canonical_photo_columns <> 2 THEN
         RAISE EXCEPTION 'migration 012 required-object validation failed';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM propertymanager.maintenance_task_photos
+        WHERE byte_size < 0
+           OR (sha256 IS NOT NULL AND sha256 !~ '^[0-9a-f]{64}$')
+    ) THEN
+        RAISE EXCEPTION 'migration 012 canonical photo validation failed';
     END IF;
 END
 $$;

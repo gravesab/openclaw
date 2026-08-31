@@ -238,6 +238,7 @@ class TaskCompletionTests(unittest.TestCase):
         task = {
             "id": "task",
             "asset_id": "asset",
+            "frequency": "Monthly",
             "warning_days": 7,
             "schedule_kind": "calendar",
             "kind": "Scheduled",
@@ -271,7 +272,35 @@ class TaskCompletionTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         atomic.assert_called_once()
+        self.assertEqual(
+            atomic.call_args.kwargs["next_due"].month,
+            (datetime.now(timezone.utc).month % 12) + 1,
+        )
         split_write.assert_not_called()
+
+    def test_calendar_next_due_uses_frequency_not_warning_window(self):
+        completed_at = datetime(2026, 1, 31, 12, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            self.api.next_calendar_due(completed_at, frequency="Monthly", warning_days=30),
+            datetime(2026, 2, 28, 12, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            self.api.next_calendar_due(completed_at, frequency="Every 2 Weeks", warning_days=30),
+            datetime(2026, 2, 14, 12, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            self.api.next_calendar_due(completed_at, frequency="Yearly", warning_days=30),
+            datetime(2027, 1, 31, 12, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            self.api.next_calendar_due(completed_at, frequency="Every 2 Years", warning_days=30),
+            datetime(2028, 1, 31, 12, tzinfo=timezone.utc),
+        )
+        self.assertEqual(
+            self.api.next_calendar_due(completed_at, frequency="Every 3-4 Months", warning_days=30),
+            datetime(2026, 4, 30, 12, tzinfo=timezone.utc),
+        )
 
     def test_completion_route_rejects_non_boolean_meter_confirmation(self):
         task = {

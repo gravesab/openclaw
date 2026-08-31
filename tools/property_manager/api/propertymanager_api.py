@@ -4,6 +4,8 @@ from __future__ import annotations
 import logging
 import os
 import json
+import re
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -37,6 +39,59 @@ ATTACHMENTS_ROOT = os.environ.get(
 
 logger = logging.getLogger("propertymanager_api")
 EXPECTED_SCHEMA_VERSION = "012"
+
+
+def _add_calendar_months(value: datetime, months: int) -> datetime:
+    """Advance a timestamp by whole calendar months without changing its timezone."""
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    return value.replace(day=min(value.day, monthrange(year, month)[1]), year=year, month=month)
+
+
+def next_calendar_due(
+    completed_at: datetime,
+    *,
+    frequency: str | None,
+    warning_days: int,
+) -> datetime:
+    """Return the next calendar occurrence; warning days are alert thresholds, not cadence."""
+    normalized = " ".join((frequency or "").casefold().split())
+    day_intervals = {
+        "daily": 1,
+        "weekly": 7,
+        "biweekly": 14,
+        "every 2 weeks": 14,
+    }
+    if normalized in day_intervals:
+        return completed_at + timedelta(days=day_intervals[normalized])
+    if normalized == "monthly":
+        return _add_calendar_months(completed_at, 1)
+    if normalized == "quarterly":
+        return _add_calendar_months(completed_at, 3)
+    if normalized in {"semiannual", "semi-annually", "every 6 months"}:
+        return _add_calendar_months(completed_at, 6)
+    if normalized in {"annual", "annually", "yearly"}:
+        return _add_calendar_months(completed_at, 12)
+
+    every_match = re.fullmatch(
+        r"every\s+(\d+)(?:\s*-\s*\d+)?\s+(day|days|week|weeks|month|months|year|years)",
+        normalized,
+    )
+    if every_match:
+        interval = int(every_match.group(1))
+        unit = every_match.group(2)
+        if unit.startswith("day"):
+            return completed_at + timedelta(days=interval)
+        if unit.startswith("week"):
+            return completed_at + timedelta(days=interval * 7)
+        if unit.startswith("month"):
+            return _add_calendar_months(completed_at, interval)
+        return _add_calendar_months(completed_at, interval * 12)
+
+    # Legacy free-text frequencies remain deployable. Preserve their existing
+    # fallback until each is normalized to an explicit cadence.
+    return completed_at + timedelta(days=max(warning_days, 1))
 
 TASK_COLUMNS = """
     id, area, item, category_name, priority, frequency,
@@ -1206,7 +1261,7 @@ def complete_task(task_id: str):
 
     task = pm_db.execute_one_json(
         """
-        SELECT id, warning_days, asset_id, schedule_kind, kind, intake_state
+        SELECT id, frequency, warning_days, asset_id, schedule_kind, kind, intake_state
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
         """,
@@ -1217,12 +1272,13 @@ def complete_task(task_id: str):
     if task.get("kind") == "Work Request" or task.get("intake_state"):
         return error_response("INTAKE_NOT_MAINTENANCE", "Work requests cannot be completed", status=409)
 
-    # Calendar next_due on complete: completed_at + warning_days (legacy CSV-era
-    # interval). Mac Recalculate Next Due uses Frequency instead (lastDone +
-    # Daily/Weekly/…/Yearly). Do not change this prod formula without an
-    # explicit migration — Mac Recalculate is local until Save.
+    # Frequency defines recurrence; warning and critical days define alert windows.
     warning_days = int(task.get("warning_days") or 0)
-    next_due = completed_at + timedelta(days=max(warning_days, 1))
+    next_due = next_calendar_due(
+        completed_at,
+        frequency=task.get("frequency"),
+        warning_days=warning_days,
+    )
 
     meter_value = None
     meter_value_raw = payload.get("meter_value_at_completion")

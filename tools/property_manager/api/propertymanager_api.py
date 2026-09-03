@@ -20,10 +20,12 @@ from errors import error_response, validation_error
 from mapping_proposals import register_mapping_routes
 from maintenance_proposals import register_maintenance_proposal_routes
 from work_requests import register_work_request_routes
+from handbook_api import register_handbook_routes
 
 app = Flask(__name__)
 register_maintenance_proposal_routes(app)
 register_work_request_routes(app)
+register_handbook_routes(app)
 
 # Intentional upload ceiling (aligned with Gunicorn request timeout for large bodies).
 # 32 MiB covers photo/manual attachments without unbounded memory growth.

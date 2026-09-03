@@ -22,6 +22,7 @@ import json
 import time
 import base64
 import hashlib
+import hmac
 import uuid
 import psycopg2
 import html as html_module
@@ -74,6 +75,15 @@ INTELMINI_STORAGE_KEY = os.environ.get(
     "OPENCLAW_INTELMINI_STORAGE_KEY",
     str(Path.home() / ".ssh/openclaw_dev_backup_ed25519"),
 )
+PROPERTYMANAGER_API_BASE = os.environ.get(
+    "PROPERTYMANAGER_API_BASE",
+    "http://127.0.0.1:5062",
+).rstrip("/")
+PROPERTYMANAGER_API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "").strip()
+PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN = os.environ.get(
+    "PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN",
+    "",
+).strip()
 
 REPORT_DIR = Path.home() / "ai/projects/openclaw/reports"
 GRAPH_DIR = REPORT_DIR / "graphs"
@@ -3620,6 +3630,77 @@ def pdf_upload_sha256(path):
     return digest.hexdigest()
 
 
+def pdf_upload_normalize_known_bom(path):
+    """Remove only the observed UTF-16 BOM immediately before a PDF header.
+
+    This retains strict PDF validation: arbitrary leading bytes still fail.
+    The canonicalized temporary file is the one hashed and stored on the
+    IntelMini external drive.
+    """
+    candidate = Path(path)
+    with candidate.open("rb") as handle:
+        leading = handle.read(7)
+    if not leading.startswith(b"\xff\xfe%PDF-"):
+        return False
+    data = candidate.read_bytes()
+    candidate.write_bytes(data[2:])
+    return True
+
+
+def propertymanager_manual_library_headers():
+    if not PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN:
+        raise RuntimeError("PropertyManager manual-library service authentication is not configured.")
+    return {
+        "Content-Type": "application/json",
+        "X-PropertyManager-Manual-Library-Token": PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN,
+    }
+
+
+def propertymanager_manual_library_register(asset_id, payload):
+    response = requests.post(
+        f"{PROPERTYMANAGER_API_BASE}/v1/internal/manual-library/assets/{asset_id}/manuals",
+        headers=propertymanager_manual_library_headers(),
+        json=payload,
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        try:
+            message = str(response.json().get("message") or "PropertyManager manual registration failed.")
+        except (ValueError, AttributeError):
+            message = "PropertyManager manual registration failed."
+        raise RuntimeError(message)
+    return response.json()
+
+
+def propertymanager_manual_library_source(asset_id, manual_id, version_id):
+    response = requests.get(
+        f"{PROPERTYMANAGER_API_BASE}/v1/internal/manual-library/assets/{asset_id}/manuals/{manual_id}/versions/{version_id}/source",
+        headers=propertymanager_manual_library_headers(),
+        timeout=20,
+    )
+    if response.status_code >= 400:
+        raise FileNotFoundError("Manual source is unavailable.")
+    payload = response.json()
+    locator = str(payload.get("source_locator") or "")
+    prefix = "dashboard-library://"
+    if not locator.startswith(prefix):
+        raise ValueError("Manual source locator is invalid.")
+    relative_path = pdf_library_validate_relative_path(locator.removeprefix(prefix))
+    return relative_path, str(payload.get("mime_type") or "application/pdf")
+
+
+def propertymanager_manual_library_client_authorized():
+    """Authorize a Mac PropertyManager client without logging its credential."""
+    expected = PROPERTYMANAGER_API_KEY
+    if not expected:
+        return False
+    supplied = request.headers.get("X-API-Key") or ""
+    authorization = request.headers.get("Authorization") or ""
+    if authorization.lower().startswith("bearer "):
+        supplied = authorization[7:].strip()
+    return bool(supplied) and hmac.compare_digest(supplied, expected)
+
+
 def pdf_upload_find_duplicate(sha256):
     conn = ranchbrain_db()
     cur = conn.cursor()
@@ -3867,6 +3948,7 @@ def documentation_upload_pdf():
                     f"openclaw-pdf-upload-{time.time_ns()}.pdf"
                 )
                 upload.save(temporary_path)
+                pdf_upload_normalize_known_bom(temporary_path)
                 validation = pdf_upload_validate(temporary_path)
                 duplicate = pdf_upload_find_duplicate(validation["sha256"])
                 if duplicate:
@@ -3922,6 +4004,7 @@ def documentation_upload_pdf():
                 )
 
                 upload.save(temporary_path)
+                pdf_upload_normalize_known_bom(temporary_path)
                 validation = pdf_upload_validate(temporary_path)
                 duplicate = pdf_upload_find_duplicate(validation["sha256"])
                 if duplicate:
@@ -4072,6 +4155,241 @@ Only valid PDF files up to 50 MB are accepted.
 """
 
     return documentation_shell("Upload PDF", body)
+
+
+def propertymanager_manual_library_list_assets():
+    if not PROPERTYMANAGER_API_KEY:
+        raise RuntimeError("PropertyManager API authentication is not configured.")
+    response = requests.get(
+        f"{PROPERTYMANAGER_API_BASE}/v1/assets",
+        headers={"Authorization": f"Bearer {PROPERTYMANAGER_API_KEY}"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, list) else []
+
+
+def propertymanager_manual_library_list_manuals(asset_id):
+    if not PROPERTYMANAGER_API_KEY:
+        raise RuntimeError("PropertyManager API authentication is not configured.")
+    response = requests.get(
+        f"{PROPERTYMANAGER_API_BASE}/v1/assets/{asset_id}/manuals",
+        headers={"Authorization": f"Bearer {PROPERTYMANAGER_API_KEY}"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    return payload if isinstance(payload, list) else []
+
+
+@app.route("/pm/manual-library", methods=["GET", "POST"])
+def propertymanager_manual_library():
+    """Dashboard-only binary library for PropertyManager manuals.
+
+    The dashboard writes PDFs to the IntelMini external drive first, then
+    registers only the opaque Dashboard-library locator with PropertyManager.
+    """
+    selected_asset_id = str(
+        request.form.get("asset_id") if request.method == "POST" else request.args.get("asset_id") or ""
+    ).strip()
+    message = ""
+    message_class = "empty-state"
+    remote_mode = not pdf_document_storage_is_local()
+    assets = []
+
+    try:
+        assets = propertymanager_manual_library_list_assets()
+    except Exception:
+        message = "PropertyManager assets are unavailable. No manual was uploaded."
+        message_class = "empty-state error"
+
+    if request.method == "POST" and not message:
+        upload = request.files.get("pdf_file")
+        temporary_path = None
+        try:
+            if not selected_asset_id:
+                raise ValueError("Choose the asset this manual belongs to.")
+            if not upload or not upload.filename:
+                raise ValueError("Select a PDF file before uploading.")
+            if selected_asset_id not in {str(asset.get("id") or "") for asset in assets}:
+                raise ValueError("Choose an active PropertyManager asset.")
+            temporary_path = Path("/tmp") / f"openclaw-propertymanager-manual-{time.time_ns()}.pdf"
+            upload.save(temporary_path)
+            normalized_bom = pdf_upload_normalize_known_bom(temporary_path)
+            validation = pdf_upload_validate(temporary_path)
+            duplicate = pdf_upload_find_duplicate(validation["sha256"])
+            if duplicate:
+                raise ValueError(
+                    "This PDF is already stored in the IntelMini library. "
+                    "Use the existing library record instead of uploading another copy."
+                )
+            relative_path = pdf_upload_remote_destination(
+                "Assets",
+                upload.filename,
+                validation["sha256"],
+            )
+            created = False
+            if remote_mode:
+                created = pdf_upload_copy_remote(
+                    temporary_path,
+                    relative_path,
+                    validation["sha256"],
+                )
+            else:
+                destination = pdf_upload_safe_destination("Assets", upload.filename)
+                temporary_path.replace(destination)
+                temporary_path = None
+                relative_path = str(destination.relative_to(PDF_DOCUMENT_ROOT))
+                created = True
+            metadata = {
+                "uploaded_at": datetime.now().astimezone().isoformat(),
+                "original_filename": str(upload.filename),
+                "stored_filename": Path(relative_path).name,
+                "relative_path": relative_path,
+                "category": "Assets",
+                "title": str(request.form.get("title") or "").strip() or Path(relative_path).stem,
+                "notes": "PropertyManager asset manual",
+                "size_bytes": validation["size_bytes"],
+                "page_count": validation["page_count"],
+                "encrypted": validation["encrypted"],
+                "sha256": validation["sha256"],
+                "source_host": INTELMINI_STORAGE_HOST if remote_mode else os.uname().nodename,
+            }
+            pdf_upload_record(metadata)
+            try:
+                propertymanager_manual_library_register(
+                    selected_asset_id,
+                    {
+                        "source_locator": f"dashboard-library://{relative_path}",
+                        "source_display_name": str(upload.filename),
+                        "source_sha256": validation["sha256"],
+                        "byte_size": validation["size_bytes"],
+                        "title": str(request.form.get("title") or "").strip(),
+                        "document_type": str(request.form.get("document_type") or "operator_manual"),
+                        "manufacturer": str(request.form.get("manufacturer") or "").strip(),
+                        "model_number": str(request.form.get("model_number") or "").strip(),
+                    },
+                )
+            except Exception:
+                # The PDF remains in its governed external library rather than
+                # risking deletion of a verified copy. It cannot be extracted
+                # until the operator resolves this explicit linking failure.
+                message = "PDF stored on the IntelMini library, but asset linking failed. No extraction is available yet."
+                message_class = "empty-state error"
+            else:
+                message = (
+                    "PDF stored on the IntelMini external drive and linked to this asset. "
+                    "Open PropertyManager for Mac and choose Manual Library → Extract."
+                )
+                if normalized_bom:
+                    message += " The known leading PDF BOM was removed before storage."
+                message_class = "document-viewer"
+        except ValueError as exc:
+            message = str(exc)
+            message_class = "empty-state error"
+        except Exception:
+            message = "The manual upload could not be completed. Check the external library before retrying."
+            message_class = "empty-state error"
+        finally:
+            if temporary_path:
+                temporary_path.unlink(missing_ok=True)
+
+    manuals = []
+    if selected_asset_id and not message.endswith("No manual was uploaded."):
+        try:
+            manuals = propertymanager_manual_library_list_manuals(selected_asset_id)
+        except Exception:
+            if not message:
+                message = "The asset manual status could not be loaded."
+                message_class = "empty-state error"
+
+    asset_options = ['<option value="">Choose an asset</option>']
+    for asset in sorted(assets, key=lambda item: str(item.get("name") or "").lower()):
+        asset_id = str(asset.get("id") or "")
+        selected = " selected" if asset_id == selected_asset_id else ""
+        asset_options.append(
+            f'<option value="{html.escape(asset_id, quote=True)}"{selected}>'
+            f'{html.escape(str(asset.get("name") or "Unnamed asset"))}</option>'
+        )
+
+    manual_rows = []
+    for manual in manuals:
+        extraction = "Uploaded — awaiting local extraction"
+        if manual.get("ingestion_status") == "extracted":
+            extraction = f"Extracted {html.escape(str(manual.get('extracted_at') or ''))}"
+        manual_rows.append(
+            "<tr>"
+            f"<td>{html.escape(str(manual.get('title') or 'Untitled manual'))}</td>"
+            f"<td>{html.escape(str(manual.get('source_display_name') or 'manual.pdf'))}</td>"
+            f"<td>{extraction}</td>"
+            f"<td>{int(manual.get('task_count') or 0)}</td>"
+            "</tr>"
+        )
+    library_table = ""
+    if selected_asset_id:
+        library_table = f"""
+<h2>Linked manuals</h2>
+<table><thead><tr><th>Manual</th><th>PDF</th><th>Extraction</th><th>Accepted tasks</th></tr></thead>
+<tbody>{''.join(manual_rows) or '<tr><td colspan="4">No manuals are linked to this asset.</td></tr>'}</tbody></table>
+"""
+
+    storage_note = (
+        f"PDFs are stored on the IntelMini external drive ({html.escape(INTELMINI_STORAGE_HOST)})."
+        if remote_mode
+        else f"PDFs are stored on the local external drive at {html.escape(str(PDF_DOCUMENT_ROOT))}."
+    )
+    body = f"""
+<p class="breadcrumb"><a href="/documentation">Documentation Center</a> &nbsp;→&nbsp; PropertyManager Manual Library</p>
+<div class="document-viewer">
+<h2>PropertyManager Manual Library <small>DEV</small></h2>
+<p>Store an owner’s or service manual here, linked to its asset. The Mac app later performs local-Ollama extraction and returns only extracted text, task proposals, and lifecycle status to PropertyManager.</p>
+<p class="muted">{storage_note} PropertyManager does not store PDF bytes or filesystem paths.</p>
+<form method="get" action="/pm/manual-library">
+<label>Asset</label><br><select name="asset_id">{"".join(asset_options)}</select>
+<button type="submit">Open Asset Library</button>
+</form>
+{library_table}
+<h2>Upload and link a PDF</h2>
+<form method="post" enctype="multipart/form-data">
+<input type="hidden" name="asset_id" value="{html.escape(selected_asset_id, quote=True)}">
+<p><label>PDF file</label><br><input name="pdf_file" type="file" accept="application/pdf,.pdf" required></p>
+<p><label>Title</label><br><input name="title" maxlength="300" placeholder="Owner's or service manual"></p>
+<p><label>Document type</label><br><select name="document_type"><option value="operator_manual">Owner / operator manual</option><option value="service_manual">Service manual</option><option value="parts_manual">Parts manual</option><option value="safety_manual">Safety manual</option><option value="other">Other</option></select></p>
+<p><label>Manufacturer</label><br><input name="manufacturer" maxlength="200"></p>
+<p><label>Model number</label><br><input name="model_number" maxlength="200"></p>
+<p><button type="submit">Upload and Link Manual</button></p>
+</form>
+</div>
+{f'<div class="{message_class}" style="margin-top:18px;padding:20px;">{html.escape(message)}</div>' if message else ''}
+"""
+    return documentation_shell("PropertyManager Manual Library", body)
+
+
+@app.get("/pm/manual-library/content/<asset_id>/<manual_id>/<version_id>")
+def propertymanager_manual_library_content(asset_id, manual_id, version_id):
+    if not propertymanager_manual_library_client_authorized():
+        abort(401)
+    try:
+        relative_path, mime_type = propertymanager_manual_library_source(asset_id, manual_id, version_id)
+        if pdf_document_storage_is_local():
+            resolved = pdf_upload_resolve(relative_path)
+            return send_from_directory(
+                str(resolved["path"].parent),
+                resolved["path"].name,
+                mimetype=mime_type,
+                as_attachment=False,
+                conditional=True,
+            )
+        return pdf_library_stream_remote(relative_path)
+    except FileNotFoundError:
+        abort(404)
+    except (ValueError, RuntimeError):
+        abort(409)
+    except HTTPException:
+        raise
+    except Exception:
+        abort(502)
 
 
 @app.route("/documentation/pdf/<path:doc_path>")

@@ -58,6 +58,7 @@ class TaskPhotoRouteTests(unittest.TestCase):
     def test_mutating_photo_routes_require_authentication(self):
         for method, path in (
             ("POST", f"/tasks/{TASK_ID}/photos"),
+            ("GET", f"/tasks/{TASK_ID}/photos/content?file_name={PHOTO_NAME}"),
             ("DELETE", f"/tasks/{TASK_ID}/photos"),
         ):
             with self.subTest(method=method):

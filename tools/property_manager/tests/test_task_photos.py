@@ -112,6 +112,13 @@ class TaskPhotoRouteTests(unittest.TestCase):
         self.assertEqual(rejected.status_code, 400, rejected.get_json())
         self.assertEqual(rejected.get_json()["code"], "VALIDATION_ERROR")
 
+    def test_completion_history_boundary_rejects_oversized_entries(self):
+        self.assertIsNone(self.api._completion_history_error(["Completed on 2026-09-03."]))
+        self.assertEqual(
+            self.api._completion_history_error(["x" * (self.api.MAX_COMPLETION_HISTORY_ENTRY_BYTES + 1)]),
+            "completion_history contains an invalid or oversized entry",
+        )
+
     def test_download_uses_opaque_id_and_never_returns_storage_path(self):
         with mock.patch.object(self.api, "fetch_task_or_404", return_value={"id": TASK_ID}), \
              mock.patch.object(
@@ -128,6 +135,23 @@ class TaskPhotoRouteTests(unittest.TestCase):
         self.assertEqual(response.data, JPEG)
         self.assertEqual(response.headers["X-Content-Type-Options"], "nosniff")
         self.assertNotIn("storage_path", response.headers)
+
+    def test_download_accepts_postgresql_base64_line_wrapping(self):
+        encoded = base64.b64encode(JPEG * 20).decode()
+        wrapped = "\n".join(encoded[index:index + 76] for index in range(0, len(encoded), 76))
+        with mock.patch.object(self.api, "fetch_task_or_404", return_value={"id": TASK_ID}), \
+             mock.patch.object(
+                 self.api.pm_db,
+                 "execute_one_json",
+                 return_value={"content_base64": wrapped, "content_type": "image/jpeg"},
+             ):
+            response = self.client.get(
+                f"/tasks/{TASK_ID}/photos/content?file_name={PHOTO_NAME}",
+                headers=self._headers(),
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, JPEG * 20)
 
     def test_download_preserves_importer_photo_access_without_exposing_its_path(self):
         with mock.patch.object(self.api, "fetch_task_or_404", return_value={"id": TASK_ID}), \

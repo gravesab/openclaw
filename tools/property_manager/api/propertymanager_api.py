@@ -45,6 +45,8 @@ ATTACHMENTS_ROOT = os.environ.get(
 logger = logging.getLogger("propertymanager_api")
 EXPECTED_SCHEMA_VERSION = "012"
 MAX_TASK_PHOTO_BYTES = 25 * 1024 * 1024
+MAX_COMPLETION_HISTORY_ENTRIES = 100
+MAX_COMPLETION_HISTORY_ENTRY_BYTES = 4 * 1024
 _TASK_PHOTO_NAME_RE = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.jpg$")
 
 
@@ -53,6 +55,21 @@ def _requested_task_photo_name(file_name: object) -> str | None:
     if not value or len(value) > 255 or "/" in value or "\\" in value or "\x00" in value:
         return None
     return value
+
+
+def _completion_history_error(history: object) -> str | None:
+    """Keep task upserts bounded even if a client retries a malformed state."""
+    if not isinstance(history, list):
+        return "completion_history must be an array"
+    if len(history) > MAX_COMPLETION_HISTORY_ENTRIES:
+        return "completion_history has too many entries"
+    if any(
+        not isinstance(entry, str)
+        or len(entry.encode("utf-8")) > MAX_COMPLETION_HISTORY_ENTRY_BYTES
+        for entry in history
+    ):
+        return "completion_history contains an invalid or oversized entry"
+    return None
 
 
 def _safe_legacy_photo_bytes(storage_path: object) -> bytes | None:
@@ -818,8 +835,9 @@ def upsert_task():
     history = payload.get("completion_history") or []
     if not isinstance(tools, list):
         tools = []
-    if not isinstance(history, list):
-        history = []
+    history_error = _completion_history_error(history)
+    if history_error:
+        return validation_error(history_error, field="completion_history")
 
     schedule_kind = str(payload.get("schedule_kind") or "calendar").strip().lower()
     if schedule_kind not in ms.SCHEDULE_KINDS:
@@ -1239,7 +1257,11 @@ def download_task_photo(task_id: str):
     content_type = str(row.get("content_type") or _legacy_photo_content_type(file_name))
     if row.get("content_base64"):
         try:
-            content = base64.b64decode(str(row["content_base64"]), validate=True)
+            # PostgreSQL's encode(..., 'base64') wraps long values at 76
+            # characters. Strip only that transport whitespace, then retain
+            # strict validation for the actual Base64 payload.
+            encoded = "".join(str(row["content_base64"]).split())
+            content = base64.b64decode(encoded, validate=True)
         except ValueError:
             logger.error("task photo %s has malformed stored content", file_name)
             return jsonify({"error": "Photo content not found"}), 404

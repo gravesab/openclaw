@@ -366,6 +366,11 @@ def _mogrify(query: str, params: Any) -> str:
             adapted = psycopg2.extensions.adapt(json.dumps(value))
             adapted.encoding = "utf8"
             return adapted.getquoted().decode("utf8")
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            # docker-exec feeds rendered SQL to psql.  psycopg's byte adapter
+            # emits backslash-octal quoting for its native protocol, which
+            # psql with standard_conforming_strings stores as literal text.
+            return "'\\x" + bytes(value).hex() + "'::bytea"
         adapted = psycopg2.extensions.adapt(value)
         if hasattr(adapted, "encoding"):
             adapted.encoding = "utf8"

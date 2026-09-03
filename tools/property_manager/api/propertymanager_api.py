@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import logging
 import os
+import base64
+import hashlib
 import json
 import re
 from calendar import monthrange
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 import db as pm_db
@@ -21,7 +24,7 @@ from decimal_utils import parse_decimal, decimal_to_db
 from errors import error_response, validation_error
 from mapping_proposals import register_mapping_routes
 from maintenance_proposals import register_maintenance_proposal_routes
-from work_requests import register_work_request_routes
+from work_requests import _sanitize_jpeg, register_work_request_routes
 from handbook_api import register_handbook_routes
 
 app = Flask(__name__)
@@ -29,9 +32,9 @@ register_maintenance_proposal_routes(app)
 register_work_request_routes(app)
 register_handbook_routes(app)
 
-# Intentional upload ceiling (aligned with Gunicorn request timeout for large bodies).
-# 32 MiB covers photo/manual attachments without unbounded memory growth.
-MAX_UPLOAD_BYTES = int(os.environ.get("PROPERTYMANAGER_MAX_CONTENT_LENGTH", str(32 * 1024 * 1024)))
+# The dashboard documents a 50 MiB PDF ceiling.  Keep the API boundary aligned
+# so a valid manual or photo is not rejected by Flask before route validation.
+MAX_UPLOAD_BYTES = int(os.environ.get("PROPERTYMANAGER_MAX_CONTENT_LENGTH", str(50 * 1024 * 1024)))
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 ATTACHMENTS_ROOT = os.environ.get(
@@ -41,6 +44,40 @@ ATTACHMENTS_ROOT = os.environ.get(
 
 logger = logging.getLogger("propertymanager_api")
 EXPECTED_SCHEMA_VERSION = "012"
+MAX_TASK_PHOTO_BYTES = 25 * 1024 * 1024
+_TASK_PHOTO_NAME_RE = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.jpg$")
+
+
+def _requested_task_photo_name(file_name: object) -> str | None:
+    value = str(file_name or "").strip()
+    if not value or len(value) > 255 or "/" in value or "\\" in value or "\x00" in value:
+        return None
+    return value
+
+
+def _safe_legacy_photo_bytes(storage_path: object) -> bytes | None:
+    """Read an importer-era photo only when it remains under the configured root."""
+    if not storage_path:
+        return None
+    try:
+        root = Path(ATTACHMENTS_ROOT).resolve(strict=True)
+        candidate = Path(str(storage_path)).resolve(strict=True)
+        if not candidate.is_file() or not candidate.is_relative_to(root):
+            return None
+        if candidate.stat().st_size > MAX_TASK_PHOTO_BYTES:
+            return None
+        return candidate.read_bytes()
+    except (OSError, ValueError):
+        return None
+
+
+def _legacy_photo_content_type(file_name: str) -> str:
+    suffix = Path(file_name).suffix.lower()
+    return {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".heic": "image/heic", ".heif": "image/heic", ".gif": "image/gif",
+        ".webp": "image/webp", ".tif": "image/tiff", ".tiff": "image/tiff",
+    }.get(suffix, "application/octet-stream")
 
 
 def _add_calendar_months(value: datetime, months: int) -> datetime:
@@ -331,7 +368,7 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     )
     photos_rows = pm_db.execute_json(
         f"""
-        SELECT id, task_id, file_name, storage_path, created_at
+        SELECT id, task_id, file_name, created_at
         FROM propertymanager.maintenance_task_photos
         WHERE task_id IN ({placeholders})
         ORDER BY created_at
@@ -1125,6 +1162,115 @@ def delete_task(task_id: str):
     if affected == 0:
         return jsonify({"error": "Task not found"}), 404
     return jsonify({"deleted": True, "task_id": task_id})
+
+
+@app.post("/tasks/<task_id>/photos")
+@auth_required()
+def upload_task_photo(task_id: str):
+    """Store one validated task photo in PostgreSQL under an opaque identifier."""
+    if fetch_task_or_404(task_id) is None:
+        return jsonify({"error": "Task not found"}), 404
+
+    uploaded = request.files.get("file")
+    if uploaded is None:
+        return validation_error("Photo file is required", field="file")
+    content = uploaded.read(MAX_TASK_PHOTO_BYTES + 1)
+    if not content:
+        return validation_error("Photo file is empty", field="file")
+    if len(content) > MAX_TASK_PHOTO_BYTES:
+        return validation_error("Photo exceeds the 25 MiB limit", field="file")
+    try:
+        content = _sanitize_jpeg(content)
+    except ValueError:
+        return validation_error("Only JPEG photos are accepted", field="file")
+
+    content_type, extension = "image/jpeg", "jpg"
+    digest = hashlib.sha256(content).hexdigest()
+    existing = pm_db.execute_one_json(
+        """SELECT file_name FROM propertymanager.maintenance_task_photos
+           WHERE task_id = %s AND sha256 = %s
+           ORDER BY created_at LIMIT 1""",
+        (task_id, digest),
+    )
+    if existing and existing.get("file_name"):
+        return jsonify({"file_name": existing["file_name"], "idempotent_replay": True})
+    photo_id = str(uuid4())
+    file_name = f"{photo_id}.{extension}"
+    pm_db.execute(
+        """
+        INSERT INTO propertymanager.maintenance_task_photos
+            (id, task_id, file_name, storage_path, original_file_name, content_type,
+             byte_size, sha256, content, sanitized_at)
+        VALUES (%s, %s, %s, %s, NULL, %s, %s, %s, %s, now())
+        """,
+        (
+            photo_id,
+            task_id,
+            file_name,
+            f"database://maintenance-task-photo/{photo_id}",
+            content_type,
+            len(content),
+            digest,
+            content,
+        ),
+    )
+    return jsonify({"file_name": file_name}), 201
+
+
+@app.get("/tasks/<task_id>/photos/content")
+@auth_required()
+def download_task_photo(task_id: str):
+    """Return photo bytes only for the owning active maintenance task."""
+    if fetch_task_or_404(task_id) is None:
+        return jsonify({"error": "Task not found"}), 404
+    file_name = _requested_task_photo_name(request.args.get("file_name"))
+    if file_name is None:
+        return validation_error("file_name must be an opaque photo ID", field="file_name")
+    row = pm_db.execute_one_json(
+        """
+        SELECT encode(content, 'base64') AS content_base64, content_type, storage_path
+        FROM propertymanager.maintenance_task_photos
+        WHERE task_id = %s AND file_name = %s
+        """,
+        (task_id, file_name),
+    )
+    if row is None:
+        return jsonify({"error": "Photo content not found"}), 404
+    content_type = str(row.get("content_type") or _legacy_photo_content_type(file_name))
+    if row.get("content_base64"):
+        try:
+            content = base64.b64decode(str(row["content_base64"]), validate=True)
+        except ValueError:
+            logger.error("task photo %s has malformed stored content", file_name)
+            return jsonify({"error": "Photo content not found"}), 404
+    else:
+        content = _safe_legacy_photo_bytes(row.get("storage_path"))
+        if content is None:
+            return jsonify({"error": "Photo content not found"}), 404
+    response = Response(content, mimetype=content_type)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.delete("/tasks/<task_id>/photos")
+@auth_required()
+def delete_task_photo(task_id: str):
+    """Delete one opaque task photo without resolving any filesystem path."""
+    if fetch_task_or_404(task_id) is None:
+        return jsonify({"error": "Task not found"}), 404
+    payload = request.get_json(silent=True)
+    file_name = _requested_task_photo_name(payload.get("file_name") if isinstance(payload, dict) else None)
+    if file_name is None:
+        return validation_error("file_name is required", field="file_name")
+    affected = pm_db.execute(
+        """DELETE FROM propertymanager.maintenance_task_photos
+           WHERE task_id = %s AND file_name = %s""",
+        (task_id, file_name),
+    )
+    if affected == 0:
+        return jsonify({"error": "Photo not found"}), 404
+    return jsonify({"deleted": True, "file_name": file_name})
 
 
 @app.put("/tasks/<task_id>/parts")

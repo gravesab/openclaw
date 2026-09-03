@@ -40,8 +40,9 @@ class DockerExecDrainTests(unittest.TestCase):
             def poll(self):
                 return self._polled
 
-            def communicate(self):
+            def communicate(self, input=None):
                 seen_inflight["count"] = self_db.inflight_docker_exec_count()
+                seen_inflight["sql"] = input
                 self._polled = 0
                 return ("ok\n", "")
 
@@ -56,6 +57,7 @@ class DockerExecDrainTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "ok\n")
+        self.assertEqual(seen_inflight["sql"], "SELECT 1")
         self.assertGreaterEqual(seen_inflight["count"], 1)
         self.assertEqual(self.db.inflight_docker_exec_count(), 0)
 

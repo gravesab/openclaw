@@ -174,7 +174,7 @@ def _docker_psql(
     *,
     field_separator: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one psql statement via docker exec (same argv as legacy callers)."""
+    """Run one psql statement via docker exec without placing SQL in argv."""
     cmd = [
         "docker",
         "exec",
@@ -191,12 +191,15 @@ def _docker_psql(
     ]
     if field_separator is not None:
         cmd.extend(["-F", field_separator])
-    cmd.extend(["-c", sql])
+    # The local extraction path can legitimately contain a large manufacturer
+    # procedure.  Passing rendered SQL through ``-c`` makes it subject to the
+    # host argv limit before PostgreSQL can validate it.
+    cmd.extend(["-f", "-"])
     # Track Popen explicitly so worker_exit can wait. Do not start a new session
     # (that would detach/orphan children across worker death).
     proc: subprocess.Popen[str] = subprocess.Popen(
         cmd,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -205,7 +208,7 @@ def _docker_psql(
     with _inflight_lock:
         _inflight_procs.add(proc)
     try:
-        stdout, stderr = proc.communicate()
+        stdout, stderr = proc.communicate(sql)
         return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
     finally:
         with _inflight_lock:

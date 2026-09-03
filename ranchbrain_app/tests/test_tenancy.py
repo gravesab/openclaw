@@ -3,6 +3,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from ranchbrain.tenancy import (
+    ROLE_CAPABILITIES,
     Capability,
     Role,
     Tenant,
@@ -104,6 +105,54 @@ def test_dual_member_can_explicitly_select_either_authorized_tenant(selected_ten
         principal=principal(), requested_tenant_id=selected_tenant, capability=Capability.LIVESTOCK_READ, now=NOW
     )
     assert context.tenant_id == selected_tenant
+
+
+@pytest.mark.parametrize(
+    ("role", "capability", "allowed"),
+    [
+        (Role.OWNER, Capability.LIVESTOCK_ANIMAL_WRITE, True),
+        (Role.OWNER, Capability.LIVESTOCK_IDENTIFIER_WRITE, True),
+        (Role.OWNER, Capability.LIVESTOCK_LIFECYCLE_WRITE, True),
+        (Role.OWNER, Capability.LIVESTOCK_LIFECYCLE_CORRECT, True),
+        (Role.MANAGER, Capability.LIVESTOCK_ANIMAL_WRITE, True),
+        (Role.MANAGER, Capability.LIVESTOCK_IDENTIFIER_WRITE, True),
+        (Role.MANAGER, Capability.LIVESTOCK_LIFECYCLE_WRITE, True),
+        (Role.MANAGER, Capability.LIVESTOCK_LIFECYCLE_CORRECT, False),
+        (Role.VIEWER, Capability.LIVESTOCK_ANIMAL_WRITE, False),
+        (Role.VIEWER, Capability.LIVESTOCK_IDENTIFIER_WRITE, False),
+        (Role.VIEWER, Capability.LIVESTOCK_LIFECYCLE_WRITE, False),
+        (Role.VIEWER, Capability.LIVESTOCK_LIFECYCLE_CORRECT, False),
+    ],
+)
+def test_livestock_write_capability_matrix_is_enforced_on_tenant_context(role, capability, allowed):
+    memberships = [TenantMembership(tenant_id="tenant-a", user_id="user-a", role=role)]
+    if allowed:
+        context = resolver(memberships).resolve(
+            principal=principal(), requested_tenant_id="tenant-a", capability=capability, now=NOW
+        )
+        assert context.tenant_id == "tenant-a"
+        assert context.role is role
+        return
+    with pytest.raises(TenancyError) as denied:
+        resolver(memberships).resolve(
+            principal=principal(), requested_tenant_id="tenant-a", capability=capability, now=NOW
+        )
+    assert denied.value.code.value == "tenant_capability_forbidden"
+
+
+def test_owner_capability_set_is_explicit_and_matches_approved_matrix():
+    # Pin the exact set so a future Capability member cannot inherit owner authority.
+    assert ROLE_CAPABILITIES[Role.OWNER] == frozenset(
+        {
+            Capability.MEMORY_READ,
+            Capability.LIVESTOCK_READ,
+            Capability.LIVESTOCK_ANIMAL_WRITE,
+            Capability.LIVESTOCK_IDENTIFIER_WRITE,
+            Capability.LIVESTOCK_LIFECYCLE_WRITE,
+            Capability.LIVESTOCK_LIFECYCLE_CORRECT,
+            Capability.TV_TODAY_READ,
+        }
+    )
 
 
 @pytest.mark.parametrize(

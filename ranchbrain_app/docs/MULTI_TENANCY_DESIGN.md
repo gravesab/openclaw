@@ -2,7 +2,7 @@
 
 Status: Approved for DEV foundation work  
 Scope: Ranch OS modules, beginning with RanchBrain  
-Last updated: 2026-08-26
+Last updated: 2026-09-03
 
 Ranch OS supports multiple ranches and multiple users in a shared data
 platform. A ranch's information must never be visible, searchable, mutable, or
@@ -41,6 +41,19 @@ they do not independently grant authority.
 | Archive, delete, or export tenant data  | Yes                                          | No                                           | No                                           |
 | Manage memberships or tenant settings   | Yes                                          | No                                           | No                                           |
 | Run a service workload                  | Explicit tenant and operation grant required | Explicit tenant and operation grant required | Explicit tenant and operation grant required |
+
+The following livestock write capabilities are DEV-only in-memory contracts.
+They are authorized only through the same server-derived `TenantContext`
+boundary as other capabilities. Owner has all four; manager has the first
+three only; viewer has none. This does not authorize persistence, migrations,
+database/RLS work, runtime integration, device work, or Production.
+
+| Capability                    | Owner | Manager | Viewer |
+| ----------------------------- | ----- | ------- | ------ |
+| `livestock.animal.write`      | Yes   | Yes     | No     |
+| `livestock.identifier.write`  | Yes   | Yes     | No     |
+| `livestock.lifecycle.write`   | Yes   | Yes     | No     |
+| `livestock.lifecycle.correct` | Yes   | No      | No     |
 
 An asset belongs to a tenant, not to the user who created it. Tenant-owned
 records retain `created_by_user_id` and `updated_by_user_id` for attribution,

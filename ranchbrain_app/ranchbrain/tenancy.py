@@ -37,12 +37,35 @@ class Role(str, Enum):
 class Capability(str, Enum):
     MEMORY_READ = "memory.read"
     LIVESTOCK_READ = "livestock.read"
+    LIVESTOCK_ANIMAL_WRITE = "livestock.animal.write"
+    LIVESTOCK_IDENTIFIER_WRITE = "livestock.identifier.write"
+    LIVESTOCK_LIFECYCLE_WRITE = "livestock.lifecycle.write"
+    LIVESTOCK_LIFECYCLE_CORRECT = "livestock.lifecycle.correct"
     TV_TODAY_READ = "tv.today.read"
 
 
 ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = {
-    Role.OWNER: frozenset(Capability),
-    Role.MANAGER: frozenset(Capability),
+    Role.OWNER: frozenset(
+        {
+            Capability.MEMORY_READ,
+            Capability.LIVESTOCK_READ,
+            Capability.LIVESTOCK_ANIMAL_WRITE,
+            Capability.LIVESTOCK_IDENTIFIER_WRITE,
+            Capability.LIVESTOCK_LIFECYCLE_WRITE,
+            Capability.LIVESTOCK_LIFECYCLE_CORRECT,
+            Capability.TV_TODAY_READ,
+        }
+    ),
+    Role.MANAGER: frozenset(
+        {
+            Capability.MEMORY_READ,
+            Capability.LIVESTOCK_READ,
+            Capability.LIVESTOCK_ANIMAL_WRITE,
+            Capability.LIVESTOCK_IDENTIFIER_WRITE,
+            Capability.LIVESTOCK_LIFECYCLE_WRITE,
+            Capability.TV_TODAY_READ,
+        }
+    ),
     Role.VIEWER: frozenset({Capability.MEMORY_READ, Capability.LIVESTOCK_READ, Capability.TV_TODAY_READ}),
 }
 

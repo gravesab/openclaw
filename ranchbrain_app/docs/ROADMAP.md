@@ -64,3 +64,12 @@ Before Ranch OS is made available to multiple ranches, implement the approved
 [Ranch OS multi-tenancy design](MULTI_TENANCY_DESIGN.md) in DEV, including
 tenant ownership, membership authorization, tenant-scoped storage and search,
 and database row-level-security isolation tests.
+
+## Cross-cutting foundation - Home and application shell
+
+Before Ranch OS applications share a common launcher, approve the
+[Ranch OS Home and application shell design](RANCH_OS_HOME_APPLICATION_SHELL_DESIGN.md).
+The shell must use the shared `TenantContext`, a tenant-safe application
+registry, explicit ranch switching, capability-gated visibility, and signed
+application handoff/return contracts without taking ownership of Property,
+Livestock, Finance, or Health records.

@@ -143,6 +143,21 @@
       "verification_status": "needs-runtime-verification"
     },
     {
+      "id": "property_manager_handbook_evaluation",
+      "display_name": "PropertyManager Handbook Evaluation DEV",
+      "description": "DEV-only, source-cited handbook extraction evaluation. It cannot create or update PropertyManager records.",
+      "privacy_tier": "local",
+      "primary_model": "omlx-qwen3.5-9b-4bit",
+      "fallback_models": [
+        "ollama-gemma4-12b-mlx",
+        "ollama-hermes3-8b"
+      ],
+      "task_type": "long_context_engineering",
+      "assignment_status": "configured",
+      "configuration_source": "DEV-only PropertyManager handbook evaluation",
+      "verification_status": "development-live-verification-required"
+    },
+    {
       "id": "embedding_service",
       "display_name": "Embedding Service",
       "description": "Creates vector embeddings for RanchBrain PostgreSQL and pgvector retrieval.",

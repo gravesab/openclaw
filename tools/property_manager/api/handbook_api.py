@@ -73,6 +73,26 @@ def _safe_title(value: str, fallback: str) -> str:
     return stem[:300] or "Untitled manual"
 
 
+def _document_key(payload: dict, *, document_type: str, title: str, manufacturer: str | None, model_number: str | None) -> str:
+    """Resolve one durable manual identity independently of PDF file/version names."""
+    supplied = " ".join(str(payload.get("document_key") or "").split())
+    if supplied:
+        if len(supplied) > 100:
+            raise ValueError("document_key is too long")
+        return supplied
+
+    # Existing Dashboard callers do not yet supply a key.  Derive a stable,
+    # opaque identity so a revised file with the same logical title appends a
+    # version instead of creating another manual record.
+    identity = "\0".join((
+        document_type,
+        (manufacturer or "").casefold(),
+        (model_number or "").casefold(),
+        title.casefold(),
+    ))
+    return f"dashboard-manual-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:48]}"
+
+
 def _validate_library_locator(value: object) -> str:
     locator = str(value or "").strip()
     if not locator.startswith(LIBRARY_LOCATOR_PREFIX):
@@ -219,6 +239,16 @@ def register_handbook_routes(app: Flask) -> None:
         title = _safe_title(str(payload.get("title") or ""), display_name)
         manufacturer = " ".join(str(payload.get("manufacturer") or "").split())[:200] or None
         model_number = " ".join(str(payload.get("model_number") or "").split())[:200] or None
+        try:
+            document_key = _document_key(
+                payload,
+                document_type=document_type,
+                title=title,
+                manufacturer=manufacturer,
+                model_number=model_number,
+            )
+        except ValueError as exc:
+            return validation_error(str(exc), field="document_key")
 
         duplicate = pm_db.execute_one_json(
             _MANUAL_SELECT
@@ -234,19 +264,33 @@ def register_handbook_routes(app: Flask) -> None:
         manual_id, version_id, event_id = str(uuid4()), str(uuid4()), str(uuid4())
         created = pm_db.execute_top_level_one_json(
             """
-            WITH created_manual AS (
+            WITH target_manual AS (
                 INSERT INTO propertymanager.asset_manual
                     (id, asset_id, document_key, title, document_type, manufacturer, model_number, created_by)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, 'dashboard-manual-library')
+                ON CONFLICT (asset_id, document_key) DO UPDATE
+                SET title = EXCLUDED.title,
+                    document_type = EXCLUDED.document_type,
+                    manufacturer = EXCLUDED.manufacturer,
+                    model_number = EXCLUDED.model_number,
+                    updated_at = now()
                 RETURNING id, asset_id, title, document_type, manufacturer, model_number
+            ), previous_version AS (
+                SELECT v.id, v.version_number
+                FROM propertymanager.asset_manual_version v
+                JOIN target_manual m ON m.id = v.manual_id
+                ORDER BY v.version_number DESC
+                LIMIT 1
+                FOR UPDATE
             ), created_version AS (
                 INSERT INTO propertymanager.asset_manual_version
                     (id, manual_id, version_number, source_kind, source_locator, source_display_name,
                      source_sha256, mime_type, ingestion_status, review_status, lifecycle_status,
-                     provenance, created_by)
-                SELECT %s, id, 1, 'pdf', %s, %s, %s, 'application/pdf',
-                       'pending', 'pending', 'draft', %s::jsonb, 'dashboard-manual-library'
-                FROM created_manual
+                     supersedes_version_id, provenance, created_by)
+                SELECT %s, m.id, COALESCE(p.version_number + 1, 1), 'pdf', %s, %s, %s, 'application/pdf',
+                       'pending', 'pending', 'draft', p.id, %s::jsonb, 'dashboard-manual-library'
+                FROM target_manual m
+                LEFT JOIN previous_version p ON true
                 RETURNING id, manual_id, version_number, source_display_name, mime_type,
                           ingestion_status, review_status, lifecycle_status, created_at
             ), created_event AS (
@@ -263,11 +307,11 @@ def register_handbook_routes(app: Flask) -> None:
                        v.id AS version_id, v.version_number, v.source_display_name, v.mime_type,
                        v.ingestion_status, v.review_status, v.lifecycle_status, v.created_at,
                        NULL::timestamptz AS extracted_at, 0 AS task_count
-                FROM created_manual m JOIN created_version v ON v.manual_id = m.id
+                FROM target_manual m JOIN created_version v ON v.manual_id = m.id
             ) result
             """,
             (
-                manual_id, asset_id, f"dashboard-pdf-{source_sha256[:48]}", title, document_type,
+                manual_id, asset_id, document_key, title, document_type,
                 manufacturer, model_number, version_id, locator, display_name, source_sha256,
                 json.dumps({"storage_owner": "dashboard-intelmini", "byte_size": byte_size}), event_id,
             ),

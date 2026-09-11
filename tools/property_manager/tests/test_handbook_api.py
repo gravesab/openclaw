@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 import unittest
@@ -101,6 +102,24 @@ class HandbookAPITests(unittest.TestCase):
         value.update(overrides)
         return value
 
+    @staticmethod
+    def generated_document_key(
+        *,
+        document_type: str = "operator_manual",
+        title: str = "Ranger Owner's Manual",
+        manufacturer: str | None = "Polaris",
+        model_number: str | None = None,
+    ) -> str:
+        identity = "\0".join(
+            (
+                document_type,
+                (manufacturer or "").casefold(),
+                (model_number or "").casefold(),
+                title.casefold(),
+            )
+        )
+        return f"dashboard-manual-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:48]}"
+
     def test_library_listing_requires_the_normal_app_credential(self):
         with mock.patch.object(self.api.pm_db, "execute_one_json") as query:
             response = self.client.get("/v1/assets/asset-1/manuals")
@@ -141,6 +160,140 @@ class HandbookAPITests(unittest.TestCase):
         self.assertIn("asset_manual_state_event", sql)
         self.assertIn("Dashboard library registration", sql)
         self.assertNotIn("send_file", sql)
+
+    def test_changed_pdf_appends_a_version_of_the_same_logical_manual(self):
+        second_version = self.stored_manual(
+            version_id="version-2",
+            version_number=2,
+            source_display_name="Polaris Ranger Owner's Manual.pdf",
+        )
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[self.asset(), None],
+        ), mock.patch.object(
+            self.api.pm_db,
+            "execute_top_level_one_json",
+            return_value=second_version,
+        ) as write:
+            response = self.client.post(
+                "/v1/internal/manual-library/assets/asset-1/manuals",
+                headers=self.dashboard_headers(),
+                json=self.registration_payload(
+                    source_display_name="Polaris Ranger Owner's Manual.pdf",
+                    source_sha256="b" * 64,
+                ),
+            )
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.assertEqual(response.get_json()["version_number"], 2)
+        sql = write.call_args.args[0]
+        self.assertIn("ON CONFLICT (asset_id, document_key)", sql)
+        self.assertIn("COALESCE(p.version_number + 1, 1)", sql)
+        self.assertIn("supersedes_version_id", sql)
+        self.assertNotIn("dashboard-pdf-", sql)
+
+    def test_identical_pdf_replays_the_existing_version_without_a_write(self):
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[self.asset(), self.stored_manual()],
+        ) as query, mock.patch.object(self.api.pm_db, "execute_top_level_one_json") as write:
+            response = self.client.post(
+                "/v1/internal/manual-library/assets/asset-1/manuals",
+                headers=self.dashboard_headers(),
+                json=self.registration_payload(),
+            )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertTrue(response.get_json()["idempotent_replay"])
+        self.assertEqual(query.call_count, 2)
+        write.assert_not_called()
+
+    def test_generated_document_key_is_bound_into_the_write(self):
+        expected = self.generated_document_key()
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[self.asset(), None],
+        ), mock.patch.object(
+            self.api.pm_db,
+            "execute_top_level_one_json",
+            return_value=self.stored_manual(),
+        ) as write:
+            response = self.client.post(
+                "/v1/internal/manual-library/assets/asset-1/manuals",
+                headers=self.dashboard_headers(),
+                json=self.registration_payload(),
+            )
+        self.assertEqual(response.status_code, 201, response.get_json())
+        bound_key = write.call_args.args[1][2]
+        self.assertEqual(bound_key, expected)
+        self.assertTrue(bound_key.startswith("dashboard-manual-"))
+        self.assertNotIn("dashboard-pdf-", bound_key)
+
+    def test_generated_document_key_is_stable_when_only_filename_changes(self):
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[self.asset(), None, self.asset(), None],
+        ), mock.patch.object(
+            self.api.pm_db,
+            "execute_top_level_one_json",
+            return_value=self.stored_manual(),
+        ) as write:
+            first = self.client.post(
+                "/v1/internal/manual-library/assets/asset-1/manuals",
+                headers=self.dashboard_headers(),
+                json=self.registration_payload(),
+            )
+            second = self.client.post(
+                "/v1/internal/manual-library/assets/asset-1/manuals",
+                headers=self.dashboard_headers(),
+                json=self.registration_payload(
+                    source_locator="dashboard-library://Assets/polaris-ranger-revised.pdf",
+                    source_display_name="Polaris Ranger Owner's Manual.pdf",
+                    source_sha256="b" * 64,
+                ),
+            )
+        self.assertEqual(first.status_code, 201, first.get_json())
+        self.assertEqual(second.status_code, 201, second.get_json())
+        keys = [call.args[1][2] for call in write.call_args_list]
+        self.assertEqual(keys[0], keys[1])
+        self.assertEqual(keys[0], self.generated_document_key())
+
+    def test_supplied_document_key_is_used_unchanged(self):
+        supplied = "ranger-operator-manual"
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[self.asset(), None],
+        ), mock.patch.object(
+            self.api.pm_db,
+            "execute_top_level_one_json",
+            return_value=self.stored_manual(),
+        ) as write:
+            response = self.client.post(
+                "/v1/internal/manual-library/assets/asset-1/manuals",
+                headers=self.dashboard_headers(),
+                json=self.registration_payload(document_key=supplied),
+            )
+        self.assertEqual(response.status_code, 201, response.get_json())
+        self.assertEqual(write.call_args.args[1][2], supplied)
+
+    def test_oversized_document_key_is_rejected_before_a_write(self):
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            return_value=self.asset(),
+        ) as query, mock.patch.object(self.api.pm_db, "execute_top_level_one_json") as write:
+            response = self.client.post(
+                "/v1/internal/manual-library/assets/asset-1/manuals",
+                headers=self.dashboard_headers(),
+                json=self.registration_payload(document_key="x" * 101),
+            )
+        self.assertEqual(response.status_code, 400, response.get_json())
+        self.assertEqual(response.get_json()["field"], "document_key")
+        self.assertEqual(query.call_count, 1)
+        write.assert_not_called()
 
     def test_dashboard_registration_rejects_non_dashboard_source_locator(self):
         with mock.patch.object(self.api.pm_db, "execute_one_json", return_value=self.asset()):

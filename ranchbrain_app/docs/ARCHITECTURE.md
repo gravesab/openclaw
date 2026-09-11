@@ -70,3 +70,6 @@ That document is the source of truth for DEV tenancy work.
 
 Ranch OS livestock ownership, lifecycle, authorization, and tenant-isolation
 requirements are defined in [Livestock Management design](LIVESTOCK_MANAGEMENT_DESIGN.md).
+
+The proposed DEV-only Apple TV Today vertical slice is defined in
+[Ranch OS Apple TV Phase 1 design and test plan](RANCH_OS_APPLE_TV_PHASE_1_DESIGN_AND_TEST_PLAN.md).

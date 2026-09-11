@@ -38,8 +38,30 @@ struct FixtureLivestockReadModel: LivestockReadModel {
 
     func animals(context: FixturePresentationContext) async throws -> [Animal] {
         [
-            Animal(id: UUID(uuidString: "2FB6AA84-374C-4EE1-9D94-6A4CD8E80F52")!, displayName: "Juniper", species: .cattle, productionType: .beef, breed: LivestockCatalog.breeds.first, identifier: "Tag RB-104", status: "Active"),
-            Animal(id: UUID(uuidString: "D57C4765-C890-4A2B-8B6F-7C87F0C60DF2")!, displayName: "Cedar", species: .goat, productionType: .dairy, breed: LivestockCatalog.breeds.first { $0.code == "boer" }, identifier: "Tag G-18", status: "Active"),
+            Animal(
+                id: UUID(uuidString: "2FB6AA84-374C-4EE1-9D94-6A4CD8E80F52")!,
+                displayName: "Juniper",
+                species: .cattle,
+                productionType: .beef,
+                breed: LivestockCatalog.breeds.first,
+                identifier: "Tag RB-104",
+                status: "Active",
+                care: AnimalCareFixture(nextCheckLabel: "Routine checkup due Sep 12", summary: "Vaccination review and weight check"),
+                feed: AnimalFeedFixture(rationLabel: "Pasture plus grass hay", dailyAmountLabel: "24 lb hay equivalent"),
+                operationalCostAttribution: AnimalOperationalCostFixture(categoryLabel: "Feed allocation", amountLabel: "$86.40 month to date")
+            ),
+            Animal(
+                id: UUID(uuidString: "D57C4765-C890-4A2B-8B6F-7C87F0C60DF2")!,
+                displayName: "Cedar",
+                species: .goat,
+                productionType: .dairy,
+                breed: LivestockCatalog.breeds.first { $0.code == "boer" },
+                identifier: "Tag G-18",
+                status: "Active",
+                care: AnimalCareFixture(nextCheckLabel: "Routine checkup due Sep 18", summary: "Hoof check and parasite screening"),
+                feed: AnimalFeedFixture(rationLabel: "Browse plus alfalfa hay", dailyAmountLabel: "4 lb hay equivalent"),
+                operationalCostAttribution: AnimalOperationalCostFixture(categoryLabel: "Care allocation", amountLabel: "$24.00 month to date")
+            ),
         ]
     }
 }
@@ -78,9 +100,11 @@ struct AddAnimalDraft: Equatable {
     var species: Species?
     var productionType: ProductionType?
     var breed: Breed?
+    var otherSpeciesDescription = ""
 
     mutating func selectSpecies(_ species: Species?) {
         self.species = species
+        if species != .other { otherSpeciesDescription = "" }
         if !LivestockCatalog.productionTypes(for: species).contains(productionType ?? .beef) { productionType = nil }
         if breed?.species != species { breed = nil }
     }
@@ -94,7 +118,8 @@ struct AddAnimalDraft: Equatable {
     }
 
     var isValidCatalogSelection: Bool {
-        LivestockCatalog.accepts(species: species, production: productionType, breed: breed)
+        guard LivestockCatalog.accepts(species: species, production: productionType, breed: breed) else { return false }
+        return species != .other || !otherSpeciesDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     func submitFixturePresentation() -> String {

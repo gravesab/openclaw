@@ -11,25 +11,38 @@ struct LivestockRootView: View {
     @Bindable var store: LivestockStore
     @State private var destination: LivestockDestination? = .overview
     @State private var presentingAddAnimal = false
+    @State private var appearance: AppearanceChoice = .system
     var body: some View {
         NavigationSplitView {
             List(selection: $destination) {
                 Section("Livestock Management") { ForEach(LivestockDestination.allCases) { item in Label(item.label, systemImage: item.icon).tag(item) } }
                 Section("Context") { FixtureContextView(context: store.fixtureContext) }
+                Section("Appearance") {
+                    Picker("Color mode", selection: $appearance) {
+                        ForEach(AppearanceChoice.allCases) { choice in
+                            Text(choice.label).tag(choice)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    .accessibilityLabel("Appearance color mode")
+                }
             }
             .navigationTitle("Ranch OS")
             .safeAreaInset(edge: .bottom) { Text(FixturePresentationBoundary.tenantDisclosure).font(.caption).foregroundStyle(.secondary).padding(12) }
         } content: { destinationContent } detail: { detailContent }
-        .toolbar { ToolbarItem(placement: .primaryAction) { Button("Add animal", systemImage: "plus") { presentingAddAnimal = true }.accessibilityHint("Opens an in-memory DEV fixture form") } }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) { Button("Add animal", systemImage: "plus") { presentingAddAnimal = true }.accessibilityHint("Opens an in-memory DEV fixture form") }
+        }
         .sheet(isPresented: $presentingAddAnimal) { AddAnimalSheet() }
+        .preferredColorScheme(appearance.colorScheme)
     }
     @ViewBuilder private var destinationContent: some View {
         switch destination ?? .overview {
         case .overview: HerdOverviewView(store: store)
         case .animals: AnimalListView(store: store)
-        case .care: FixtureStateView(title: "Care", systemImage: "cross.case", state: .empty(message: "Care records will arrive through an authorized Livestock read model."), ownershipNote: FixturePresentationBoundary.careOwnership)
-        case .feed: FixtureStateView(title: "Feed and supplies", systemImage: "leaf", state: .loading, ownershipNote: "Feed, hay, and supplements are read-only fixture placeholders; no inventory transaction is available.")
-        case .costs: FixtureStateView(title: "Costs", systemImage: "dollarsign.circle", state: .error(message: "Fixture cost attribution is unavailable until an authorized read model supplies it."), ownershipNote: FixturePresentationBoundary.financeOwnership)
+        case .care: CareFixtureView(store: store)
+        case .feed: FeedAndSuppliesFixtureView(store: store)
+        case .costs: CostsFixtureView(store: store)
         }
     }
     @ViewBuilder private var detailContent: some View {
@@ -85,17 +98,157 @@ struct AnimalListView: View {
     }
 }
 
+struct AnimalDisplayNamePicker: View {
+    @Bindable var store: LivestockStore
+
+    var body: some View {
+        Picker("Animal display name", selection: $store.selectedAnimalID) {
+            Text("Select animal").tag(Animal.ID?.none)
+            ForEach(store.animals) { animal in
+                Text(animal.displayName).tag(Animal.ID?.some(animal.id))
+            }
+        }
+        .accessibilityLabel("Animal display name")
+    }
+}
+
+struct CareFixtureView: View {
+    @Bindable var store: LivestockStore
+    @State private var careType = "Routine checkup"
+    @State private var careDate = Date()
+    @State private var careNote = ""
+
+    private var selectedAnimal: Animal? {
+        store.animals.first { $0.id == store.selectedAnimalID }
+    }
+
+    var body: some View {
+        Group {
+            if case .loaded = store.animalsState, let animal = selectedAnimal {
+                Form {
+                    Section("Animal") {
+                        AnimalDisplayNamePicker(store: store)
+                        LabeledContent("Next care", value: animal.care.nextCheckLabel)
+                        LabeledContent("Care summary", value: animal.care.summary)
+                    }
+                    Section("Care questions") {
+                        Picker("Care type", selection: $careType) {
+                            Text("Routine checkup").tag("Routine checkup")
+                            Text("Vaccination").tag("Vaccination")
+                            Text("Treatment").tag("Treatment")
+                            Text("Weight check").tag("Weight check")
+                        }
+                        DatePicker("Care date", selection: $careDate, displayedComponents: .date)
+                        TextField("Care note", text: $careNote)
+                    }
+                    Section {
+                        Text("Care questions are session-only DEV fixture presentation. No animal care record is saved.")
+                            .foregroundStyle(.secondary)
+                        Text(FixturePresentationBoundary.careOwnership)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .formStyle(.grouped)
+                .onAppear { careNote = animal.care.summary }
+                .onChange(of: store.selectedAnimalID) { _, _ in
+                    careNote = selectedAnimal?.care.summary ?? ""
+                }
+            } else {
+                FixtureStateView(title: "Care", systemImage: "cross.case", state: store.animalsState, ownershipNote: FixturePresentationBoundary.careOwnership)
+            }
+        }
+        .navigationTitle("Care")
+    }
+}
+
+struct FeedAndSuppliesFixtureView: View {
+    @Bindable var store: LivestockStore
+
+    private var selectedAnimal: Animal? {
+        store.animals.first { $0.id == store.selectedAnimalID }
+    }
+
+    var body: some View {
+        Group {
+            if case .loaded = store.animalsState, let animal = selectedAnimal {
+                Form {
+                    Section("Animal") { AnimalDisplayNamePicker(store: store) }
+                    Section("Prefilled feeding") {
+                        LabeledContent("Ration", value: animal.feed.rationLabel)
+                        LabeledContent("Daily amount", value: animal.feed.dailyAmountLabel)
+                    }
+                    Section {
+                        Text("Feed, hay, and supplements are local fixture presentation only; no inventory transaction is available.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .formStyle(.grouped)
+            } else {
+                FixtureStateView(title: "Feed and supplies", systemImage: "leaf", state: store.animalsState, ownershipNote: FixturePresentationBoundary.tenantDisclosure)
+            }
+        }
+        .navigationTitle("Feed and supplies")
+    }
+}
+
+struct CostsFixtureView: View {
+    @Bindable var store: LivestockStore
+
+    private var selectedAnimal: Animal? {
+        store.animals.first { $0.id == store.selectedAnimalID }
+    }
+
+    var body: some View {
+        Group {
+            if case .loaded = store.animalsState, let animal = selectedAnimal {
+                Form {
+                    Section("Animal") { AnimalDisplayNamePicker(store: store) }
+                    Section("Prefilled operational cost attribution") {
+                        LabeledContent("Attribution", value: animal.operationalCostAttribution.categoryLabel)
+                        LabeledContent("Amount", value: animal.operationalCostAttribution.amountLabel)
+                    }
+                    Section {
+                        Text(FixturePresentationBoundary.financeOwnership)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .formStyle(.grouped)
+            } else {
+                FixtureStateView(title: "Costs", systemImage: "dollarsign.circle", state: store.animalsState, ownershipNote: FixturePresentationBoundary.financeOwnership)
+            }
+        }
+        .navigationTitle("Costs")
+    }
+}
+
 struct AnimalDetailView: View {
     let animal: Animal
     var body: some View { ScrollView { VStack(alignment: .leading, spacing: 20) {
         VStack(alignment: .leading, spacing: 4) { Text(animal.displayName).font(.largeTitle.bold()); Text("\(animal.status) · fixture read-model record").foregroundStyle(.secondary) }
         DetailSection(title: "Identifiers", icon: "number") { LabeledContent("Primary tag", value: animal.identifier) }
         DetailSection(title: "Routine lifecycle history", icon: "clock.arrow.circlepath") { Text("No routine lifecycle history is connected in this fixture.").foregroundStyle(.secondary) }
-        DetailSection(title: "Veterinary care", icon: "cross.case") { Text(FixturePresentationBoundary.careOwnership).foregroundStyle(.secondary) }
+        DetailSection(title: "Veterinary care", icon: "cross.case") {
+            VStack(alignment: .leading, spacing: 8) {
+                LabeledContent("Next care", value: animal.care.nextCheckLabel)
+                LabeledContent("Care summary", value: animal.care.summary)
+                Text(FixturePresentationBoundary.careOwnership).foregroundStyle(.secondary)
+            }
+        }
         DetailSection(title: "Surgeries and treatments", icon: "stethoscope") { Text("Authorized care history will supply this section; fixture state is empty.").foregroundStyle(.secondary) }
         DetailSection(title: "Supplements", icon: "pills") { Text("No fixture supplement consumption is connected.").foregroundStyle(.secondary) }
-        DetailSection(title: "Feed and hay consumption", icon: "leaf") { Text("No fixture feed or hay consumption is connected.").foregroundStyle(.secondary) }
-        DetailSection(title: "Operational cost attribution", icon: "dollarsign.circle") { Text(FixturePresentationBoundary.financeOwnership).foregroundStyle(.secondary) }
+        DetailSection(title: "Feed and hay consumption", icon: "leaf") {
+            VStack(alignment: .leading, spacing: 8) {
+                LabeledContent("Ration", value: animal.feed.rationLabel)
+                LabeledContent("Daily amount", value: animal.feed.dailyAmountLabel)
+            }
+        }
+        DetailSection(title: "Operational cost attribution", icon: "dollarsign.circle") {
+            VStack(alignment: .leading, spacing: 8) {
+                LabeledContent("Attribution", value: animal.operationalCostAttribution.categoryLabel)
+                LabeledContent("Amount", value: animal.operationalCostAttribution.amountLabel)
+                Text(FixturePresentationBoundary.financeOwnership).foregroundStyle(.secondary)
+            }
+        }
     }.padding(24) } }
 }
 
@@ -117,7 +270,20 @@ struct AddAnimalSheet: View {
         Text("Add animal").font(.title2.bold()); Text(FixturePresentationBoundary.addAnimalBoundary).foregroundStyle(.secondary)
         Form {
             TextField("Display name", text: $draft.displayName)
-            Picker("Species", selection: Binding(get: { draft.species }, set: { draft.selectSpecies($0) })) { Text("Select species").tag(Species?.none); ForEach(Species.allCases) { Text($0.label).tag(Species?.some($0)) } }
+            Picker("Species", selection: Binding(get: { draft.species }, set: { draft.selectSpecies($0) })) { Text("Select species").tag(Species?.none); ForEach(Species.pickerChoices) { Text($0.label).tag(Species?.some($0)) } }
+            if draft.species == .other {
+                TextField("Describe other livestock type", text: $draft.otherSpeciesDescription)
+                    .accessibilityLabel("Describe other livestock type")
+                Text(FixturePresentationBoundary.otherSpeciesBoundary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if draft.species == .rabbit {
+                Text(FixturePresentationBoundary.rabbitSpeciesBoundary)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(FixturePresentationBoundary.rabbitSpeciesBoundary)
+            }
             Picker("Production type", selection: Binding(get: { draft.productionType }, set: { draft.selectProductionType($0) })) { Text("Select production type").tag(ProductionType?.none); ForEach(LivestockCatalog.productionTypes(for: draft.species)) { Text($0.label).tag(ProductionType?.some($0)) } }.disabled(draft.species == nil)
             Picker("Breed", selection: Binding(get: { draft.breed }, set: { draft.selectBreed($0) })) { Text("No breed selected").tag(Breed?.none); ForEach(LivestockCatalog.breeds(for: draft.species)) { Text($0.label).tag(Breed?.some($0)) } }.disabled(draft.species == nil)
         }.formStyle(.grouped)

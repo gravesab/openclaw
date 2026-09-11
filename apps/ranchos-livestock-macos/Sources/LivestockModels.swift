@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 /// Presentation-only DEV fixture metadata. It is never an authenticated tenant context.
 struct FixturePresentationContext: Equatable, Sendable {
@@ -13,10 +14,26 @@ struct FixturePresentationContext: Equatable, Sendable {
     )
 }
 
-enum Species: String, CaseIterable, Identifiable, Sendable {
-    case cattle, bison, goat, sheep, chicken, pig, horse
+enum AppearanceChoice: String, CaseIterable, Identifiable, Sendable {
+    case system, light, dark
 
     var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
+    }
+}
+
+enum Species: String, CaseIterable, Identifiable, Sendable {
+    case cattle, bison, chicken, goat, horse, pet, pig, rabbit, sheep, other
+
+    var id: String { rawValue }
+    static let pickerChoices: [Species] = [.cattle, .bison, .chicken, .goat, .horse, .pet, .pig, .rabbit, .sheep, .other]
+
     var label: String {
         switch self {
         case .cattle: "Beef cattle"
@@ -26,12 +43,23 @@ enum Species: String, CaseIterable, Identifiable, Sendable {
         case .chicken: "Chickens"
         case .pig: "Pigs"
         case .horse: "Horses"
+        case .rabbit: "Rabbits"
+        case .pet: "Pets"
+        case .other: "Other"
+        }
+    }
+
+    /// Picker-only species that this DEV fixture must not present as durable catalog values.
+    var isFixtureOnlyPickerSpecies: Bool {
+        switch self {
+        case .rabbit, .other: true
+        case .cattle, .bison, .chicken, .goat, .horse, .pet, .pig, .sheep: false
         }
     }
 }
 
 enum ProductionType: String, CaseIterable, Identifiable, Sendable {
-    case beef, dairy, layer, broiler, breeding, companion
+    case beef, breeding, broiler, companion, dairy, layer
 
     var id: String { rawValue }
     var label: String { rawValue.capitalized }
@@ -58,20 +86,20 @@ enum LivestockCatalog {
 
     static func productionTypes(for species: Species?) -> [ProductionType] {
         guard let species else { return [] }
-        switch species {
-        case .cattle: return [.beef, .dairy, .breeding]
-        case .bison: return [.beef, .breeding]
-        case .goat: return [.dairy, .beef, .breeding]
-        case .sheep: return [.breeding, .companion]
-        case .chicken: return [.layer, .broiler, .breeding]
-        case .pig: return [.breeding, .companion]
-        case .horse: return [.breeding, .companion]
+        let types: [ProductionType] = switch species {
+        case .cattle: [.beef, .dairy, .breeding]
+        case .bison: [.beef, .breeding]
+        case .chicken: [.layer, .broiler, .breeding]
+        case .goat: [.dairy, .beef, .breeding]
+        case .horse, .rabbit, .sheep, .pig: [.breeding, .companion]
+        case .other, .pet: [.companion]
         }
+        return types.sorted { $0.label < $1.label }
     }
 
     static func breeds(for species: Species?) -> [Breed] {
         guard let species else { return [] }
-        return breeds.filter { $0.species == species }
+        return breeds.filter { $0.species == species }.sorted { $0.label < $1.label }
     }
 
     static func accepts(species: Species?, production: ProductionType?, breed: Breed?) -> Bool {
@@ -88,6 +116,27 @@ struct Animal: Identifiable, Equatable, Sendable {
     let breed: Breed?
     let identifier: String
     let status: String
+    let care: AnimalCareFixture
+    let feed: AnimalFeedFixture
+    let operationalCostAttribution: AnimalOperationalCostFixture
+}
+
+/// Local presentation values for a future authorized Livestock care read model.
+struct AnimalCareFixture: Equatable, Sendable {
+    let nextCheckLabel: String
+    let summary: String
+}
+
+/// Local presentation values for a future authorized Livestock feeding read model.
+struct AnimalFeedFixture: Equatable, Sendable {
+    let rationLabel: String
+    let dailyAmountLabel: String
+}
+
+/// Display-only attribution. Ranch Finance remains the canonical ledger.
+struct AnimalOperationalCostFixture: Equatable, Sendable {
+    let categoryLabel: String
+    let amountLabel: String
 }
 
 struct HerdOverview: Equatable, Sendable {
@@ -117,4 +166,6 @@ enum FixturePresentationBoundary {
     static let careOwnership = "Livestock owns animal care records. Ranch Health remains human-only."
     static let financeOwnership = "Fixture operational attribution only. Ranch Finance remains the canonical ledger; no posting or editing occurs here."
     static let addAnimalBoundary = "Fixture presentation only — Add animal does not write to a database or disk."
+    static let otherSpeciesBoundary = "Other livestock descriptions are fixture-only and are not accepted by the durable catalog."
+    static let rabbitSpeciesBoundary = "Rabbit is a fixture-only picker choice and is not accepted by the durable catalog."
 }

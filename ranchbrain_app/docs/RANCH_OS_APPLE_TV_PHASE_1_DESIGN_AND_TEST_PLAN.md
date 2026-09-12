@@ -1,10 +1,10 @@
 # Ranch OS Apple TV Phase 1 design and test plan
 
 Status: Proposed for DEV design review
-Scope: Read-only Apple TV Today endpoint and fixture-backed backend vertical slice
-Last updated: 2026-08-27
+Scope: Read-only Apple TV Today endpoint, fixture-backed backend vertical slice, and a separate design-only static tvOS shell
+Last updated: 2026-09-12
 
-This plan defines Phase 1 of Ranch OS Apple TV: an authenticated viewer loads a compact, tenant-scoped Today screen through `GET /v1/tv/today`. It is a DEV-only design and test plan. It authorizes no application code, database schema, credentials, configuration, deployment, or Production change.
+This plan defines Phase 1 of Ranch OS Apple TV: an authenticated viewer loads a compact, tenant-scoped Today screen through `GET /v1/tv/today`. It is a DEV-only design and test plan. Phase 1 authorizes no application code, database schema, credentials, configuration, deployment, or Production change. The separate DEV-only static tvOS shell fixture below is a design-only authorization; it is not Phase 1 implementation and grants no compile, signing, simulator, device, or readiness claim.
 
 The [Ranch OS multi-tenancy design](MULTI_TENANCY_DESIGN.md) remains authoritative for tenant ownership, `VerifiedPrincipal`, `TenantContext`, membership, capability checks, PostgreSQL RLS, cache isolation, and auditing. This plan narrows that design to one read-only vertical slice; it does not introduce an Apple TV authorization model.
 
@@ -21,6 +21,14 @@ The Apple TV app renders only server-authorized tenant display name, tenant-loca
 Health, Finance, attachments, full-text search, records, histories, notifications, exports, write controls, and cross-tenant aggregation are out of scope. A missing card is omitted; the server never fabricates a value or substitutes another tenant's data.
 
 The slice is fixture-backed. Fixtures are deterministic DEV test data selected only after the server has derived and authorized `TenantContext`. The fixture verifier is test-only and implements the same versioned `VerifiedPrincipal` contract as the deployed OpenClaw identity adapter. It must not be loadable or configurable in deployed DEV runtime.
+
+## DEV-only static tvOS shell fixture
+
+This amendment authorizes a separate DEV-only static tvOS Today shell as design only. The shell may hold compile-time `weather`, `livestock`, and `property` card chrome that is labeled as a local DEV fixture and that does not present live or tenant-scoped values.
+
+The static shell is not the server-authorized Phase 1 `GET /v1/tv/today` implementation. It does not derive `VerifiedPrincipal` or `TenantContext`, select a tenant, call an API, render server-delivered cards or freshness, or satisfy any Phase 1 readiness gate, including the Apple TV UI-fixture proof below.
+
+The static shell must not include network access; tenant identity or tenant data; persistence; writes; navigation to records, attachments, exports, Health, or Finance; credentials; Apple Developer signing; a build, simulator, or device run; TestFlight; deployment; or a Production claim. Authorizing this design does not authorize those actions. Each remains behind its own later approval.
 
 ## Principal-to-context flow
 
@@ -193,7 +201,7 @@ Phase 1 is acceptable only after focused automated tests prove these DEV fixture
 | RLS adversarial read   | A context makes an intentionally unfiltered query over A and B rows.    | Only A rows return; missing/malformed `SET LOCAL` denies; runtime role cannot bypass RLS.                    |
 | Audit isolation        | Authorized and denied A/B calls, queried under each tenant context.     | Each tenant sees only its own audit data; denied events leak neither other identity nor fixture state.       |
 
-The Apple TV UI fixture must also prove the app displays only server-delivered cards; contains no write controls or navigation to records, attachments, exports, Health, or Finance; and clears in-memory content on tenant change, sign-out, and authorization failure.
+The Phase 1 Apple TV UI fixture must also prove the app displays only server-delivered cards; contains no write controls or navigation to records, attachments, exports, Health, or Finance; and clears in-memory content on tenant change, sign-out, and authorization failure. The DEV-only static tvOS shell fixture does not satisfy this proof.
 
 ## DEV gates and follow-up
 
@@ -203,7 +211,7 @@ fixture catalog, and isolated DEV RLS test identities. Before Phase 1
 readiness, review endpoint contract, adversarial two-tenant evidence, audit
 redaction, and Apple TV cache behavior together.
 
-This plan does not authorize a Production endpoint, Apple Developer signing, TestFlight distribution, database migration, Apple TV writes, or deployment. Each remains behind its own approval gate.
+This plan does not authorize a Production endpoint, Apple Developer signing, TestFlight distribution, database migration, Apple TV writes, deployment, or a build, simulator, or device claim for the static tvOS shell. Each remains behind its own approval gate. The static shell does not advance or waive any Phase 1 readiness gate.
 
 ## Related design
 

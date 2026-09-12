@@ -81,7 +81,9 @@ def main() -> int:
     database = AIIntelligenceDatabase(DatabaseConfig.from_env())
     summary = summarize_failover_status(
         drift_rows=database.list_deployment_drift(),
+        configured_assignment_rows=database.list_current_model_deployments(),
         recent_rows=database.list_recent_observed_usage(limit=20),
+        recent_usage_limit=20,
     )
     text = format_failover_status_text(summary)
 

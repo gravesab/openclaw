@@ -178,6 +178,22 @@ class AIIntelligenceDatabaseTests(unittest.TestCase):
         self.assertEqual(len(rows), 1)
         self.assertEqual(rows[0]["deployment_status"], "drift")
 
+    def test_list_current_model_deployments_maps_rows(self) -> None:
+        self.cursor.fetchall.return_value = [
+            {
+                "component_id": "telegram_ranch_bot",
+                "component_name": "Telegram Ranch Bot",
+                "model_id": "ollama-hermes3-8b",
+                "assignment_type": "primary",
+            }
+        ]
+
+        rows = self.database.list_current_model_deployments()
+
+        self.assertEqual(rows[0]["model_id"], "ollama-hermes3-8b")
+        sql = self.cursor.execute.call_args.args[0]
+        self.assertIn("current_model_deployment", sql)
+
 
 if __name__ == "__main__":
     unittest.main()

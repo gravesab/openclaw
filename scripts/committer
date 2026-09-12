@@ -6,9 +6,9 @@ set -f
 usage() {
   local exit_code=${1:-2}
   if [ "$exit_code" -eq 0 ]; then
-    printf 'Usage: %s [--force] [--fast] "commit message" "file" ["file" ...]\n' "$(basename "$0")"
+    printf 'Usage: %s [--force] [--fast] [--keep-index] "commit message" "file" ["file" ...]\n' "$(basename "$0")"
   else
-    printf 'Usage: %s [--force] [--fast] "commit message" "file" ["file" ...]\n' "$(basename "$0")" >&2
+    printf 'Usage: %s [--force] [--fast] [--keep-index] "commit message" "file" ["file" ...]\n' "$(basename "$0")" >&2
   fi
   exit "$exit_code"
 }
@@ -23,6 +23,7 @@ fi
 
 force_delete_lock=false
 fast_commit=false
+keep_index=false
 while [[ "${1:-}" == --* ]]; do
   case "${1:-}" in
     --force)
@@ -31,6 +32,10 @@ while [[ "${1:-}" == --* ]]; do
       ;;
     --fast)
       fast_commit=true
+      shift
+      ;;
+    --keep-index)
+      keep_index=true
       shift
       ;;
     --help|-h)
@@ -198,6 +203,29 @@ run_git_with_lock_retry() {
   return 1
 }
 
+require_keep_index_matches_listed_paths() {
+  local listed_paths_file staged_paths_file extra_paths_file missing_paths_file extra missing
+  listed_paths_file=$(mktemp)
+  staged_paths_file=$(mktemp)
+  extra_paths_file=$(mktemp)
+  missing_paths_file=$(mktemp)
+  printf '%s\n' "${files[@]}" | sed 's|^\./||' | LC_ALL=C sort -u >"$listed_paths_file"
+  git diff --cached --name-only | sed 's|^\./||' | LC_ALL=C sort -u >"$staged_paths_file"
+  comm -13 "$listed_paths_file" "$staged_paths_file" >"$extra_paths_file"
+  comm -23 "$listed_paths_file" "$staged_paths_file" >"$missing_paths_file"
+  extra=$(cat "$extra_paths_file")
+  missing=$(cat "$missing_paths_file")
+  rm -f "$listed_paths_file" "$staged_paths_file" "$extra_paths_file" "$missing_paths_file"
+  if [ -n "$extra" ]; then
+    printf 'Error: --keep-index index has extra staged paths:\n%s\n' "$extra" >&2
+    exit 1
+  fi
+  if [ -n "$missing" ]; then
+    printf 'Error: --keep-index requires every listed path to be staged:\n%s\n' "$missing" >&2
+    exit 1
+  fi
+}
+
 for file in "${files[@]}"; do
   if ! path_exists_or_tracked "$file"; then
     printf 'Error: file not found: %s\n' "$file" >&2
@@ -205,8 +233,13 @@ for file in "${files[@]}"; do
   fi
 done
 
-run_git_with_lock_retry "unstaging files" git restore --staged :/
-run_git_with_lock_retry "staging files" git add --force -- "${files[@]}"
+if [ "$keep_index" = true ]; then
+  # Preserve the already-staged hunk set; do not restore or git-add listed paths.
+  require_keep_index_matches_listed_paths
+else
+  run_git_with_lock_retry "unstaging files" git restore --staged :/
+  run_git_with_lock_retry "staging files" git add --force -- "${files[@]}"
+fi
 
 if git diff --staged --quiet; then
   printf 'Warning: no staged changes detected for: %s\n' "${files[*]}" >&2

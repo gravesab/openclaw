@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { createScriptTestHarness } from "./test-helpers.js";
@@ -53,6 +53,19 @@ function commitWithHelper(repo: string, commitMessage: string, ...args: string[]
 
 function commitWithHelperArgs(repo: string, ...args: string[]) {
   return run(repo, "bash", [scriptPath, ...args]);
+}
+
+function commitWithHelperResult(repo: string, ...args: string[]) {
+  try {
+    return { status: 0, stdout: run(repo, "bash", [scriptPath, ...args]), stderr: "" };
+  } catch (error) {
+    const err = error as { status?: number; stdout?: string; stderr?: string };
+    return {
+      status: err.status ?? 1,
+      stdout: String(err.stdout ?? "").trim(),
+      stderr: String(err.stderr ?? "").trim(),
+    };
+  }
 }
 
 function committedPaths(repo: string) {
@@ -199,7 +212,100 @@ describe("scripts/committer", () => {
     const output = commitWithHelperArgs(repo, "--help");
 
     expect(output).toContain(
-      'Usage: committer [--force] [--fast] "commit message" "file" ["file" ...]',
+      'Usage: committer [--force] [--fast] [--keep-index] "commit message" "file" ["file" ...]',
     );
+  });
+
+  it("keep-index commits a partial stage and leaves remaining hunks unstaged", () => {
+    const repo = createRepo();
+    writeRepoFile(repo, "note.txt", "base\n");
+    git(repo, "add", "note.txt");
+    git(repo, "commit", "-qm", "base note");
+    writeRepoFile(repo, "note.txt", "base\nstaged\n");
+    git(repo, "add", "note.txt");
+    writeRepoFile(repo, "note.txt", "base\nstaged\nunstaged\n");
+
+    const output = commitWithHelperArgs(
+      repo,
+      "--keep-index",
+      "test: keep partial stage",
+      "note.txt",
+    );
+
+    expect(output).toContain('Committed "test: keep partial stage" with 1 files');
+    expect(committedPaths(repo)).toEqual(["note.txt"]);
+    expect(committedFileContents(repo, "note.txt")).toBe("base\nstaged");
+    expect(readFileSync(path.join(repo, "note.txt"), "utf8")).toBe("base\nstaged\nunstaged\n");
+    expect(git(repo, "status", "--short")).toContain("M note.txt");
+  });
+
+  it("keep-index requires the staged path set to match the listed files", () => {
+    const extraStaged = createRepo();
+    writeRepoFile(extraStaged, "keep.txt", "keep\n");
+    writeRepoFile(extraStaged, "extra.txt", "extra\n");
+    git(extraStaged, "add", "keep.txt", "extra.txt");
+    const extraResult = commitWithHelperResult(
+      extraStaged,
+      "--keep-index",
+      "test: extra staged path",
+      "keep.txt",
+    );
+    expect(extraResult.status).toBe(1);
+    expect(extraResult.stderr).toContain("--keep-index index has extra staged paths:");
+    expect(extraResult.stderr).toContain("extra.txt");
+    expect(git(extraStaged, "log", "-1", "--format=%s")).toBe("seed");
+
+    const missingStaged = createRepo();
+    writeRepoFile(missingStaged, "keep.txt", "keep\n");
+    const missingResult = commitWithHelperResult(
+      missingStaged,
+      "--keep-index",
+      "test: listed path unstaged",
+      "keep.txt",
+    );
+    expect(missingResult.status).toBe(1);
+    expect(missingResult.stderr).toContain("--keep-index requires every listed path to be staged:");
+    expect(missingResult.stderr).toContain("keep.txt");
+    expect(git(missingStaged, "log", "-1", "--format=%s")).toBe("seed");
+  });
+
+  it("without keep-index, a listed file is restaged in full", () => {
+    const repo = createRepo();
+    writeRepoFile(repo, "note.txt", "base\n");
+    git(repo, "add", "note.txt");
+    git(repo, "commit", "-qm", "base note");
+    writeRepoFile(repo, "note.txt", "base\nstaged\n");
+    git(repo, "add", "note.txt");
+    writeRepoFile(repo, "note.txt", "base\nstaged\nunstaged\n");
+    writeRepoFile(repo, "unrelated.ts", "export const dirty = true;\n");
+
+    commitWithHelper(repo, "test: default restages whole file", "note.txt");
+
+    expect(committedPaths(repo)).toEqual(["note.txt"]);
+    expect(committedFileContents(repo, "note.txt")).toBe("base\nstaged\nunstaged");
+    expect(git(repo, "status", "--short")).toContain("?? unrelated.ts");
+    expect(git(repo, "status", "--short", "--untracked-files=no")).toBe("");
+  });
+
+  it("passes FAST_COMMIT through to git hooks when using --keep-index --fast", () => {
+    const repo = createRepo();
+    installHook(
+      repo,
+      ".githooks/pre-commit",
+      '#!/usr/bin/env bash\nset -euo pipefail\n[ "${FAST_COMMIT:-}" = "1" ] || exit 91\n',
+    );
+    writeRepoFile(repo, "note.txt", "hello\n");
+    git(repo, "add", "note.txt");
+
+    const output = commitWithHelperArgs(
+      repo,
+      "--keep-index",
+      "--fast",
+      "test: keep-index fast hook env",
+      "note.txt",
+    );
+
+    expect(output).toContain('Committed "test: keep-index fast hook env" with 1 files');
+    expect(committedPaths(repo)).toEqual(["note.txt"]);
   });
 });

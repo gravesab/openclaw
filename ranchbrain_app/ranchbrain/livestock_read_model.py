@@ -25,6 +25,7 @@ PRODUCTION_TYPES_BY_SPECIES = {
     "chicken": frozenset({"layer", "broiler", "breeding"}),
     "pig": frozenset({"breeding", "companion"}),
     "horse": frozenset({"breeding", "companion"}),
+    "pet": frozenset({"companion"}),
 }
 BREED_SPECIES = {
     "angus": "cattle",

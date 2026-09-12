@@ -1,0 +1,71 @@
+name: RanchOS
+
+options:
+  bundleIdPrefix: ai.openclaw
+  deploymentTarget:
+    tvOS: "18.0"
+    macOS: "15.0"
+  xcodeVersion: "16.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGN_IDENTITY: ""
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Manual
+
+schemes:
+  RanchOS:
+    shared: true
+    build:
+      targets:
+        RanchOS: all
+  RanchOSFixtureTests:
+    shared: true
+    build:
+      targets:
+        RanchOSFixtureTests: [test]
+    test:
+      targets:
+        - RanchOSFixtureTests
+
+targets:
+  RanchOS:
+    type: application
+    platform: tvOS
+    sources:
+      - path: Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.tv.dev
+        PRODUCT_NAME: RanchOS
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "3"
+        TVOS_DEPLOYMENT_TARGET: "18.0"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+        DEVELOPMENT_TEAM: ""
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: Ranch OS DEV
+        UILaunchScreen: {}
+  RanchOSFixtureTests:
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: Tests
+      - path: Sources/TodayDashboard.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.tv.dev.tests
+        GENERATE_INFOPLIST_FILE: YES
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        CODE_SIGNING_ALLOWED: NO
+        CODE_SIGNING_REQUIRED: NO
+        CODE_SIGN_IDENTITY: ""
+        DEVELOPMENT_TEAM: ""
+        COMBINE_HIDPI_IMAGES: YES

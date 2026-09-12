@@ -1,0 +1,414 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		29B350D65C0B73FF4A20C479 /* TodayDashboardFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF5C173217CEF3D1B718802A /* TodayDashboardFixtureTests.swift */; };
+		35CC45B11686B4F3EFE064FC /* RanchOSTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689771A263873E911F5D8A04 /* RanchOSTVApp.swift */; };
+		8884C25A2FBFB695783A6248 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71A8EAFBB9981AEE6C297A9 /* TodayView.swift */; };
+		B6D6AC526724531FB70B467B /* TodayDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DBDE915908D3B8BFDB9B46 /* TodayDashboard.swift */; };
+		BF8055A5221D3494FD748873 /* TodayDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DBDE915908D3B8BFDB9B46 /* TodayDashboard.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		07DBDE915908D3B8BFDB9B46 /* TodayDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayDashboard.swift; sourceTree = "<group>"; };
+		689771A263873E911F5D8A04 /* RanchOSTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSTVApp.swift; sourceTree = "<group>"; };
+		74C05CB47C73336F25EBACF8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		902198BEB993A86E58183B00 /* RanchOSFixtureTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSFixtureTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		D1495AE13D02AA93AC72EE5A /* RanchOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		E71A8EAFBB9981AEE6C297A9 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		EF5C173217CEF3D1B718802A /* TodayDashboardFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayDashboardFixtureTests.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		6C77D8D100E09B8C36E9A43B /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				EF5C173217CEF3D1B718802A /* TodayDashboardFixtureTests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		7309FDBA2FF7767B02AE9CC7 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				74C05CB47C73336F25EBACF8 /* Info.plist */,
+				689771A263873E911F5D8A04 /* RanchOSTVApp.swift */,
+				07DBDE915908D3B8BFDB9B46 /* TodayDashboard.swift */,
+				E71A8EAFBB9981AEE6C297A9 /* TodayView.swift */,
+			);
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		87B401673D44C3DA826970B8 = {
+			isa = PBXGroup;
+			children = (
+				7309FDBA2FF7767B02AE9CC7 /* Sources */,
+				6C77D8D100E09B8C36E9A43B /* Tests */,
+				BE768A9EBF118F940D948635 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		BE768A9EBF118F940D948635 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				D1495AE13D02AA93AC72EE5A /* RanchOS.app */,
+				902198BEB993A86E58183B00 /* RanchOSFixtureTests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		EEAC092D5B3622342ABAA2DF /* RanchOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 38506B5DF911726A69A1F7F9 /* Build configuration list for PBXNativeTarget "RanchOS" */;
+			buildPhases = (
+				50337272F4400E5081082C92 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOS;
+			packageProductDependencies = (
+			);
+			productName = RanchOS;
+			productReference = D1495AE13D02AA93AC72EE5A /* RanchOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		F981AC258341819075C95327 /* RanchOSFixtureTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 746EA934FAD066BA02C112DE /* Build configuration list for PBXNativeTarget "RanchOSFixtureTests" */;
+			buildPhases = (
+				4C080FA64E3A30507E7F44C4 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOSFixtureTests;
+			packageProductDependencies = (
+			);
+			productName = RanchOSFixtureTests;
+			productReference = 902198BEB993A86E58183B00 /* RanchOSFixtureTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		FB841E07852895CE8FF7303E /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+					EEAC092D5B3622342ABAA2DF = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					F981AC258341819075C95327 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+				};
+			};
+			buildConfigurationList = C94B0A4BD02D155C6E60D408 /* Build configuration list for PBXProject "RanchOS" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 87B401673D44C3DA826970B8;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			productRefGroup = BE768A9EBF118F940D948635 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				EEAC092D5B3622342ABAA2DF /* RanchOS */,
+				F981AC258341819075C95327 /* RanchOSFixtureTests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		4C080FA64E3A30507E7F44C4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B6D6AC526724531FB70B467B /* TodayDashboard.swift in Sources */,
+				29B350D65C0B73FF4A20C479 /* TodayDashboardFixtureTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		50337272F4400E5081082C92 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				35CC45B11686B4F3EFE064FC /* RanchOSTVApp.swift in Sources */,
+				BF8055A5221D3494FD748873 /* TodayDashboard.swift in Sources */,
+				8884C25A2FBFB695783A6248 /* TodayView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		69EF8FC29C309452496A496D /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.tv.dev;
+				PRODUCT_NAME = RanchOS;
+				SDKROOT = appletvos;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 18.0;
+			};
+			name = Release;
+		};
+		838056E1A2F72220D5A9E758 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.tv.dev.tests;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		90D92987401455846C7400CA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				DEVELOPMENT_TEAM = "";
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 6.0;
+				TVOS_DEPLOYMENT_TARGET = 18.0;
+			};
+			name = Debug;
+		};
+		DB70CE356E49982A49F87131 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Sources/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.tv.dev;
+				PRODUCT_NAME = RanchOS;
+				SDKROOT = appletvos;
+				TARGETED_DEVICE_FAMILY = 3;
+				TVOS_DEPLOYMENT_TARGET = 18.0;
+			};
+			name = Debug;
+		};
+		ECB37305825248AB702F4C79 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				COMBINE_HIDPI_IMAGES = YES;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.tv.dev.tests;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		FFF06EA59666E542F7ACA31C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_STYLE = Manual;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				DEVELOPMENT_TEAM = "";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 6.0;
+				TVOS_DEPLOYMENT_TARGET = 18.0;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		38506B5DF911726A69A1F7F9 /* Build configuration list for PBXNativeTarget "RanchOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DB70CE356E49982A49F87131 /* Debug */,
+				69EF8FC29C309452496A496D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		746EA934FAD066BA02C112DE /* Build configuration list for PBXNativeTarget "RanchOSFixtureTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				ECB37305825248AB702F4C79 /* Debug */,
+				838056E1A2F72220D5A9E758 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		C94B0A4BD02D155C6E60D408 /* Build configuration list for PBXProject "RanchOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				90D92987401455846C7400CA /* Debug */,
+				FFF06EA59666E542F7ACA31C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = FB841E07852895CE8FF7303E /* Project object */;
+}

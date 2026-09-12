@@ -89,17 +89,42 @@ separate approval of their payload, confirmation, Ranch Finance, and audit
 policies. Cross-tenant transfer requires a separate workflow. No deferred event
 may delete an animal record.
 
+### First immutable write-contract rules
+
+The local `ranchbrain.livestock_write_model` contract defines only immutable animal
+creation, identifier assignment and retirement, and routine lifecycle events.
+It requires a resolved `TenantContext`; it does not create an ingress, API,
+repository, database, background service, or client path.
+
+- `livestock.animal.write`, `livestock.identifier.write`, and
+  `livestock.lifecycle.write` permit owners and managers to create the
+  respective immutable records.
+- `livestock.lifecycle.correct` is owner-only. A correction creates a new
+  same-type event, names the event it supersedes, supplies a closed correction
+  reason, and carries a context-bound confirmation. It cannot overwrite the
+  original or supersede an already superseded event.
+- Identifier types are closed to `ear_tag`, `rfid`, `brand`, and
+  `registry_number`. Active uniqueness is tenant-scoped by identifier type and
+  normalized value. Retirement is immutable, and reuse is allowed only after
+  the matching active assignment has been retired.
+- Routine events are closed to `intake`, `tagged`, and `weight_recorded`.
+  Non-correction events append in strictly increasing occurrence-time order
+  for an animal.
+- Every record receives context-derived audit input containing operation,
+  actor, principal, correlation ID, and recorded time. A caller cannot supply
+  these as authority facts.
+
 ## Controlled classification
 
 The Livestock Management UI and domain API must use controlled catalog values.
 Neither may accept arbitrary free-text animal type, species, production type,
 or breed values that bypass the approved catalog.
 
-| Classification  | Initial dropdown values                                       | Rules                                                                                                                                                            |
-| --------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Species         | `chicken`, `goat`, `bison`, `cattle`, `sheep`, `pig`, `horse` | `species_code` is required and stored as a stable catalog code. Future entries require an approved catalog change.                                               |
-| Production type | `beef`, `dairy`, `layer`, `broiler`, `breeding`, `companion`  | `production_type_code` is required and must be an allowed catalog value for the selected species. Future entries require an approved catalog change.             |
-| Breed           | Optional catalog selection                                    | A breed belongs to one species and can be selected only after its species is selected. A missing catalog entry remains unset; it is not replaced with free text. |
+| Classification  | Initial dropdown values                                              | Rules                                                                                                                                                                         |
+| --------------- | -------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Species         | `chicken`, `goat`, `bison`, `cattle`, `sheep`, `pig`, `horse`, `pet` | `species_code` is required and stored as a stable catalog code. `pet` supports the controlled `companion` production type. Future entries require an approved catalog change. |
+| Production type | `beef`, `dairy`, `layer`, `broiler`, `breeding`, `companion`         | `production_type_code` is required and must be an allowed catalog value for the selected species. Future entries require an approved catalog change.                          |
+| Breed           | Optional catalog selection                                           | A breed belongs to one species and can be selected only after its species is selected. A missing catalog entry remains unset; it is not replaced with free text.              |
 
 Catalog records use stable codes and display labels. A future catalog addition,
 retirement, or label correction must preserve historical animal classifications

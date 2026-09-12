@@ -148,3 +148,11 @@ class LivestockReadModelTests(unittest.TestCase):
             LivestockAnimalFact("animal-2", "Unknown", "chicken", "beef", None, "active", None, NOW)
         with self.assertRaises(ValueError):
             LivestockAnimalFact("animal-2", "Unknown", "cattle", "beef", "boer", "active", None, NOW)
+        with self.assertRaises(ValueError):
+            LivestockAnimalFact("animal-3", "Milo", "pet", "beef", None, "active", None, NOW)
+        with self.assertRaises(ValueError):
+            LivestockAnimalFact("animal-3", "Milo", "pet", "companion", "angus", "active", None, NOW)
+        pet = LivestockAnimalFact("animal-3", "Milo", "pet", "companion", None, "active", None, NOW)
+        self.assertEqual(pet.species_code, "pet")
+        self.assertEqual(pet.production_type_code, "companion")
+        self.assertIsNone(pet.breed_code)

@@ -47,7 +47,8 @@ The add/edit flow uses catalog-backed dropdowns. It must not expose a free-text
 type, species, production type, or breed field.
 
 1. Species is required. The initial choices are `chicken`, `goat`, `bison`,
-   `cattle`, `sheep`, `pig`, and `horse`.
+   `cattle`, `sheep`, `pig`, `horse`, and `pet`. `pet` exposes only the
+   controlled `companion` production type.
 2. Production type is required after species selection. The initial choices are
    `beef`, `dairy`, `layer`, `broiler`, `breeding`, and `companion`; the UI
    shows only choices allowed by the selected species.
@@ -89,6 +90,56 @@ tenant user cannot create a personal catalog value as a workaround.
    lifecycle projection, then appends the event and audit evidence atomically.
 4. The UI refreshes the projected status and lifecycle history with the event
    provenance. Sale, death, and transfer are not choices in this flow.
+
+## First immutable animal, identifier, and lifecycle write contract
+
+The local `ranchbrain.livestock_write_model` contract is transport-free for the first
+immutable mutation slice. It accepts only a previously server-derived
+`TenantContext`; it is not an ingress, API, repository, database driver,
+background service, or client integration. A future authoritative adapter must
+resolve the listed capability before invoking a command and atomically persist
+the returned immutable record with its audit input.
+
+The proposed [Livestock authoritative mutation persistence design](LIVESTOCK_AUTHORITATIVE_MUTATION_PERSISTENCE_DESIGN.md)
+defines the future transaction, RLS, idempotency, confirmation, audit, and
+trusted-ingress gates. It does not approve their implementation.
+
+### Controlled commands and records
+
+| Operation             | Closed inputs                                                                                  | Immutable result                                         | Authorization                                  |
+| --------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------- | ---------------------------------------------- |
+| Create animal         | Controlled species, production type, optional compatible breed, stable animal ID, provenance   | `LivestockAnimalV1`                                      | `livestock.animal.write`; owner or manager     |
+| Assign identifier     | `ear_tag`, `rfid`, `brand`, or `registry_number`; normalized value; effective time; provenance | `AnimalIdentifierV1`                                     | `livestock.identifier.write`; owner or manager |
+| Retire identifier     | Existing identifier, `replaced`, `lost`, `invalid`, or `duplicate`; retirement time            | `IdentifierRetirementV1`                                 | `livestock.identifier.write`; owner or manager |
+| Record routine event  | `intake`, `tagged`, or `weight_recorded`; occurrence time; provenance                          | `RoutineLifecycleEventV1`                                | `livestock.lifecycle.write`; owner or manager  |
+| Correct routine event | Direct prior-event reference, same event type, controlled correction reason, confirmation      | New `RoutineLifecycleEventV1` with `supersedes_event_id` | `livestock.lifecycle.correct`; owner only      |
+
+Animal creation is immutable in this slice: changing an animal identity or
+classification is not defined here. Every result carries a context-derived
+`LivestockAuditInputV1`: operation, actor user, principal, correlation ID, and
+recorded time. Caller-supplied actor, tenant, role, capability, or audit claims
+are never accepted.
+
+### Identifier and lifecycle rules
+
+- An identifier assignment is immutable. A retirement is a distinct immutable
+  record; it never overwrites the assignment.
+- Active uniqueness is tenant-scoped by `(identifier_type, normalized_value)`.
+  A value may be reused only after every matching assignment is retired, and
+  reuse creates a new assignment record with new audit and provenance facts.
+- Routine lifecycle taxonomy is closed to `intake`, `tagged`, and
+  `weight_recorded`. New non-correction events append in strictly increasing
+  occurrence-time order for an animal.
+- A correction must supersede exactly one same-type event that has not already
+  been superseded. It supplies a controlled reason and a context-bound owner
+  confirmation whose approval time precedes the corrected record time.
+- Sale, death, transfer, care, feed, cost, attachments, notifications, exports,
+  and legal ownership remain outside this contract. Ranch Health remains
+  human-only; Ranch Finance remains the ledger owner.
+
+The V1 identifier and routine-lifecycle **read** families remain explicitly
+`unavailable`. Defining local immutable write records does not approve their
+future repository, PostgreSQL/RLS, projection, transport, or UI exposure.
 
 ### Retire an identifier
 
@@ -157,16 +208,16 @@ approved adapter for it, never a direct Livestock repository or PostgreSQL.
 
 The closed V1 fact-family vocabulary is:
 
-| Enum value                      | Contract subject                                                      | Initial availability                                                                                                           |
-| ------------------------------- | --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
-| `herd_overview`                 | Tenant-scoped aggregate herd overview                                 | Available when its bounded overview projection is supplied.                                                                    |
-| `animal_list`                   | Controlled animal summaries                                           | Available.                                                                                                                     |
-| `animal_detail`                 | One controlled animal detail                                          | Available when its detail projection is supplied.                                                                              |
-| `identifiers`                   | Animal identifier history                                             | Explicitly unavailable until identifier-history, retirement, reuse, and active-uniqueness rules are approved.                  |
-| `routine_lifecycle_events`      | Immutable intake, tagged, and weight history                          | Explicitly unavailable until taxonomy, event ordering, correction/supersession, and confirmation-authority rules are approved. |
-| `care_history`                  | Veterinary care, surgeries, treatments, medications, and schedules    | Unavailable pending the Livestock care vertical slice; Ranch Health remains human-only.                                        |
-| `feeding_consumption_history`   | Feed, hay, mineral, supplement, and consumption history               | Unavailable pending the controlled input vertical slice.                                                                       |
-| `operational_cost_attributions` | Livestock operational cost attribution and optional Finance reference | Unavailable pending the cost vertical slice; Ranch Finance remains the canonical ledger.                                       |
+| Enum value                      | Contract subject                                                      | Initial availability                                                                                           |
+| ------------------------------- | --------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `herd_overview`                 | Tenant-scoped aggregate herd overview                                 | Available when its bounded overview projection is supplied.                                                    |
+| `animal_list`                   | Controlled animal summaries                                           | Available.                                                                                                     |
+| `animal_detail`                 | One controlled animal detail                                          | Available when its detail projection is supplied.                                                              |
+| `identifiers`                   | Animal identifier history                                             | Explicitly unavailable: local write rules are defined, but its repository/RLS projection gate is not approved. |
+| `routine_lifecycle_events`      | Immutable intake, tagged, and weight history                          | Explicitly unavailable: local write rules are defined, but its repository/RLS projection gate is not approved. |
+| `care_history`                  | Veterinary care, surgeries, treatments, medications, and schedules    | Unavailable pending the Livestock care vertical slice; Ranch Health remains human-only.                        |
+| `feeding_consumption_history`   | Feed, hay, mineral, supplement, and consumption history               | Unavailable pending the controlled input vertical slice.                                                       |
+| `operational_cost_attributions` | Livestock operational cost attribution and optional Finance reference | Unavailable pending the cost vertical slice; Ranch Finance remains the canonical ledger.                       |
 
 Herd assignments, attachments, exports, notifications, sale, death, and
 transfer facts remain outside V1 until their separate contracts are approved.

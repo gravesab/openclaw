@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "aliases": {
+    "nomic-embed-text": ["nomic-embed-text:latest"],
+    "ollama-gemma4-12b-mlx": ["gemma4:12b-mlx"],
+    "ollama-hermes3-8b": ["hermes3:8b"],
+    "ollama-llama3.2-3b": ["llama3.2:3b"]
+  }
+}

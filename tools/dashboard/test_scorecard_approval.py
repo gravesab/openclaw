@@ -538,7 +538,7 @@ class ScorecardDashboardTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with mock.patch.object(dashboard, "REPORT_DIR", telemetry_dir.parent):
+        with mock.patch.object(dashboard, "AI_REPORT_DIR", telemetry_dir):
             rendered = dashboard.ai_routing_telemetry_panel_html()
 
         self.assertIn("Report generation age:", rendered)
@@ -569,6 +569,35 @@ class ScorecardDashboardTests(unittest.TestCase):
                     },
                     "recent_failover_count": 1,
                     "recent_failure_count": 0,
+                    "model_usage": {
+                        "observation_limit": 20,
+                        "rows": [
+                            {
+                                "model_id": "ollama-hermes3-8b",
+                                "usage_status": "used",
+                                "observed_attempt_count": 3,
+                                "configured_assignments": [
+                                    {
+                                        "component_id": "telegram_ranch_bot",
+                                        "assignment_types": ["primary"],
+                                    }
+                                ],
+                                "latest_observed_at": "2026-09-11T00:00:00+00:00",
+                            },
+                            {
+                                "model_id": "ollama-llama3.2-3b",
+                                "usage_status": "not-observed",
+                                "observed_attempt_count": 0,
+                                "configured_assignments": [
+                                    {
+                                        "component_id": "telegram_ranch_bot",
+                                        "assignment_types": ["fallback"],
+                                    }
+                                ],
+                                "latest_observed_at": None,
+                            },
+                        ]
+                    },
                     "recent_observations": [
                         {
                             "component_id": "telegram_ranch_bot",
@@ -582,14 +611,41 @@ class ScorecardDashboardTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-        with mock.patch.object(dashboard, "REPORT_DIR", telemetry_dir.parent):
-            rendered = dashboard.ai_routing_telemetry_panel_html()
+        with mock.patch.object(dashboard, "AI_REPORT_DIR", telemetry_dir):
+            with mock.patch.object(
+                dashboard,
+                "load_model_runtime_aliases",
+                return_value={
+                    "ollama-hermes3-8b": ("hermes3:8b",),
+                    "ollama-gemma4-12b-mlx": ("gemma4:12b-mlx",),
+                },
+            ):
+                rendered = dashboard.ai_routing_telemetry_panel_html(
+                    installed_model_names=(
+                        "gemma4:12b-mlx",
+                        "hermes3:8b",
+                        "qwen3:14b",
+                    ),
+                )
 
         self.assertIn("Development test recorded", rendered)
         self.assertIn("No action is required", rendered)
         self.assertIn("No failed requests were recorded", rendered)
         self.assertIn("does not mean the component failed", rendered)
+        self.assertIn("Model usage in this telemetry window", rendered)
+        self.assertIn("No observed request", rendered)
+        self.assertIn("not evidence that the model is", rendered)
+        self.assertIn("safe to remove", rendered)
+        self.assertIn("Installed-model telemetry coverage", rendered)
+        self.assertIn("No telemetry record", rendered)
+        self.assertIn("No routing identity mapped", rendered)
+        self.assertIn("qwen3:14b", rendered)
         self.assertIn("Telegram Ranch Bot", rendered)
+        self.assertIn("telemetry-inventory-count", rendered)
+        self.assertIn("telemetry-status--used", rendered)
+        self.assertIn("telemetry-status--unobserved", rendered)
+        self.assertIn("telemetry-status--no-record", rendered)
+        self.assertIn("telemetry-status--unmapped", rendered)
         self.assertIn("Technical details", rendered)
 
     def test_missing_external_storage_is_not_reported_as_zero_percent(self):

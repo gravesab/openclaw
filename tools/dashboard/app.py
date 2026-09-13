@@ -121,6 +121,9 @@ AI_SCORECARD_PATH = OPENCLAW_ROOT / "config/ai_intelligence/scorecard.json"
 AI_MODEL_REGISTRY_PATH = (
     OPENCLAW_ROOT / "config/ai_intelligence/model_registry.json"
 )
+AI_MODEL_RUNTIME_ALIASES_PATH = (
+    OPENCLAW_ROOT / "config/ai_intelligence/model_runtime_aliases.json"
+)
 AI_APPROVAL_TOOL = (
     OPENCLAW_ROOT / "tools/ai_intelligence/approve_evaluation_lab.py"
 )
@@ -1363,9 +1366,34 @@ def graphs(filename):
 
 
 
-def ai_routing_telemetry_panel_html():
-    report_path = REPORT_DIR / "ai_intelligence" / "routing-telemetry-latest.json"
-    text_path = REPORT_DIR / "ai_intelligence" / "routing-telemetry-latest.txt"
+def load_model_runtime_aliases():
+    """Return declared routing-model to installed-runtime-tag aliases."""
+
+    try:
+        payload = json.loads(
+            AI_MODEL_RUNTIME_ALIASES_PATH.read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+    aliases = payload.get("aliases", {})
+    if not isinstance(aliases, dict):
+        return {}
+    return {
+        str(model_id): tuple(
+            str(tag) for tag in tags if isinstance(tag, str) and tag
+        )
+        for model_id, tags in aliases.items()
+        if isinstance(tags, list)
+    }
+
+
+def ai_routing_telemetry_panel_html(
+    *,
+    installed_model_names=(),
+):
+    report_path = AI_REPORT_DIR / "routing-telemetry-latest.json"
+    text_path = AI_REPORT_DIR / "routing-telemetry-latest.txt"
 
     if not report_path.exists():
         return """
@@ -1498,6 +1526,102 @@ def ai_routing_telemetry_panel_html():
         if difference_items
         else "<p>No model-routing differences were recorded.</p>"
     )
+    model_usage = summary.get("model_usage", {})
+    if not isinstance(model_usage, dict):
+        model_usage = {}
+    model_usage_limit = int(
+        model_usage.get("observation_limit", 0) or 0
+    )
+    model_usage_rows = model_usage.get("rows", [])
+    if not isinstance(model_usage_rows, list):
+        model_usage_rows = []
+    model_usage_items = []
+    for row in model_usage_rows:
+        if not isinstance(row, dict):
+            continue
+        model_id = html.escape(str(row.get("model_id", "unknown")))
+        observed_count = int(row.get("observed_attempt_count", 0) or 0)
+        latest_observed = html.escape(
+            str(row.get("latest_observed_at") or "No request observed")
+        )
+        assignments = row.get("configured_assignments", [])
+        if not isinstance(assignments, list):
+            assignments = []
+        assignment_text = ", ".join(
+            f"{item.get('component_id', 'unknown')} "
+            f"({'/'.join(str(role) for role in item.get('assignment_types', [])) or 'assigned'})"
+            for item in assignments
+            if isinstance(item, dict)
+        ) or "Observed only; no current assignment"
+        if row.get("usage_status") == "used":
+            activity = "Used"
+            activity_class = "telemetry-status--used"
+        else:
+            activity = "No observed request"
+            activity_class = "telemetry-status--unobserved"
+        model_usage_items.append(
+            "<tr>"
+            f"<td><code>{model_id}</code></td>"
+            f"<td><span class='telemetry-status {activity_class}'>{activity}</span></td>"
+            f"<td>{observed_count}</td>"
+            f"<td>{html.escape(assignment_text)}</td>"
+            f"<td>{latest_observed}</td>"
+            "</tr>"
+        )
+    model_usage_html = (
+        "<div class='table-scroll'><table class='dashboard-table'>"
+        "<thead><tr><th>Model</th><th>Activity</th>"
+        "<th>Attempts</th><th>Current assignment</th>"
+        "<th>Latest observation</th></tr></thead><tbody>"
+        + "".join(model_usage_items)
+        + "</tbody></table></div>"
+        if model_usage_items
+        else "<p>No configured or observed models were found in this report.</p>"
+    )
+    aliases = load_model_runtime_aliases()
+    alias_to_model_id = {
+        runtime_tag: model_id
+        for model_id, runtime_tags in aliases.items()
+        for runtime_tag in runtime_tags
+    }
+    usage_by_model_id = {
+        str(row.get("model_id")): row
+        for row in model_usage_rows
+        if isinstance(row, dict) and row.get("model_id")
+    }
+    installed_usage_items = []
+    for runtime_tag in sorted({str(name) for name in installed_model_names if name}):
+        model_id = alias_to_model_id.get(runtime_tag)
+        usage = usage_by_model_id.get(model_id) if model_id else None
+        if usage and usage.get("usage_status") == "used":
+            activity = "Used"
+            activity_class = "telemetry-status--used"
+        elif usage:
+            activity = "No observed request"
+            activity_class = "telemetry-status--unobserved"
+        elif model_id:
+            activity = "No telemetry record"
+            activity_class = "telemetry-status--no-record"
+        else:
+            activity = "No routing identity mapped"
+            activity_class = "telemetry-status--unmapped"
+        installed_usage_items.append(
+            "<tr>"
+            f"<td><code>{html.escape(runtime_tag)}</code></td>"
+            f"<td>{html.escape(model_id or '—')}</td>"
+            f"<td><span class='telemetry-status {activity_class}'>{activity}</span></td>"
+            "</tr>"
+        )
+    installed_usage_html = (
+        "<div class='table-scroll'><table class='dashboard-table telemetry-coverage-table'>"
+        "<colgroup><col style='width:29%'><col style='width:31%'><col style='width:40%'></colgroup>"
+        "<thead><tr><th>Installed model</th><th>Routing identity</th>"
+        "<th>Telemetry activity</th></tr></thead><tbody>"
+        + "".join(installed_usage_items)
+        + "</tbody></table></div>"
+        if installed_usage_items
+        else "<p>The live model inventory was unavailable for this dashboard refresh.</p>"
+    )
     preview = ""
     if text_path.exists():
         preview = html.escape(
@@ -1530,6 +1654,36 @@ def ai_routing_telemetry_panel_html():
                 {not_observed_count} configured component(s) had no request
                 telemetry in this reporting window. “Not observed” means no
                 request was recorded; it does not mean the component failed.
+            </p>
+        </div>
+        <div class="status-box telemetry-section" style="margin-top:14px;">
+            <h3>Model usage in this telemetry window</h3>
+            {model_usage_html}
+            <p class="telemetry-note">
+                “No observed request” means this report did not record a request
+                for that configured model in its latest {model_usage_limit or 'available'}
+                telemetry record(s). It is not evidence that the model is safe to remove.
+            </p>
+        </div>
+        <div class="status-box telemetry-section" style="margin-top:14px;">
+            <div class="telemetry-heading">
+                <div>
+                    <h3>Installed-model telemetry coverage</h3>
+                    <p>Live Ollama inventory matched to declared routing identities.</p>
+                </div>
+                <span class="telemetry-inventory-count">{len(installed_usage_items)} installed</span>
+            </div>
+            <div class="telemetry-legend" aria-label="Telemetry activity legend">
+                <span class="telemetry-status telemetry-status--used">Used</span>
+                <span class="telemetry-status telemetry-status--unobserved">No observed request</span>
+                <span class="telemetry-status telemetry-status--unmapped">No routing identity mapped</span>
+            </div>
+            {installed_usage_html}
+            <p class="telemetry-note">
+                Every model tag returned by the live Ollama inventory is shown.
+                An unmapped tag has no declared routing identity, so telemetry
+                cannot classify it as used or unused. Map it before using this
+                table for any removal decision.
             </p>
         </div>
         <details style="margin-top:14px;">
@@ -2125,6 +2279,79 @@ table.dashboard-table tbody tr:hover td {{
 table.dashboard-table code {{
   white-space:normal;
   overflow-wrap:anywhere;
+}}
+.telemetry-section h3 {{
+  margin:0;
+  font-size:17px;
+}}
+.telemetry-heading {{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:16px;
+  margin-bottom:10px;
+}}
+.telemetry-heading p {{
+  margin:5px 0 0;
+  color:#cbd5e1;
+}}
+.telemetry-inventory-count {{
+  flex:none;
+  border:1px solid #64748b;
+  border-radius:999px;
+  padding:4px 9px;
+  color:#e2e8f0;
+  font-size:13px;
+  font-weight:bold;
+  white-space:nowrap;
+}}
+.telemetry-legend {{
+  display:flex;
+  flex-wrap:wrap;
+  gap:8px;
+  margin:0 0 12px;
+}}
+.telemetry-status {{
+  display:inline-block;
+  border-radius:999px;
+  padding:3px 8px;
+  font-size:13px;
+  font-weight:bold;
+  line-height:1.25;
+  white-space:nowrap;
+}}
+.telemetry-status--used {{
+  color:#bbf7d0;
+  background:#14532d;
+  border:1px solid #22c55e;
+}}
+.telemetry-status--unobserved,
+.telemetry-status--no-record {{
+  color:#fef3c7;
+  background:#78350f;
+  border:1px solid #fbbf24;
+}}
+.telemetry-status--unmapped {{
+  color:#ffedd5;
+  background:#7c2d12;
+  border:1px solid #fb923c;
+}}
+.telemetry-coverage-table {{
+  min-width:760px;
+}}
+.telemetry-note {{
+  margin:12px 0 0;
+  padding:10px 12px;
+  border-left:3px solid #64748b;
+  border-radius:0 6px 6px 0;
+  background:#1e293b;
+  color:#cbd5e1;
+}}
+@media (max-width:640px) {{
+  .telemetry-heading {{
+    flex-direction:column;
+    gap:8px;
+  }}
 }}
 button {{
   border:0;
@@ -7352,6 +7579,25 @@ button { background-color:#60a5fa; color:black; border:none; padding:10px 15px; 
 .warning-box { padding:15px; border-radius:8px; margin-bottom:15px; color:white; font-weight:bold; }
 .chart { background:white; padding:10px; border-radius:8px; margin-bottom:18px; width:900px; max-width:100%; }
 h1, h2 { margin-top:0; }
+.telemetry-section { padding:22px; }
+.telemetry-section h3 { margin:0; font-size:18px; }
+.telemetry-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.telemetry-heading p { margin:6px 0 0; color:#cbd5e1; line-height:1.4; }
+.telemetry-inventory-count { flex:none; border:1px solid #64748b; border-radius:999px; padding:5px 10px; color:#e2e8f0; font-size:13px; font-weight:bold; white-space:nowrap; }
+.telemetry-legend { display:flex; flex-wrap:wrap; gap:9px; margin:0 0 14px; }
+.telemetry-status { display:inline-block; border-radius:999px; padding:4px 9px; font-size:13px; font-weight:bold; line-height:1.25; white-space:nowrap; }
+.telemetry-status--used { color:#bbf7d0; background:#14532d; border:1px solid #22c55e; }
+.telemetry-status--unobserved, .telemetry-status--no-record { color:#fef3c7; background:#78350f; border:1px solid #fbbf24; }
+.telemetry-status--unmapped { color:#ffedd5; background:#7c2d12; border:1px solid #fb923c; }
+.telemetry-section .table-scroll { width:100%; overflow-x:auto; }
+.telemetry-section table.dashboard-table { width:100%; min-width:800px; border-collapse:separate; border-spacing:0 7px; table-layout:fixed; }
+.telemetry-section table.dashboard-table th { padding:0 14px 6px; color:#cbd5e1; font-size:13px; text-align:left; }
+.telemetry-section table.dashboard-table td { padding:12px 14px; background:#334155; line-height:1.35; overflow-wrap:anywhere; }
+.telemetry-section table.dashboard-table td:first-child { border-radius:8px 0 0 8px; }
+.telemetry-section table.dashboard-table td:last-child { border-radius:0 8px 8px 0; }
+.telemetry-section table.dashboard-table code { white-space:normal; overflow-wrap:anywhere; }
+.telemetry-note { margin:14px 0 0; padding:11px 13px; border-left:3px solid #64748b; border-radius:0 6px 6px 0; background:#1e293b; color:#cbd5e1; line-height:1.45; }
+@media (max-width:640px) { .telemetry-heading { flex-direction:column; gap:8px; } }
 </style>
 </head>
 <body>
@@ -7398,7 +7644,9 @@ __OPENCLAW_SHARED_NAVIGATION__
         """
 
     html += m4_ai_health_panel_html(m4, omlx)
-    html += ai_routing_telemetry_panel_html()
+    html += ai_routing_telemetry_panel_html(
+        installed_model_names=m4.get("model_names", []),
+    )
 
     html += model_status_panel_html(
         m4,

@@ -368,8 +368,13 @@ class LivestockMutationCoordinatorTests(unittest.TestCase):
         self.assertTrue(session.committed)
         self.assertFalse(session.rolled_back)
         self.assertEqual(session.confirmations[CONFIRM_A].consumed_at, NOW)
-        self.assertEqual(session.audits[0].operation, "animal_create")
+        self.assertEqual(session.audits[0].operation, ANIMAL_CREATE_OPERATION)
         self.assertEqual(len(session.audits), 1)
+        finalized = session.idempotency[(TENANT_A, ANIMAL_CREATE_OPERATION, "idem-a")]
+        self.assertEqual(finalized.operation, ANIMAL_CREATE_OPERATION)
+        self.assertEqual(finalized.outcome, "committed")
+        self.assertEqual(finalized.result_animal_id, ANIMAL_A)
+        self.assertEqual(finalized.animal.id, ANIMAL_A)
 
     def test_identical_replay_returns_original_without_second_consume(self):
         admitted = confirmation()

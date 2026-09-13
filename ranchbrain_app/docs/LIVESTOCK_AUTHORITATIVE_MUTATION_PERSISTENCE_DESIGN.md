@@ -1,15 +1,15 @@
 # Ranch OS Livestock authoritative mutation persistence design
 
-Status: DEV SQL contract landed unapplied; matrix-id and idempotency-key alignment recorded
+Status: DEV SQL `001`/`002` landed unapplied; identifier persistence decisions recorded
 Scope: Future durable mutation boundary for animal, identifier, and lifecycle contracts
 Last updated: 2026-09-13 by A.Graves
 
 This document defines the approval gate for making the local
-`ranchbrain.livestock_write_model` contracts durable. The unapplied DEV SQL
-contract has landed. A transport-free DEV `animal_create` coordinator and
-repository exist in source. They do not authorize a PostgreSQL adapter,
-database apply, standing DEV database, ingress, deployed runtime, device
-path, or Production implementation.
+`ranchbrain.livestock_write_model` contracts durable. Committed unapplied DEV
+SQL remains `001` and `002`. A transport-free DEV `animal_create` coordinator,
+repository, and disposable PostgreSQL session adapter exist in source. They
+do not authorize identifier or lifecycle coordinator methods, `003`, a
+standing DEV database, ingress, deployed runtime, device path, or Production.
 
 The repository-wide [atomic transaction design](../../docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md), [confirmation policy](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md), and [identity policy](../../docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md) remain authoritative.
 
@@ -48,12 +48,14 @@ non-UUID principal id fails closed before any `SET LOCAL ranchos.principal_id`.
 
 Every first-slice operation additionally requires a current CF-2 confirmation
 bound to actor, tenant, operation, target, digest, policy, validator, and
-idempotency identity. The confirmation is fresh and single-use. Freshness
-expires 2 minutes after issuance and is enforced with trusted
-transaction-time state, not client, confirmation, or wall-clock claims.
-Missing, expired, forged, ambiguous, malformed, reused, or unsupported facts
-fail closed. Admission does not consume confirmation, write a success audit, or
-mutate livestock data.
+idempotency identity. Identifier-assignment target binding is the planned
+assignment ID. Identifier-retirement target binding is the existing identifier
+ID. The canonical request digest still binds the complete command. The
+confirmation is fresh and single-use. Freshness expires 2 minutes after
+issuance and is enforced with trusted transaction-time state, not client,
+confirmation, or wall-clock claims. Missing, expired, forged, ambiguous,
+malformed, reused, or unsupported facts fail closed. Admission does not
+consume confirmation, write a success audit, or mutate livestock data.
 
 ## One authoritative transaction
 
@@ -121,11 +123,13 @@ not apply SQL, open ingress, create a repository, or touch Production.
 Immutable `animal_identifiers` assignment rows are never updated to retire.
 Retirement is a separate `animal_identifier_retirements` row: `id`,
 `tenant_id`, `identifier_id`, closed reason (`replaced`, `lost`, `invalid`,
-`duplicate`), `retired_at`, and audit facts. Active uniqueness is tenant-scoped
-on `(identifier_type, normalized_value)` for assignments that have no matching
-retirement. Identifier types remain `ear_tag`, `rfid`, `brand`, and
-`registry_number`. In-place `retired_at` on the assignment, `tag`, and
-`vendor_label` are rejected.
+`duplicate`), `retired_at`, required `LivestockFactProvenance`, and audit
+facts. Identifier-retirement command and result contracts must carry that
+provenance. Do not weaken the committed `002` retirement provenance columns.
+Active uniqueness is tenant-scoped on `(identifier_type, normalized_value)`
+for assignments that have no matching retirement. Identifier types remain
+`ear_tag`, `rfid`, `brand`, and `registry_number`. In-place `retired_at` on
+the assignment, `tag`, and `vendor_label` are rejected.
 
 ### Lifecycle correction and supersession
 
@@ -148,25 +152,33 @@ credentials, SQL, reusable confirmations, or unsupported client claims.
 ### Idempotency retention and status query
 
 A tenant-scoped idempotency row holds scope, identity, key digest, operation,
-outcome, transaction ID, and a nullable committed `animal_create` outcome
-reference. Scope is the matrix operation identifier and must equal
-`operation`. The unique key is `(tenant_id, scope, identity)`. The key digest
-is the canonical request digest compared for replay versus conflict. A
-committed `ranchos.livestock.animal-create` row stores `result_animal_id`
-referencing `livestock_animals (tenant_id, id)` and is immutable. Replay
-loads that foreign key; it must not scan or assume a one-row tenant. Rows are
-retained indefinitely. A status query is allowed only with a current
-`TenantContext` and the exact key. The same identity with a different digest
-is a stable conflict. Later identifier and lifecycle slices need their own
-nullable outcome foreign keys.
+outcome, transaction ID, and exactly one nullable committed outcome reference
+appropriate to the matrix operation. Scope is the matrix operation identifier
+and must equal `operation`. The unique key is `(tenant_id, scope, identity)`.
+The key digest is the canonical request digest compared for replay versus
+conflict. Committed `002` keeps `result_animal_id` for
+`ranchos.livestock.animal-create`, referencing
+`livestock_animals (tenant_id, id)`. A later unapplied
+`003_livestock_identifier_idempotency_outcomes.sql` adds tenant-safe
+`result_identifier_id` and `result_retirement_id` references. A reserved row
+has no result reference. A committed row has exactly one of those references,
+matching its matrix operation. Replay loads that foreign key; it must not
+scan or assume a one-row tenant. Rows are retained indefinitely. A status
+query is allowed only with a current `TenantContext` and the exact key. The
+same identity with a different digest is a stable conflict. Lifecycle slices
+still need their own nullable outcome foreign keys. Do not rewrite committed
+`002` for identifier replay.
 
 ### Confirmation class and expiry
 
 All five first-slice operations are CF-2 on the canonical confirmation matrix.
 Confirmations are fresh and single-use. Freshness expires 2 minutes after
-issuance and is enforced with trusted transaction-time state. The
-authoritative coordinator consumes that confirmation for every first-slice
-operation. The pure write model does not consume, issue, or satisfy CF-2.
+issuance and is enforced with trusted transaction-time state. Identifier
+assignment binds the planned assignment ID as the confirmation target.
+Identifier retirement binds the existing identifier ID. The canonical request
+digest still binds the complete command. The authoritative coordinator
+consumes that confirmation for every first-slice operation. The pure write
+model does not consume, issue, or satisfy CF-2.
 Sale, death, transfer, archive, and Production stay out of slice and are not
 lowered to CF-2.
 
@@ -210,8 +222,11 @@ After this design amendment, a separately authorized change may land only:
 - `ranchbrain_app/tests/rls/two_tenant_livestock_isolation.sql`
 - `ranchbrain_app/tests/test_livestock_migration_contract.py`
 
-Those three paths have landed. This amendment does not reopen SQL, apply,
-roles, ingress, or a repository.
+Those three paths have landed. Preserve committed `002`. The next separately
+authorized SQL file is unapplied
+`ranchbrain_app/migrations/003_livestock_identifier_idempotency_outcomes.sql`.
+This amendment does not add `003`, reopen apply, roles, ingress, or
+identifier coordinator methods.
 
 ## Approved final SQL implementation package
 
@@ -241,15 +256,20 @@ triggers, not coordinator-only.
 
 - `ranchos.livestock_idempotency`: tenant, matrix-operation scope, identity,
   key digest, operation, `reserved`/`committed` outcome, transaction ID, and
-  nullable `result_animal_id`; unique `(tenant_id, scope, identity)`;
-  `scope = operation`; committed rows immutable; committed animal reference is
-  a tenant-safe foreign key to `livestock_animals (tenant_id, id)`.
+  nullable result references. Committed `002` owns `result_animal_id` as a
+  tenant-safe foreign key to `livestock_animals (tenant_id, id)`. Unapplied
+  `003` adds tenant-safe `result_identifier_id` and `result_retirement_id`.
+  Unique `(tenant_id, scope, identity)`; `scope = operation`; committed rows
+  immutable; a reserved row has no result reference; a committed row has
+  exactly one result reference for its matrix operation.
 - `ranchos.livestock_confirmations`: CF-2 records for all five first-slice
   operations identified by matrix id; bind actor, tenant, operation, target,
   digest, policy/validator, and idempotency identity; `issued_at` and
   `expires_at` with `expires_at = issued_at + interval '2 minutes'`;
-  single-use `consumed_at`. Expiry and consumption compare against trusted
-  transaction time (`CURRENT_TIMESTAMP`), not client clocks.
+  single-use `consumed_at`. Identifier-assignment target is the planned
+  assignment ID. Identifier-retirement target is the existing identifier ID.
+  The digest still binds the complete command. Expiry and consumption compare
+  against trusted transaction time (`CURRENT_TIMESTAMP`), not client clocks.
 - `ranchos.livestock_mutation_audit`: as specified above; runtime `INSERT`
   only.
 
@@ -300,9 +320,9 @@ standing DEV database is not authorized.
 ## Approved DEV coordinator decisions
 
 These decisions describe the transport-free DEV `animal_create` coordinator
-and repository that exist in source. They do not authorize a PostgreSQL
-adapter, database apply, standing DEV database, ingress, deployed runtime,
-device path, or Production.
+and repository that exist in source. They do not authorize identifier or
+lifecycle coordinator methods, `003`, standing DEV database, ingress,
+deployed runtime, device path, or Production.
 
 - All five first-slice operations are registered on the canonical confirmation
   matrix before coordinator implementation: `ranchos.livestock.animal-create`,
@@ -318,17 +338,47 @@ device path, or Production.
   open a durable transaction.
 - Durable idempotency uses tenant, matrix-operation scope, and caller
   identity as the unique key. The canonical request digest is compared for
-  replay versus conflict. Committed `animal_create` replay returns the animal
-  referenced by `result_animal_id`.
+  replay versus conflict and still binds the complete command. Committed
+  `animal_create` replay returns the animal referenced by `result_animal_id`.
+  After unapplied `003`, committed identifier-assignment replay returns the
+  identifier referenced by `result_identifier_id`, and committed
+  identifier-retirement replay returns the retirement referenced by
+  `result_retirement_id`.
+- Write-model operation names stay in-memory only. Persisted confirmation,
+  idempotency, and audit `operation` values remain the canonical CF-2 matrix
+  IDs.
 - Database use remains disposable-only. Do not create a standing DEV database.
+
+## Approved DEV identifier persistence decisions
+
+These decisions record the identifier-assign and identifier-retire durable
+contract. They do not add `003`, edit Python, apply SQL, open ingress, or
+touch Production.
+
+- Preserve committed `002`. Identifier and retirement replay outcomes land in
+  a new unapplied `003_livestock_identifier_idempotency_outcomes.sql`.
+- Extend durable idempotency with tenant-safe identifier and retirement
+  result references. A reserved row has no result reference. A committed row
+  has exactly one result reference appropriate to its matrix operation.
+- Identifier-retirement command and result contracts require
+  `LivestockFactProvenance`. Do not weaken committed `002` retirement
+  provenance columns.
+- CF-2 target binding uses the planned assignment ID for
+  `ranchos.livestock.identifier-assign` and the existing identifier ID for
+  `ranchos.livestock.identifier-retire`.
+- In-memory write-model names remain `identifier_assign` and
+  `identifier_retire`. Persisted operation IDs remain
+  `ranchos.livestock.identifier-assign` and
+  `ranchos.livestock.identifier-retire`.
 
 ## Remaining before apply
 
 - The deployed OpenClaw-authoritative ingress remains a separate prerequisite.
-- The transport-free DEV `animal_create` coordinator and repository exist in
-  source. A PostgreSQL adapter, database apply, standing DEV database,
-  ingress, deployed runtime, device path, and Production implementation are
-  not authorized or proven.
+- The transport-free DEV `animal_create` coordinator, repository, and
+  disposable PostgreSQL session adapter exist in source. Identifier and
+  lifecycle coordinator methods, `003`, standing DEV database, ingress,
+  deployed runtime, device path, and Production implementation are not
+  authorized or proven.
 - Any later apply or live coordinator proof uses a disposable DEV database
   only, under a later explicit apply approval. A standing DEV database is
   not authorized.

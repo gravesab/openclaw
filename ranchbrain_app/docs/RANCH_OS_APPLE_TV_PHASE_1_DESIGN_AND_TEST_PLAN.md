@@ -1,18 +1,20 @@
 # Ranch OS Apple TV Phase 1 design and test plan
 
 Status: Proposed for DEV design review
-Scope: Read-only Apple TV Today endpoint, fixture-backed backend vertical slice, and a separate design-only static tvOS shell
-Last updated: 2026-09-12
+Scope: Read-only Apple TV Today endpoint, fixture-backed backend vertical slice, a separate design-only static tvOS shell, and a transport-free in-memory Today foundation
+Last updated: 2026-09-13
 
-This plan defines Phase 1 of Ranch OS Apple TV: an authenticated viewer loads a compact, tenant-scoped Today screen through `GET /v1/tv/today`. It is a DEV-only design and test plan. Phase 1 authorizes no application code, database schema, credentials, configuration, deployment, or Production change. The separate DEV-only static tvOS shell fixture below is a design-only authorization; it is not Phase 1 implementation and grants no compile, signing, simulator, device, or readiness claim.
+This plan defines Phase 1 of Ranch OS Apple TV: an authenticated viewer loads a compact, tenant-scoped Today screen through `GET /v1/tv/today`. It is a DEV-only design and test plan. Phase 1 still authorizes no HTTP endpoint, database schema, credentials, configuration, deployment, or Production change. The separate DEV-only static tvOS shell fixture below remains a design-only authorization; it is not Phase 1 implementation and grants no compile, signing, simulator, device, or readiness claim.
+
+This amendment separately authorizes one DEV-only transport-free in-memory Today foundation in `ranchbrain.tv_today`. That foundation is not `GET /v1/tv/today` and satisfies no Phase 1 readiness gate.
 
 The [Ranch OS multi-tenancy design](MULTI_TENANCY_DESIGN.md) remains authoritative for tenant ownership, `VerifiedPrincipal`, `TenantContext`, membership, capability checks, PostgreSQL RLS, cache isolation, and auditing. This plan narrows that design to one read-only vertical slice; it does not introduce an Apple TV authorization model.
 
-The canonical Phase 1 capability is `tv.today.read`. The existing provisional
-`TV_MORNING_BRIEF_READ` / `tv.morning_brief.read` primitive must be renamed to
-the corresponding canonical enum/value in the same future approved tenancy
-implementation change. No compatibility alias, dual check, or runtime fallback
-is permitted.
+The canonical Phase 1 capability is the already-committed
+`Capability.TV_TODAY_READ` / `tv.today.read` token. No compatibility alias,
+dual check, or runtime fallback is permitted. That committed token does not
+authorize `GET /v1/tv/today`, trusted-ingress wiring, RLS, cache, audit,
+devices, or Production.
 
 ## Phase 1 scope
 
@@ -29,6 +31,30 @@ This amendment authorizes a separate DEV-only static tvOS Today shell as design 
 The static shell is not the server-authorized Phase 1 `GET /v1/tv/today` implementation. It does not derive `VerifiedPrincipal` or `TenantContext`, select a tenant, call an API, render server-delivered cards or freshness, or satisfy any Phase 1 readiness gate, including the Apple TV UI-fixture proof below.
 
 The static shell must not include network access; tenant identity or tenant data; persistence; writes; navigation to records, attachments, exports, Health, or Finance; credentials; Apple Developer signing; a build, simulator, or device run; TestFlight; deployment; or a Production claim. Authorizing this design does not authorize those actions. Each remains behind its own later approval.
+
+## DEV-only in-memory Today foundation
+
+This amendment authorizes a local, transport-free Python boundary in
+`ranchbrain.tv_today`. It may accept a server-derived `VerifiedPrincipal` and
+an explicit tenant-selection hint, resolve `TenantContext` through the existing
+`TenantContextResolver`, require the committed exact `tv.today.read`
+capability, and then return a compile-time fixture projection bound to that
+authorized `tenant_id`.
+
+The foundation must fail closed before fixture lookup when the principal is
+missing or invalid, tenant selection is missing or unauthorized, the resolved
+context is missing or invalid, the resolved tenant does not match the explicit
+selection, or the membership lacks `tv.today.read`. A compile-time projection
+whose `tenant_id` does not match the resolved context is unavailable; it must
+not be rewritten to another tenant.
+
+This foundation is not `GET /v1/tv/today`. It must not add HTTP routing,
+endpoint configuration, database or RLS access, persistence, cache, an audit
+sink, credentials, network access, tvOS client wiring, simulator or device
+activity, deployment, or Production behavior. Authorizing this code does not
+authorize those actions. Each remains behind its own later approval. The static
+tvOS shell remains a separate compile-time client chrome fixture and is not
+this foundation.
 
 ## Principal-to-context flow
 
@@ -201,17 +227,19 @@ Phase 1 is acceptable only after focused automated tests prove these DEV fixture
 | RLS adversarial read   | A context makes an intentionally unfiltered query over A and B rows.    | Only A rows return; missing/malformed `SET LOCAL` denies; runtime role cannot bypass RLS.                    |
 | Audit isolation        | Authorized and denied A/B calls, queried under each tenant context.     | Each tenant sees only its own audit data; denied events leak neither other identity nor fixture state.       |
 
-The Phase 1 Apple TV UI fixture must also prove the app displays only server-delivered cards; contains no write controls or navigation to records, attachments, exports, Health, or Finance; and clears in-memory content on tenant change, sign-out, and authorization failure. The DEV-only static tvOS shell fixture does not satisfy this proof.
+The Phase 1 Apple TV UI fixture must also prove the app displays only server-delivered cards; contains no write controls or navigation to records, attachments, exports, Health, or Finance; and clears in-memory content on tenant change, sign-out, and authorization failure. The DEV-only static tvOS shell fixture and the in-memory Today foundation do not satisfy this proof.
 
 ## DEV gates and follow-up
 
-Before implementation, apply the approved `tv.today.read` rename as one tenancy
-change, then approve the trusted-ingress-to-`VerifiedPrincipal` boundary, exact
-fixture catalog, and isolated DEV RLS test identities. Before Phase 1
-readiness, review endpoint contract, adversarial two-tenant evidence, audit
-redaction, and Apple TV cache behavior together.
+The in-memory Today foundation above is the only application-code authorization
+in this plan. It uses the committed `tv.today.read` capability. `GET /v1/tv/today`,
+trusted-ingress adapter wiring, isolated DEV RLS identities, cache, audit
+sinks, and Apple TV client consumption of server-delivered cards remain gated.
 
-This plan does not authorize a Production endpoint, Apple Developer signing, TestFlight distribution, database migration, Apple TV writes, deployment, or a build, simulator, or device claim for the static tvOS shell. Each remains behind its own approval gate. The static shell does not advance or waive any Phase 1 readiness gate.
+Before Phase 1 readiness, review endpoint contract, adversarial two-tenant
+evidence, audit redaction, and Apple TV cache behavior together.
+
+This plan does not authorize a Production endpoint, Apple Developer signing, TestFlight distribution, database migration, Apple TV writes, deployment, or a build, simulator, or device claim for the static tvOS shell. Each remains behind its own approval gate. The static shell and the in-memory Today foundation do not advance or waive any Phase 1 readiness gate.
 
 ## Related design
 

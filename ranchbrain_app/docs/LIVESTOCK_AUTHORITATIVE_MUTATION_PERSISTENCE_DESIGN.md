@@ -1,35 +1,36 @@
 # Ranch OS Livestock authoritative mutation persistence design
 
-Status: DEV SQL contract landed unapplied; coordinator decisions recorded
+Status: DEV SQL contract landed unapplied; matrix-id and idempotency-key alignment recorded
 Scope: Future durable mutation boundary for animal, identifier, and lifecycle contracts
 Last updated: 2026-09-13 by A.Graves
 
 This document defines the approval gate for making the local
 `ranchbrain.livestock_write_model` contracts durable. The unapplied DEV SQL
-contract has landed. The coordinator decisions below authorize only later,
-separately approved coordinator work. They do not authorize implementing that
-coordinator or repository, opening ingress, creating a standing DEV database,
-credential, service, UI, device work, or Production.
+contract has landed. A transport-free DEV `animal_create` coordinator and
+repository exist in source. They do not authorize a PostgreSQL adapter,
+database apply, standing DEV database, ingress, deployed runtime, device
+path, or Production implementation.
 
 The repository-wide [atomic transaction design](../../docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md), [confirmation policy](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md), and [identity policy](../../docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md) remain authoritative.
 
 ## Authority boundary
 
-Only a future Ranch OS authoritative mutation coordinator may persist a
+Only the Ranch OS authoritative mutation coordinator may persist a
 Livestock command. It must receive an OpenClaw-authoritative
 `VerifiedPrincipal`, derive a current `TenantContext`, authorize the exact
 operation, and call an allowlisted local write contract. Clients, models, AI,
 fixtures, direct database users, and background tools cannot open the
 transaction or claim authority.
 
-The first durable slice is limited to `animal_create`, `identifier_assign`,
-`identifier_retire`, routine `lifecycle_record`, and `lifecycle_correct`.
-Each of those five operations requires a current CF-2 confirmation registered
-on the [canonical confirmation matrix](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md)
-as `ranchos.livestock.animal-create`, `ranchos.livestock.identifier-assign`,
+The first durable slice is limited to the five CF-2 matrix operations
+`ranchos.livestock.animal-create`, `ranchos.livestock.identifier-assign`,
 `ranchos.livestock.identifier-retire`, `ranchos.livestock.lifecycle-record`,
-and `ranchos.livestock.lifecycle-correct`. The future coordinator, not the
-pure write model, consumes that confirmation. Sale, death, transfer, archive,
+and `ranchos.livestock.lifecycle-correct`. SQL confirmation, idempotency, and
+mutation-audit `operation` columns persist those matrix identifiers only. The
+in-memory write-model names remain local to `livestock_write_model`. Each
+operation requires a current CF-2 confirmation registered on the
+[canonical confirmation matrix](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md).
+The coordinator, not the pure write model, consumes that confirmation. Sale, death, transfer, archive,
 care, feed, cost, attachments, exports, notifications, jobs, legal ownership,
 and Finance posting remain unregistered and unavailable. Ranch Health is
 human-only and Ranch Finance owns its ledger.
@@ -93,13 +94,15 @@ identity only.
 
 ## Idempotency, confirmation, and audit
 
-Durable idempotency uses a canonical request digest scoped by tenant and
-operation. That digest, together with actor/service identity, target manifest,
-policy/validator version, and the current confirmation identity, is the
-idempotency key. An identical replay returns its original outcome without
-another append, confirmation consumption, or success audit. The same key with
-different content returns a stable conflict. Ambiguous outcomes remain blocked
-until durable transaction/idempotency state proves the result.
+Durable idempotency is keyed by tenant, matrix-operation scope, and caller
+identity: unique `(tenant_id, scope, identity)` with `scope = operation`.
+`key_digest` is the canonical request digest for that scope and is compared
+for replay versus conflict; it is not the primary key. An identical digest
+replays the committed outcome without another append, confirmation
+consumption, or success audit. The same identity with a different digest is a
+stable conflict. Ambiguous outcomes remain blocked until durable
+transaction/idempotency state proves the result. Replay is read behavior.
+Durable outcomes are `reserved` and `committed` only.
 
 Every committed mutation writes immutable tenant-scoped audit evidence in the
 same transaction: transaction ID, tenant, operation, targets, actor/principal,
@@ -144,11 +147,18 @@ credentials, SQL, reusable confirmations, or unsupported client claims.
 
 ### Idempotency retention and status query
 
-A tenant-scoped idempotency row holds scope, key digest, operation, outcome,
-and transaction ID. Scope is the tenant plus the matrix operation. The key
-digest is the canonical request digest for that scope. Rows are retained
-indefinitely. A status query is allowed only with a current `TenantContext`
-and the exact key. The same key with a different digest is a stable conflict.
+A tenant-scoped idempotency row holds scope, identity, key digest, operation,
+outcome, transaction ID, and a nullable committed `animal_create` outcome
+reference. Scope is the matrix operation identifier and must equal
+`operation`. The unique key is `(tenant_id, scope, identity)`. The key digest
+is the canonical request digest compared for replay versus conflict. A
+committed `ranchos.livestock.animal-create` row stores `result_animal_id`
+referencing `livestock_animals (tenant_id, id)` and is immutable. Replay
+loads that foreign key; it must not scan or assume a one-row tenant. Rows are
+retained indefinitely. A status query is allowed only with a current
+`TenantContext` and the exact key. The same identity with a different digest
+is a stable conflict. Later identifier and lifecycle slices need their own
+nullable outcome foreign keys.
 
 ### Confirmation class and expiry
 
@@ -229,14 +239,17 @@ triggers, not coordinator-only.
 
 ### Named support tables
 
-- `ranchos.livestock_idempotency`: tenant, scope, key digest, operation,
-  outcome, transaction ID; unique `(tenant_id, scope, key_digest)`.
+- `ranchos.livestock_idempotency`: tenant, matrix-operation scope, identity,
+  key digest, operation, `reserved`/`committed` outcome, transaction ID, and
+  nullable `result_animal_id`; unique `(tenant_id, scope, identity)`;
+  `scope = operation`; committed rows immutable; committed animal reference is
+  a tenant-safe foreign key to `livestock_animals (tenant_id, id)`.
 - `ranchos.livestock_confirmations`: CF-2 records for all five first-slice
-  operations; bind actor, tenant, operation, target, digest, policy/validator,
-  and idempotency identity; `issued_at` and `expires_at` with
-  `expires_at = issued_at + interval '2 minutes'`; single-use `consumed_at`.
-  Expiry and consumption compare against trusted transaction time
-  (`CURRENT_TIMESTAMP`), not client clocks.
+  operations identified by matrix id; bind actor, tenant, operation, target,
+  digest, policy/validator, and idempotency identity; `issued_at` and
+  `expires_at` with `expires_at = issued_at + interval '2 minutes'`;
+  single-use `consumed_at`. Expiry and consumption compare against trusted
+  transaction time (`CURRENT_TIMESTAMP`), not client clocks.
 - `ranchos.livestock_mutation_audit`: as specified above; runtime `INSERT`
   only.
 
@@ -279,15 +292,17 @@ Against a disposable isolated DEV database, adversarial tests must prove:
    the future trusted ingress and mutation coordinator.
 
 Items 1 and 3 are the SQL-land gate and have been proven on a destroyed
-disposable cluster. Items 2, 4, 5, and 6 stay closed until a later coordinator
-implementation is approved. Later live coordinator proof must use another
-disposable DEV database. A standing DEV database is not authorized.
+disposable cluster. Items 2, 4, 5, and 6 stay closed until a separately
+authorized disposable live proof. That proof still requires a PostgreSQL
+adapter and an explicit apply; it is not authorized or proven here. A
+standing DEV database is not authorized.
 
 ## Approved DEV coordinator decisions
 
-These decisions are recorded before any coordinator or repository
-implementation. They do not authorize that implementation, ingress, a standing
-DEV database, or Production.
+These decisions describe the transport-free DEV `animal_create` coordinator
+and repository that exist in source. They do not authorize a PostgreSQL
+adapter, database apply, standing DEV database, ingress, deployed runtime,
+device path, or Production.
 
 - All five first-slice operations are registered on the canonical confirmation
   matrix before coordinator implementation: `ranchos.livestock.animal-create`,
@@ -301,14 +316,19 @@ DEV database, or Production.
 - `VerifiedPrincipal.id` must be a UUID at the coordinator boundary before
   `SET LOCAL ranchos.principal_id`. A non-UUID id fails closed and does not
   open a durable transaction.
-- Durable idempotency uses a canonical request digest scoped by tenant and
-  operation.
+- Durable idempotency uses tenant, matrix-operation scope, and caller
+  identity as the unique key. The canonical request digest is compared for
+  replay versus conflict. Committed `animal_create` replay returns the animal
+  referenced by `result_animal_id`.
 - Database use remains disposable-only. Do not create a standing DEV database.
 
 ## Remaining before apply
 
 - The deployed OpenClaw-authoritative ingress remains a separate prerequisite.
-- Coordinator and repository implementation require a later explicit approval.
+- The transport-free DEV `animal_create` coordinator and repository exist in
+  source. A PostgreSQL adapter, database apply, standing DEV database,
+  ingress, deployed runtime, device path, and Production implementation are
+  not authorized or proven.
 - Any later apply or live coordinator proof uses a disposable DEV database
   only, under a later explicit apply approval. A standing DEV database is
   not authorized.

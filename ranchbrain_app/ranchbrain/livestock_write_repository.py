@@ -17,7 +17,6 @@ from ranchbrain.tenancy import TenantContext
 
 
 ANIMAL_CREATE_OPERATION = "ranchos.livestock.animal-create"
-ANIMAL_CREATE_SQL_OPERATION = "animal_create"
 CONFIRMATION_TTL = timedelta(minutes=2)
 
 
@@ -59,6 +58,7 @@ class LivestockIdempotencyRecord:
     operation: str
     outcome: str
     transaction_id: str
+    result_animal_id: str | None = None
     animal: LivestockAnimalV1 | None = None
 
 
@@ -162,7 +162,7 @@ class LivestockWriteRepository:
                 scope,
                 identity,
                 digest,
-                ANIMAL_CREATE_SQL_OPERATION,
+                ANIMAL_CREATE_OPERATION,
                 "reserved",
                 transaction_id,
             )
@@ -170,7 +170,12 @@ class LivestockWriteRepository:
             return IdempotencyReservation(False, reserved)
         if existing.key_digest != digest:
             raise LivestockPersistenceError("idempotency identity reused with a different digest", LivestockPersistenceErrorCode.IDEMPOTENCY_CONFLICT)
-        if existing.outcome not in {"committed", "replayed"} or existing.animal is None:
+        if (
+            existing.outcome != "committed"
+            or existing.result_animal_id is None
+            or existing.animal is None
+            or existing.animal.id != existing.result_animal_id
+        ):
             raise LivestockPersistenceError("idempotency outcome is ambiguous", LivestockPersistenceErrorCode.IDEMPOTENCY_AMBIGUOUS)
         return IdempotencyReservation(True, existing)
 
@@ -181,4 +186,13 @@ class LivestockWriteRepository:
         session.insert_audit(record)
 
     def finalize_idempotency(self, session: LivestockMutationSession, record: LivestockIdempotencyRecord) -> None:
+        if (
+            record.outcome != "committed"
+            or record.scope != ANIMAL_CREATE_OPERATION
+            or record.operation != ANIMAL_CREATE_OPERATION
+            or record.result_animal_id is None
+            or record.animal is None
+            or record.animal.id != record.result_animal_id
+        ):
+            raise LivestockPersistenceError("idempotency outcome is ambiguous", LivestockPersistenceErrorCode.IDEMPOTENCY_AMBIGUOUS)
         session.finalize_idempotency(record)

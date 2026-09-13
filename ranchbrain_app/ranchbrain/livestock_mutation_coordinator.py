@@ -19,7 +19,6 @@ from uuid import UUID, uuid4
 from ranchbrain.livestock_write_model import AnimalCreateCommandV1, LivestockAnimalV1, create_animal
 from ranchbrain.livestock_write_repository import (
     ANIMAL_CREATE_OPERATION,
-    ANIMAL_CREATE_SQL_OPERATION,
     LivestockAuditRecord,
     LivestockConfirmationRecord,
     LivestockIdempotencyRecord,
@@ -196,7 +195,7 @@ class LivestockMutationCoordinator:
                     str(uuid4()),
                     context.tenant_id,
                     transaction_id,
-                    ANIMAL_CREATE_SQL_OPERATION,
+                    ANIMAL_CREATE_OPERATION,
                     animal.id,
                     context.user_id,
                     context.principal_id,
@@ -219,9 +218,10 @@ class LivestockMutationCoordinator:
                     ANIMAL_CREATE_OPERATION,
                     request.idempotency_identity,
                     digest,
-                    ANIMAL_CREATE_SQL_OPERATION,
+                    ANIMAL_CREATE_OPERATION,
                     "committed",
                     transaction_id,
+                    animal.id,
                     animal,
                 ),
             )

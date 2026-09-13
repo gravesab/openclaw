@@ -147,16 +147,29 @@ CREATE UNIQUE INDEX livestock_lifecycle_events_supersedes_unique
 
 CREATE TABLE ranchos.livestock_idempotency (
     tenant_id uuid NOT NULL REFERENCES ranchos.tenants(id),
-    scope text NOT NULL CHECK (scope <> ''),
+    scope text NOT NULL,
+    identity text NOT NULL CHECK (identity <> ''),
     key_digest text NOT NULL CHECK (key_digest <> ''),
     operation text NOT NULL CHECK (operation IN (
-        'animal_create', 'identifier_assign', 'identifier_retire',
-        'lifecycle_record', 'lifecycle_correct'
+        'ranchos.livestock.animal-create',
+        'ranchos.livestock.identifier-assign',
+        'ranchos.livestock.identifier-retire',
+        'ranchos.livestock.lifecycle-record',
+        'ranchos.livestock.lifecycle-correct'
     )),
-    outcome text NOT NULL CHECK (outcome <> ''),
+    outcome text NOT NULL CHECK (outcome IN ('reserved', 'committed')),
     transaction_id uuid NOT NULL,
+    result_animal_id uuid,
     created_at timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    PRIMARY KEY (tenant_id, scope, key_digest)
+    PRIMARY KEY (tenant_id, scope, identity),
+    CONSTRAINT livestock_idempotency_scope_matches_operation CHECK (scope = operation),
+    CONSTRAINT livestock_idempotency_reserved_has_no_animal CHECK (
+        (outcome = 'reserved' AND result_animal_id IS NULL)
+        OR (outcome = 'committed' AND result_animal_id IS NOT NULL)
+    ),
+    CONSTRAINT livestock_idempotency_committed_animal_matches_tenant
+        FOREIGN KEY (tenant_id, result_animal_id)
+        REFERENCES ranchos.livestock_animals (tenant_id, id)
 );
 
 CREATE TABLE ranchos.livestock_confirmations (
@@ -165,8 +178,11 @@ CREATE TABLE ranchos.livestock_confirmations (
     actor_user_id uuid NOT NULL REFERENCES ranchos.users(id),
     principal_id uuid NOT NULL,
     operation text NOT NULL CHECK (operation IN (
-        'animal_create', 'identifier_assign', 'identifier_retire',
-        'lifecycle_record', 'lifecycle_correct'
+        'ranchos.livestock.animal-create',
+        'ranchos.livestock.identifier-assign',
+        'ranchos.livestock.identifier-retire',
+        'ranchos.livestock.lifecycle-record',
+        'ranchos.livestock.lifecycle-correct'
     )),
     target_manifest text NOT NULL CHECK (target_manifest <> ''),
     command_digest text NOT NULL CHECK (command_digest <> ''),
@@ -191,8 +207,11 @@ CREATE TABLE ranchos.livestock_mutation_audit (
     id uuid NOT NULL,
     transaction_id uuid NOT NULL,
     operation text NOT NULL CHECK (operation IN (
-        'animal_create', 'identifier_assign', 'identifier_retire',
-        'lifecycle_record', 'lifecycle_correct'
+        'ranchos.livestock.animal-create',
+        'ranchos.livestock.identifier-assign',
+        'ranchos.livestock.identifier-retire',
+        'ranchos.livestock.lifecycle-record',
+        'ranchos.livestock.lifecycle-correct'
     )),
     targets text NOT NULL CHECK (targets <> ''),
     actor_user_id uuid NOT NULL REFERENCES ranchos.users(id),
@@ -386,6 +405,38 @@ CREATE TRIGGER livestock_confirmations_trusted_consume
 BEFORE INSERT OR UPDATE ON ranchos.livestock_confirmations
 FOR EACH ROW
 EXECUTE PROCEDURE ranchos.livestock_confirmations_enforce_trusted_consume();
+
+CREATE OR REPLACE FUNCTION ranchos.livestock_idempotency_enforce_finalize_only()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path TO ranchos, pg_temp
+AS $$
+BEGIN
+    IF OLD.tenant_id IS DISTINCT FROM NEW.tenant_id
+       OR OLD.scope IS DISTINCT FROM NEW.scope
+       OR OLD.identity IS DISTINCT FROM NEW.identity
+       OR OLD.key_digest IS DISTINCT FROM NEW.key_digest
+       OR OLD.operation IS DISTINCT FROM NEW.operation
+       OR OLD.transaction_id IS DISTINCT FROM NEW.transaction_id THEN
+        RAISE EXCEPTION 'idempotency identity is immutable'
+            USING ERRCODE = '23514';
+    END IF;
+    IF OLD.outcome = 'committed' THEN
+        RAISE EXCEPTION 'committed idempotency is immutable'
+            USING ERRCODE = '23514';
+    END IF;
+    IF OLD.outcome <> 'reserved' OR NEW.outcome <> 'committed' OR NEW.result_animal_id IS NULL THEN
+        RAISE EXCEPTION 'idempotency finalize is invalid'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER livestock_idempotency_finalize_only
+BEFORE UPDATE ON ranchos.livestock_idempotency
+FOR EACH ROW
+EXECUTE PROCEDURE ranchos.livestock_idempotency_enforce_finalize_only();
 
 ALTER TABLE ranchos.livestock_animals ENABLE ROW LEVEL SECURITY;
 ALTER TABLE ranchos.livestock_animals FORCE ROW LEVEL SECURITY;

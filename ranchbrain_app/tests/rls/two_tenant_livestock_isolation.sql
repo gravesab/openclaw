@@ -47,15 +47,20 @@ INSERT INTO ranchos.livestock_lifecycle_events (
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000303', '00000000-0000-0000-0000-000000000301', 'intake', CURRENT_TIMESTAMP,
     'fixture', 'event-a-1', 'fixture-v1', CURRENT_TIMESTAMP, '00000000-0000-0000-0000-000000000011'
 );
-INSERT INTO ranchos.livestock_idempotency (tenant_id, scope, key_digest, operation, outcome, transaction_id)
-VALUES ('00000000-0000-0000-0000-0000000000a1', 'livestock', 'digest-a', 'animal_create', 'committed', '00000000-0000-0000-0000-000000000307');
+INSERT INTO ranchos.livestock_idempotency (
+    tenant_id, scope, identity, key_digest, operation, outcome, transaction_id, result_animal_id
+) VALUES (
+    '00000000-0000-0000-0000-0000000000a1', 'ranchos.livestock.animal-create', 'idem-a', 'digest-a',
+    'ranchos.livestock.animal-create', 'committed', '00000000-0000-0000-0000-000000000307',
+    '00000000-0000-0000-0000-000000000301'
+);
 INSERT INTO ranchos.livestock_confirmations (
     tenant_id, id, actor_user_id, principal_id, operation, target_manifest, command_digest,
     policy_version, validator_version, idempotency_identity, issued_at, expires_at
 ) VALUES (
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000308',
     '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001',
-    'animal_create', 'animal-a', 'digest-a', 'policy-v1', 'validator-v1', 'digest-a',
+    'ranchos.livestock.animal-create', 'animal-a', 'digest-a', 'policy-v1', 'validator-v1', 'idem-a',
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '2 minutes'
 );
 INSERT INTO ranchos.livestock_mutation_audit (
@@ -64,7 +69,7 @@ INSERT INTO ranchos.livestock_mutation_audit (
     provenance_source_version, confirmation_id, result_metadata
 ) VALUES (
     '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000309',
-    '00000000-0000-0000-0000-000000000307', 'animal_create', 'animal-a',
+    '00000000-0000-0000-0000-000000000307', 'ranchos.livestock.animal-create', 'animal-a',
     '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'corr-a',
     'policy-v1', 'validator-v1', 'committed', 'fixture', 'animal-a', 'fixture-v1',
     '00000000-0000-0000-0000-000000000308', 'created'
@@ -99,15 +104,20 @@ INSERT INTO ranchos.livestock_lifecycle_events (
     '00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-000000000403', '00000000-0000-0000-0000-000000000401', 'intake', CURRENT_TIMESTAMP,
     'fixture', 'event-b-1', 'fixture-v1', CURRENT_TIMESTAMP, '00000000-0000-0000-0000-000000000011'
 );
-INSERT INTO ranchos.livestock_idempotency (tenant_id, scope, key_digest, operation, outcome, transaction_id)
-VALUES ('00000000-0000-0000-0000-0000000000b2', 'livestock', 'digest-b', 'animal_create', 'committed', '00000000-0000-0000-0000-000000000404');
+INSERT INTO ranchos.livestock_idempotency (
+    tenant_id, scope, identity, key_digest, operation, outcome, transaction_id, result_animal_id
+) VALUES (
+    '00000000-0000-0000-0000-0000000000b2', 'ranchos.livestock.animal-create', 'idem-b', 'digest-b',
+    'ranchos.livestock.animal-create', 'committed', '00000000-0000-0000-0000-000000000404',
+    '00000000-0000-0000-0000-000000000401'
+);
 INSERT INTO ranchos.livestock_confirmations (
     tenant_id, id, actor_user_id, principal_id, operation, target_manifest, command_digest,
     policy_version, validator_version, idempotency_identity, issued_at, expires_at
 ) VALUES (
     '00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-000000000405',
     '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001',
-    'animal_create', 'animal-b', 'digest-b', 'policy-v1', 'validator-v1', 'digest-b',
+    'ranchos.livestock.animal-create', 'animal-b', 'digest-b', 'policy-v1', 'validator-v1', 'idem-b',
     CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + interval '2 minutes'
 );
 INSERT INTO ranchos.livestock_mutation_audit (
@@ -116,7 +126,7 @@ INSERT INTO ranchos.livestock_mutation_audit (
     provenance_source_version, confirmation_id, result_metadata
 ) VALUES (
     '00000000-0000-0000-0000-0000000000b2', '00000000-0000-0000-0000-000000000406',
-    '00000000-0000-0000-0000-000000000404', 'animal_create', 'animal-b',
+    '00000000-0000-0000-0000-000000000404', 'ranchos.livestock.animal-create', 'animal-b',
     '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'corr-b',
     'policy-v1', 'validator-v1', 'committed', 'fixture', 'animal-b', 'fixture-v1',
     '00000000-0000-0000-0000-000000000405', 'created'

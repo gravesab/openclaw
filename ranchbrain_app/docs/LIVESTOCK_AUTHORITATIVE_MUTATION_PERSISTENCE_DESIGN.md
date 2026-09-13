@@ -1,14 +1,15 @@
 # Ranch OS Livestock authoritative mutation persistence design
 
-Status: Proposed for approval; DEV persistence decisions recorded
+Status: DEV SQL contract landed unapplied; coordinator decisions recorded
 Scope: Future durable mutation boundary for animal, identifier, and lifecycle contracts
 Last updated: 2026-09-13 by A.Graves
 
 This document defines the approval gate for making the local
-`ranchbrain.livestock_write_model` contracts durable. The recorded DEV
-decisions below authorize only a later, separately landed unapplied DEV SQL
-contract. They do not authorize applying that SQL, a repository, trusted
-ingress, credential, service, UI, device work, or Production.
+`ranchbrain.livestock_write_model` contracts durable. The unapplied DEV SQL
+contract has landed. The coordinator decisions below authorize only later,
+separately approved coordinator work. They do not authorize implementing that
+coordinator or repository, opening ingress, creating a standing DEV database,
+credential, service, UI, device work, or Production.
 
 The repository-wide [atomic transaction design](../../docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md), [confirmation policy](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md), and [identity policy](../../docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md) remain authoritative.
 
@@ -23,19 +24,26 @@ transaction or claim authority.
 
 The first durable slice is limited to `animal_create`, `identifier_assign`,
 `identifier_retire`, routine `lifecycle_record`, and `lifecycle_correct`.
-Each of those five operations requires a current CF-2 confirmation. Sale,
-death, transfer, archive, care, feed, cost,
-attachments, exports, notifications, jobs, legal ownership, and Finance posting
-remain unavailable. Ranch Health is human-only and Ranch Finance owns its
-ledger.
+Each of those five operations requires a current CF-2 confirmation registered
+on the [canonical confirmation matrix](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md)
+as `ranchos.livestock.animal-create`, `ranchos.livestock.identifier-assign`,
+`ranchos.livestock.identifier-retire`, `ranchos.livestock.lifecycle-record`,
+and `ranchos.livestock.lifecycle-correct`. The future coordinator, not the
+pure write model, consumes that confirmation. Sale, death, transfer, archive,
+care, feed, cost, attachments, exports, notifications, jobs, legal ownership,
+and Finance posting remain unregistered and unavailable. Ranch Health is
+human-only and Ranch Finance owns its ledger.
 
 ## Admission requirements
 
 Before starting a transaction, the coordinator must have a versioned immutable
-principal from the sole deployed ingress; an explicit active tenant selection;
-current membership and exact capability; a bounded typed command; canonical
-digest; tenant-bound idempotency key; target manifest; provenance references;
-policy and validator versions; and a correlation ID.
+principal from the sole deployed ingress; a UUID `VerifiedPrincipal.id`; an
+explicit active tenant selection resolved by the injected
+`TenantContextResolver`; current membership and exact capability; a bounded
+typed command; a canonical request digest scoped by tenant and operation;
+tenant-and-operation-scoped idempotency identity; target manifest; provenance
+references; policy and validator versions; and a correlation ID. A
+non-UUID principal id fails closed before any `SET LOCAL ranchos.principal_id`.
 
 Every first-slice operation additionally requires a current CF-2 confirmation
 bound to actor, tenant, operation, target, digest, policy, validator, and
@@ -85,12 +93,13 @@ identity only.
 
 ## Idempotency, confirmation, and audit
 
-Idempotency binds tenant, actor/service identity, operation, command digest,
-target manifest, policy/validator version, and confirmation when present. An
-identical replay returns its original outcome without another append,
-confirmation consumption, or success audit. The same key with different content
-returns a stable conflict. Ambiguous outcomes remain blocked until durable
-transaction/idempotency state proves the result.
+Durable idempotency uses a canonical request digest scoped by tenant and
+operation. That digest, together with actor/service identity, target manifest,
+policy/validator version, and the current confirmation identity, is the
+idempotency key. An identical replay returns its original outcome without
+another append, confirmation consumption, or success audit. The same key with
+different content returns a stable conflict. Ambiguous outcomes remain blocked
+until durable transaction/idempotency state proves the result.
 
 Every committed mutation writes immutable tenant-scoped audit evidence in the
 same transaction: transaction ID, tenant, operation, targets, actor/principal,
@@ -136,18 +145,20 @@ credentials, SQL, reusable confirmations, or unsupported client claims.
 ### Idempotency retention and status query
 
 A tenant-scoped idempotency row holds scope, key digest, operation, outcome,
-and transaction ID. Rows are retained indefinitely. A status query is allowed
-only with a current `TenantContext` and the exact key. The same key with a
-different digest is a stable conflict.
+and transaction ID. Scope is the tenant plus the matrix operation. The key
+digest is the canonical request digest for that scope. Rows are retained
+indefinitely. A status query is allowed only with a current `TenantContext`
+and the exact key. The same key with a different digest is a stable conflict.
 
 ### Confirmation class and expiry
 
-All five first-slice operations are CF-2. Confirmations are fresh and
-single-use. Freshness expires 2 minutes after issuance and is enforced with
-trusted transaction-time state. Registering these operations on the
-repository-wide confirmation matrix is a separate docs change. Sale, death,
-transfer, archive, and Production stay out of slice and are not lowered to
-CF-2.
+All five first-slice operations are CF-2 on the canonical confirmation matrix.
+Confirmations are fresh and single-use. Freshness expires 2 minutes after
+issuance and is enforced with trusted transaction-time state. The
+authoritative coordinator consumes that confirmation for every first-slice
+operation. The pure write model does not consume, issue, or satisfy CF-2.
+Sale, death, transfer, archive, and Production stay out of slice and are not
+lowered to CF-2.
 
 ### Audit retention and reader access
 
@@ -189,10 +200,8 @@ After this design amendment, a separately authorized change may land only:
 - `ranchbrain_app/tests/rls/two_tenant_livestock_isolation.sql`
 - `ranchbrain_app/tests/test_livestock_migration_contract.py`
 
-That change must match these decisions and the committed `pet` / companion
-catalog. It must not apply SQL, create roles, open ingress, add a repository,
-or touch Production. The current untracked `002` is stale and must not land
-as-is.
+Those three paths have landed. This amendment does not reopen SQL, apply,
+roles, ingress, or a repository.
 
 ## Approved final SQL implementation package
 
@@ -269,16 +278,40 @@ Against a disposable isolated DEV database, adversarial tests must prove:
 6. No UI, AI, fixture, client, direct database role, or service identity bypasses
    the future trusted ingress and mutation coordinator.
 
-Items 1 and 3 are the SQL-land gate. Items 2, 4, 5, and 6 stay closed until a
-later coordinator implementation is approved.
+Items 1 and 3 are the SQL-land gate and have been proven on a destroyed
+disposable cluster. Items 2, 4, 5, and 6 stay closed until a later coordinator
+implementation is approved. Later live coordinator proof must use another
+disposable DEV database. A standing DEV database is not authorized.
+
+## Approved DEV coordinator decisions
+
+These decisions are recorded before any coordinator or repository
+implementation. They do not authorize that implementation, ingress, a standing
+DEV database, or Production.
+
+- All five first-slice operations are registered on the canonical confirmation
+  matrix before coordinator implementation: `ranchos.livestock.animal-create`,
+  `ranchos.livestock.identifier-assign`, `ranchos.livestock.identifier-retire`,
+  `ranchos.livestock.lifecycle-record`, and `ranchos.livestock.lifecycle-correct`.
+- The authoritative coordinator, not `ranchbrain.livestock_write_model`,
+  enforces fresh, single-use CF-2 confirmation consumption for all five
+  operations. The write model remains a pure invariant handler.
+- The first coordinator slice keeps `TenantContextResolver` injected. It does
+  not read `001` memberships as its authority source.
+- `VerifiedPrincipal.id` must be a UUID at the coordinator boundary before
+  `SET LOCAL ranchos.principal_id`. A non-UUID id fails closed and does not
+  open a durable transaction.
+- Durable idempotency uses a canonical request digest scoped by tenant and
+  operation.
+- Database use remains disposable-only. Do not create a standing DEV database.
 
 ## Remaining before apply
 
-- Register the five livestock operations on the canonical confirmation matrix
-  as CF-2, or keep them livestock-local until that matrix change is approved.
-- Provision disposable-DEV migrator/runtime roles and apply only under a later
-  explicit apply approval.
 - The deployed OpenClaw-authoritative ingress remains a separate prerequisite.
+- Coordinator and repository implementation require a later explicit approval.
+- Any later apply or live coordinator proof uses a disposable DEV database
+  only, under a later explicit apply approval. A standing DEV database is
+  not authorized.
 
 ## Related architecture
 

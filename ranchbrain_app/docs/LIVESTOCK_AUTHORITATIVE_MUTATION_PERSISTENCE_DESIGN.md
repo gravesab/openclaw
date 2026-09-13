@@ -153,7 +153,14 @@ CF-2.
 
 Livestock mutation audit is write-only in this slice. There is no livestock
 audit reader, viewer path, or new read capability. Retention is indefinite.
-Least-privilege RLS still applies. A later reader needs its own approval.
+`ranchos_dev_runtime` receives `INSERT` only on `ranchos.livestock_mutation_audit`
+and must not receive `SELECT`. Least-privilege RLS still applies. A later
+reader needs its own approval.
+
+Unfiltered two-tenant audit proof uses the **migrator-under-FORCE-RLS**
+approach: `ranchos_dev_migrator` owns the table, `FORCE ROW LEVEL SECURITY`
+still applies to that owner, and the proof counts audit rows as the migrator
+after `SET LOCAL ranchos.tenant_id`. Runtime never reads audit.
 
 ### RLS naming and ownership
 
@@ -166,11 +173,11 @@ are required on any later livestock SQL file.
 ### Adversarial two-tenant SQL proof
 
 The SQL-land gate is a disposable-DEV, rollback-only proof after `001`:
-unfiltered reads on every livestock table in that file (animals, assignments,
-retirements, lifecycle events, provenance-bearing domain rows, mutation audit,
-and idempotency); cross-tenant assign, retire, and correct denied; missing or
-malformed `SET LOCAL` denied; runtime has no `BYPASSRLS`. Fixtures use
-`ear_tag` and may use `pet` / `companion`. Stale `'tag'` fixtures are
+unfiltered runtime reads on animals, assignments, retirements, lifecycle
+events, idempotency, and confirmations; unfiltered migrator-under-FORCE-RLS
+reads on mutation audit; cross-tenant assign, retire, and correct denied;
+missing or malformed `SET LOCAL` denied; runtime has no `BYPASSRLS`. Fixtures
+use `ear_tag` and may use `pet` / `companion`. Stale `'tag'` fixtures are
 rejected. Coordinator concurrency, confirmation-consumption races, and
 idempotency replay races remain later live proof, not the SQL-land gate.
 
@@ -186,6 +193,66 @@ That change must match these decisions and the committed `pet` / companion
 catalog. It must not apply SQL, create roles, open ingress, add a repository,
 or touch Production. The current untracked `002` is stale and must not land
 as-is.
+
+## Approved final SQL implementation package
+
+These close the rewrite-plan ambiguities. They still do not apply SQL, open
+ingress, add a repository, or touch Production.
+
+### Catalog and animal row
+
+`livestock_animals.species_code` includes `pet`. Production-type CHECK includes
+`pet → companion` only. No pet breed; `breed_code` stays null for `pet`.
+`rabbit` and `other` are rejected. First-slice animals are create-immutable:
+`status` is `active` only, and `updated_at` is omitted. Archive remains
+unavailable.
+
+### Identifier assignment and retirement SQL
+
+`animal_identifiers` stores `normalized_value` only; there is no `value` or
+`retired_at` column. Types are `ear_tag`, `rfid`, `brand`, and
+`registry_number`. `animal_identifier_retirements` is a separate table with a
+unique `(tenant_id, identifier_id)` and closed reasons. Active uniqueness is a
+tenant-scoped unique constraint over assignments that have no retirement row,
+enforced by a constraint trigger. A mutable active flag is rejected.
+Retirement-before-effective and same-type supersession are also constraint
+triggers, not coordinator-only.
+
+### Named support tables
+
+- `ranchos.livestock_idempotency`: tenant, scope, key digest, operation,
+  outcome, transaction ID; unique `(tenant_id, scope, key_digest)`.
+- `ranchos.livestock_confirmations`: CF-2 records for all five first-slice
+  operations; bind actor, tenant, operation, target, digest, policy/validator,
+  and idempotency identity; `issued_at` and `expires_at` with
+  `expires_at = issued_at + interval '2 minutes'`; single-use `consumed_at`.
+  Expiry and consumption compare against trusted transaction time
+  (`CURRENT_TIMESTAMP`), not client clocks.
+- `ranchos.livestock_mutation_audit`: as specified above; runtime `INSERT`
+  only.
+
+Domain animals, assignments, retirements, and lifecycle events carry
+provenance columns: `provenance_source_type`, `provenance_source_id`,
+`provenance_source_version`, `provenance_observed_at`.
+
+Lifecycle events add nullable `supersedes_event_id` and `correction_reason`
+(`incorrect_time`, `incorrect_value`, `duplicate_entry`). Routine rows leave
+both null; correction rows set both. Unique `(tenant_id, supersedes_event_id)`
+where the target is present.
+
+Every new table uses the `001` header, migrator-only preflight, runtime
+`NOBYPASSRLS`, ENABLE/FORCE RLS, `<table>_tenant_isolation`, and
+`OWNER TO ranchos_dev_migrator` plus catalog asserts.
+
+### Proof and tests
+
+Isolation SQL remains rollback-only. Tenant A runtime unfiltered counts cover
+every livestock table except mutation audit. Mutation audit unfiltered counts
+run as `ranchos_dev_migrator` under FORCE RLS. Cross-tenant assign, retire, and
+correct are denied. Missing or malformed `SET LOCAL` is denied. Fixtures use
+`ear_tag`; a `pet` / `companion` row with null breed is permitted. Contract
+tests pin this package, including the migrator-under-FORCE-RLS audit proof
+and the absence of assignment `retired_at` / `'tag'`.
 
 ## Required proof before implementation
 

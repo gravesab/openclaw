@@ -323,10 +323,12 @@ class LivestockAnimalCreateDisposablePgTests(unittest.TestCase):
                 str(app_root / "migrations" / "002_livestock_read_model_foundation.sql"),
                 "-f",
                 str(app_root / "migrations" / "003_livestock_identifier_idempotency_outcomes.sql"),
+                "-f",
+                str(app_root / "migrations" / "004_livestock_lifecycle_idempotency_outcomes.sql"),
             ],
         )
         if applied.returncode != 0:
-            raise LiveProofBlocked("blocked: committed 001/002/003 apply failed")
+            raise LiveProofBlocked("blocked: committed 001/002/003/004 apply failed")
 
     @classmethod
     def _connect(cls):

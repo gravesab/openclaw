@@ -1,8 +1,8 @@
 """DEV-only livestock write persistence adapter.
 
 The coordinator must already have begun a transaction and set transaction-local
-Ranch OS settings. This module does not parse identity, issue SET or RESET, open
-ingress, or authorize lifecycle mutations.
+Ranch OS settings. This module does not parse identity, issue SET or RESET, or
+open ingress.
 """
 
 from __future__ import annotations
@@ -12,13 +12,21 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Protocol
 
-from ranchbrain.livestock_write_model import AnimalIdentifierType, AnimalIdentifierV1, IdentifierRetirementV1, LivestockAnimalV1
+from ranchbrain.livestock_write_model import (
+    AnimalIdentifierType,
+    AnimalIdentifierV1,
+    IdentifierRetirementV1,
+    LivestockAnimalV1,
+    RoutineLifecycleEventV1,
+)
 from ranchbrain.tenancy import TenantContext
 
 
 ANIMAL_CREATE_OPERATION = "ranchos.livestock.animal-create"
 IDENTIFIER_ASSIGN_OPERATION = "ranchos.livestock.identifier-assign"
 IDENTIFIER_RETIRE_OPERATION = "ranchos.livestock.identifier-retire"
+LIFECYCLE_RECORD_OPERATION = "ranchos.livestock.lifecycle-record"
+LIFECYCLE_CORRECT_OPERATION = "ranchos.livestock.lifecycle-correct"
 CONFIRMATION_TTL = timedelta(minutes=2)
 
 
@@ -28,6 +36,7 @@ class LivestockPersistenceErrorCode(str, Enum):
     IDEMPOTENCY_AMBIGUOUS = "livestock_idempotency_ambiguous"
     IDENTIFIER_NOT_AVAILABLE = "livestock_identifier_not_available"
     IDENTIFIER_INVALID = "livestock_identifier_invalid"
+    LIFECYCLE_INVALID = "livestock_lifecycle_invalid"
     TARGET_NOT_FOUND = "livestock_target_not_found"
 
 
@@ -69,6 +78,8 @@ class LivestockIdempotencyRecord:
     identifier: AnimalIdentifierV1 | None = None
     result_retirement_id: str | None = None
     retirement: IdentifierRetirementV1 | None = None
+    result_lifecycle_event_id: str | None = None
+    event: RoutineLifecycleEventV1 | None = None
 
 
 @dataclass(frozen=True)
@@ -131,6 +142,9 @@ class LivestockMutationSession(Protocol):
     ) -> tuple[IdentifierRetirementV1, ...]: ...
     def insert_identifier(self, identifier: AnimalIdentifierV1) -> None: ...
     def insert_retirement(self, retirement: IdentifierRetirementV1) -> None: ...
+    def lock_lifecycle_animal_history(self, tenant_id: str, animal_id: str) -> None: ...
+    def load_lifecycle_events_for_animal(self, tenant_id: str, animal_id: str) -> tuple[RoutineLifecycleEventV1, ...]: ...
+    def insert_lifecycle_event(self, event: RoutineLifecycleEventV1) -> None: ...
     def insert_audit(self, record: LivestockAuditRecord) -> None: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
@@ -147,6 +161,8 @@ def _committed_result_is_exact(record: LivestockIdempotencyRecord) -> bool:
                 and record.identifier is None
                 and record.result_retirement_id is None
                 and record.retirement is None
+                and record.result_lifecycle_event_id is None
+                and record.event is None
             )
         case operation if operation == IDENTIFIER_ASSIGN_OPERATION:
             return (
@@ -157,6 +173,8 @@ def _committed_result_is_exact(record: LivestockIdempotencyRecord) -> bool:
                 and record.animal is None
                 and record.result_retirement_id is None
                 and record.retirement is None
+                and record.result_lifecycle_event_id is None
+                and record.event is None
             )
         case operation if operation == IDENTIFIER_RETIRE_OPERATION:
             return (
@@ -167,6 +185,20 @@ def _committed_result_is_exact(record: LivestockIdempotencyRecord) -> bool:
                 and record.animal is None
                 and record.result_identifier_id is None
                 and record.identifier is None
+                and record.result_lifecycle_event_id is None
+                and record.event is None
+            )
+        case operation if operation in (LIFECYCLE_RECORD_OPERATION, LIFECYCLE_CORRECT_OPERATION):
+            return (
+                record.result_lifecycle_event_id is not None
+                and record.event is not None
+                and record.event.id == record.result_lifecycle_event_id
+                and record.result_animal_id is None
+                and record.animal is None
+                and record.result_identifier_id is None
+                and record.identifier is None
+                and record.result_retirement_id is None
+                and record.retirement is None
             )
         case _ as unreachable:
             _ = unreachable
@@ -250,6 +282,9 @@ class LivestockWriteRepository:
 
     def persist_retirement(self, session: LivestockMutationSession, retirement: IdentifierRetirementV1) -> None:
         session.insert_retirement(retirement)
+
+    def persist_lifecycle_event(self, session: LivestockMutationSession, event: RoutineLifecycleEventV1) -> None:
+        session.insert_lifecycle_event(event)
 
     def insert_audit(self, session: LivestockMutationSession, record: LivestockAuditRecord) -> None:
         session.insert_audit(record)

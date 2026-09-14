@@ -1,4 +1,4 @@
-"""Disposable-only identifier assign/retire coordinator proof through LivestockPgSession.
+"""Disposable-only lifecycle record/correct coordinator proof through LivestockPgSession.
 
 Creates and destroys a unix-socket-only temporary cluster and a temporary
 psycopg2-binary==2.9.12 venv for this process. Does not read an environment
@@ -22,28 +22,28 @@ import venv
 
 from ranchbrain.livestock_mutation_coordinator import (
     LivestockAnimalCreateRequest,
-    LivestockIdentifierAssignRequest,
-    LivestockIdentifierRetireRequest,
+    LivestockLifecycleCorrectRequest,
+    LivestockLifecycleRecordRequest,
     LivestockMutationCoordinator,
     LivestockMutationError,
     LivestockMutationErrorCode,
     canonical_animal_create_digest,
-    canonical_identifier_assign_digest,
-    canonical_identifier_retire_digest,
+    canonical_lifecycle_correct_digest,
+    canonical_lifecycle_record_digest,
 )
 from ranchbrain.livestock_pg_session import LivestockPgSession
 from ranchbrain.livestock_read_model import LivestockFactProvenance
 from ranchbrain.livestock_write_model import (
     AnimalCreateCommandV1,
-    AnimalIdentifierType,
-    IdentifierAssignCommandV1,
-    IdentifierRetireCommandV1,
-    IdentifierRetirementReason,
+    LifecycleCorrectionConfirmationV1,
+    LifecycleCorrectionReason,
+    RoutineLifecycleEventCommandV1,
+    RoutineLifecycleEventType,
 )
 from ranchbrain.livestock_write_repository import (
     ANIMAL_CREATE_OPERATION,
-    IDENTIFIER_ASSIGN_OPERATION,
-    IDENTIFIER_RETIRE_OPERATION,
+    LIFECYCLE_CORRECT_OPERATION,
+    LIFECYCLE_RECORD_OPERATION,
     LivestockConfirmationRecord,
     LivestockWriteRepository,
 )
@@ -51,8 +51,10 @@ from ranchbrain.tenancy import Role, Tenant, TenantContextResolver, TenantMember
 
 
 PRINCIPAL_A = "00000000-0000-0000-0000-000000000001"
+PRINCIPAL_M = "00000000-0000-0000-0000-000000000003"
 PRINCIPAL_B = "00000000-0000-0000-0000-000000000002"
 USER_A = "00000000-0000-0000-0000-000000000011"
+USER_M = "00000000-0000-0000-0000-000000000013"
 USER_B = "00000000-0000-0000-0000-000000000012"
 TENANT_A = "00000000-0000-0000-0000-0000000000a1"
 TENANT_B = "00000000-0000-0000-0000-0000000000b2"
@@ -120,10 +122,11 @@ def _principal(principal_id: str, correlation_id: str, now: datetime) -> Verifie
 def _resolver() -> TenantContextResolver:
     return TenantContextResolver(
         environment="development",
-        users=[User(USER_A, PRINCIPAL_A), User(USER_B, PRINCIPAL_B)],
+        users=[User(USER_A, PRINCIPAL_A), User(USER_M, PRINCIPAL_M), User(USER_B, PRINCIPAL_B)],
         tenants=[Tenant(TENANT_A, "tenant-a", "Tenant A"), Tenant(TENANT_B, "tenant-b", "Tenant B")],
         memberships=[
-            TenantMembership(TENANT_A, USER_A, Role.MANAGER),
+            TenantMembership(TENANT_A, USER_A, Role.OWNER),
+            TenantMembership(TENANT_A, USER_M, Role.MANAGER),
             TenantMembership(TENANT_B, USER_B, Role.MANAGER),
         ],
     )
@@ -140,28 +143,43 @@ def _animal_command(animal_id: str, now: datetime, display_name: str = "Juniper"
     )
 
 
-def _assign_command(identifier_id: str, animal_id: str, now: datetime, value: str = "RB-104") -> IdentifierAssignCommandV1:
-    return IdentifierAssignCommandV1(
-        identifier_id,
+def _record_command(
+    event_id: str,
+    animal_id: str,
+    now: datetime,
+    event_type: RoutineLifecycleEventType = RoutineLifecycleEventType.INTAKE,
+    occurred_at: datetime | None = None,
+) -> RoutineLifecycleEventCommandV1:
+    return RoutineLifecycleEventCommandV1(
+        event_id,
         animal_id,
-        AnimalIdentifierType.EAR_TAG,
-        value,
-        now,
-        LivestockFactProvenance("fixture", identifier_id, "fixture-v1", now),
+        event_type,
+        occurred_at or now,
+        LivestockFactProvenance("fixture", event_id, "fixture-v1", now),
     )
 
 
-def _retire_command(retirement_id: str, identifier_id: str, now: datetime) -> IdentifierRetireCommandV1:
-    return IdentifierRetireCommandV1(
-        retirement_id,
-        identifier_id,
-        IdentifierRetirementReason.REPLACED,
-        now + timedelta(minutes=1),
-        LivestockFactProvenance("fixture", retirement_id, "fixture-v1", now),
+def _correct_command(
+    event_id: str,
+    animal_id: str,
+    supersedes_event_id: str,
+    now: datetime,
+    user_id: str,
+    occurred_at: datetime | None = None,
+) -> RoutineLifecycleEventCommandV1:
+    return RoutineLifecycleEventCommandV1(
+        event_id,
+        animal_id,
+        RoutineLifecycleEventType.INTAKE,
+        occurred_at or (now - timedelta(minutes=1)),
+        LivestockFactProvenance("fixture", event_id, "fixture-v1", now),
+        supersedes_event_id,
+        LifecycleCorrectionReason.INCORRECT_TIME,
+        LifecycleCorrectionConfirmationV1("ignored-caller-confirmation", user_id, "ignored-correlation", now - timedelta(minutes=5)),
     )
 
 
-class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
+class LivestockLifecycleMutationsDisposablePgTests(unittest.TestCase):
     _bindir: Path
     _workdir: Path | None
     _psycopg2: object
@@ -171,7 +189,7 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._bindir = _bindir()
-        cls._workdir = Path(tempfile.mkdtemp(prefix="rid", dir="/tmp"))
+        cls._workdir = Path(tempfile.mkdtemp(prefix="rlc", dir="/tmp"))
         cls._session_conn = None
         cls._inspect_conn = None
         try:
@@ -185,7 +203,7 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             raise
         except Exception as error:
             cls._destroy_cluster()
-            raise LiveProofBlocked(f"blocked: disposable identifier cluster setup failed: {error}") from error
+            raise LiveProofBlocked(f"blocked: disposable lifecycle cluster setup failed: {error}") from error
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -285,22 +303,19 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             if provision.returncode != 0:
                 raise LiveProofBlocked("blocked: disposable role provision failed")
         app_root = Path(__file__).resolve().parents[1]
-        migrator = [
-            str(cls._bindir / "psql"),
-            "-h",
-            str(sock_dir),
-            "-p",
-            "5432",
-            "-U",
-            "ranchos_dev_migrator",
-            "-d",
-            "ranchos_dev",
-            "-v",
-            "ON_ERROR_STOP=1",
-        ]
         applied = _run_pg(
             [
-                *migrator,
+                str(cls._bindir / "psql"),
+                "-h",
+                str(sock_dir),
+                "-p",
+                "5432",
+                "-U",
+                "ranchos_dev_migrator",
+                "-d",
+                "ranchos_dev",
+                "-v",
+                "ON_ERROR_STOP=1",
                 "-f",
                 str(app_root / "migrations" / "001_ranch_os_tenancy_foundation.sql"),
                 "-f",
@@ -362,7 +377,17 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             )
             cursor.execute(
                 "INSERT INTO ranchos.tenant_memberships (tenant_id, user_id, role, status) VALUES (%s, %s, %s, %s)",
-                (TENANT_A, USER_A, "manager", "active"),
+                (TENANT_A, USER_A, "owner", "active"),
+            )
+            cls._inspect_conn.commit()
+            cls._set_local(cursor, PRINCIPAL_M, TENANT_A)
+            cursor.execute(
+                "INSERT INTO ranchos.users (id, principal_id, status) VALUES (%s, %s, %s)",
+                (USER_M, PRINCIPAL_M, "active"),
+            )
+            cursor.execute(
+                "INSERT INTO ranchos.tenant_memberships (tenant_id, user_id, role, status) VALUES (%s, %s, %s, %s)",
+                (TENANT_A, USER_M, "manager", "active"),
             )
             cls._inspect_conn.commit()
             cls._set_local(cursor, PRINCIPAL_B, TENANT_B)
@@ -483,7 +508,7 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             target_manifest=command.id,
             digest=digest,
             identity=identity,
-            issued_at=now,
+            issued_at=now - timedelta(seconds=30),
         )
         result = self._coordinator().create_animal(
             principal=_principal(principal_id, f"corr-animal-{animal_id}", now),
@@ -495,7 +520,7 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
         self.assertEqual(result.animal.id, animal_id)
         return animal_id
 
-    def _assign(
+    def _record(
         self,
         *,
         tenant_id: str,
@@ -503,19 +528,20 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
         user_id: str,
         animal_id: str,
         now: datetime,
-        value: str = "RB-104",
-        identifier_id: str | None = None,
+        event_id: str | None = None,
         identity: str | None = None,
+        occurred_at: datetime | None = None,
         session: LivestockPgSession | None = None,
         issued_at: datetime | None = None,
         consumed_at: datetime | None = None,
         digest: str | None = None,
+        correlation_id: str | None = None,
     ):
-        identifier_id = identifier_id or str(uuid4())
+        event_id = event_id or str(uuid4())
         confirmation_id = str(uuid4())
-        identity = identity or f"idem-assign-{identifier_id}"
-        command = _assign_command(identifier_id, animal_id, now, value)
-        computed = canonical_identifier_assign_digest(
+        identity = identity or f"idem-record-{event_id}"
+        command = _record_command(event_id, animal_id, now, occurred_at=occurred_at)
+        computed = canonical_lifecycle_record_digest(
             tenant_id=tenant_id,
             command=command,
             confirmation_id=confirmation_id,
@@ -528,36 +554,43 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             principal_id=principal_id,
             user_id=user_id,
             confirmation_id=confirmation_id,
-            operation=IDENTIFIER_ASSIGN_OPERATION,
+            operation=LIFECYCLE_RECORD_OPERATION,
             target_manifest=command.id,
             digest=computed if digest is None else digest,
             identity=identity,
-            issued_at=issued_at or now,
+            issued_at=issued_at or (now - timedelta(seconds=30)),
             consumed_at=consumed_at,
         )
-        return self._coordinator().assign_identifier(
-            principal=_principal(principal_id, f"corr-assign-{identifier_id}", now),
+        return self._coordinator().record_lifecycle_event(
+            principal=_principal(principal_id, correlation_id or f"corr-record-{event_id}", now),
             requested_tenant_id=tenant_id,
-            request=LivestockIdentifierAssignRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
+            request=LivestockLifecycleRecordRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
             session=session or self._session(),
             now=now,
         ), command, confirmation, identity
 
-    def _retire(
+    def _correct(
         self,
         *,
         tenant_id: str,
         principal_id: str,
         user_id: str,
-        identifier_id: str,
+        animal_id: str,
+        supersedes_event_id: str,
         now: datetime,
+        event_id: str | None = None,
+        identity: str | None = None,
         session: LivestockPgSession | None = None,
+        issued_at: datetime | None = None,
+        consumed_at: datetime | None = None,
+        digest: str | None = None,
+        correlation_id: str | None = None,
     ):
-        retirement_id = str(uuid4())
+        event_id = event_id or str(uuid4())
         confirmation_id = str(uuid4())
-        identity = f"idem-retire-{retirement_id}"
-        command = _retire_command(retirement_id, identifier_id, now)
-        digest = canonical_identifier_retire_digest(
+        identity = identity or f"idem-correct-{event_id}"
+        command = _correct_command(event_id, animal_id, supersedes_event_id, now, user_id)
+        computed = canonical_lifecycle_correct_digest(
             tenant_id=tenant_id,
             command=command,
             confirmation_id=confirmation_id,
@@ -570,16 +603,17 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             principal_id=principal_id,
             user_id=user_id,
             confirmation_id=confirmation_id,
-            operation=IDENTIFIER_RETIRE_OPERATION,
-            target_manifest=command.identifier_id,
-            digest=digest,
+            operation=LIFECYCLE_CORRECT_OPERATION,
+            target_manifest=command.supersedes_event_id,
+            digest=computed if digest is None else digest,
             identity=identity,
-            issued_at=now,
+            issued_at=issued_at or (now - timedelta(seconds=30)),
+            consumed_at=consumed_at,
         )
-        return self._coordinator().retire_identifier(
-            principal=_principal(principal_id, f"corr-retire-{retirement_id}", now),
+        return self._coordinator().correct_lifecycle_event(
+            principal=_principal(principal_id, correlation_id or f"corr-correct-{event_id}", now),
             requested_tenant_id=tenant_id,
-            request=LivestockIdentifierRetireRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
+            request=LivestockLifecycleCorrectRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
             session=session or self._session(),
             now=now,
         ), command, confirmation, identity
@@ -588,10 +622,8 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
         cursor = self._inspect_conn.cursor()
         try:
             self._set_local(cursor, principal_id, tenant_id)
-            cursor.execute("SELECT COUNT(*) FROM ranchos.animal_identifiers")
-            identifiers = cursor.fetchone()[0]
-            cursor.execute("SELECT COUNT(*) FROM ranchos.animal_identifier_retirements")
-            retirements = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_lifecycle_events")
+            events = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_idempotency")
             idempotency = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_confirmations WHERE consumed_at IS NOT NULL")
@@ -604,28 +636,22 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             raise
         finally:
             cursor.close()
-        return {
-            "identifiers": identifiers,
-            "retirements": retirements,
-            "idempotency": idempotency,
-            "consumed": consumed,
-            "audit": audit,
-        }
+        return {"events": events, "idempotency": idempotency, "consumed": consumed, "audit": audit}
 
-    def _identifier_state(self, tenant_id: str, principal_id: str, identifier_id: str, identity: str) -> dict[str, object]:
+    def _event_state(self, tenant_id: str, principal_id: str, event_id: str, identity: str) -> dict[str, object]:
         cursor = self._inspect_conn.cursor()
         try:
             self._set_local(cursor, principal_id, tenant_id)
-            cursor.execute("SELECT COUNT(*) FROM ranchos.animal_identifiers WHERE id = %s", (identifier_id,))
-            identifiers = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_lifecycle_events WHERE id = %s", (event_id,))
+            events = cursor.fetchone()[0]
             cursor.execute(
-                "SELECT outcome, result_identifier_id, result_retirement_id FROM ranchos.livestock_idempotency WHERE identity = %s",
+                "SELECT outcome, result_lifecycle_event_id, result_animal_id FROM ranchos.livestock_idempotency WHERE identity = %s",
                 (identity,),
             )
             idempotency = cursor.fetchone()
             cursor.execute(
                 "SELECT COUNT(*) FROM ranchos.livestock_mutation_audit WHERE targets = %s",
-                (identifier_id,),
+                (event_id,),
             )
             audit = cursor.fetchone()[0]
             self._inspect_conn.commit()
@@ -635,7 +661,7 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
         finally:
             cursor.close()
         return {
-            "identifiers": identifiers,
+            "events": events,
             "idempotency": None
             if idempotency is None
             else (
@@ -660,10 +686,10 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             cursor.close()
         return None if row is None else row[0]
 
-    def test_assign_first_write_and_exact_replay(self) -> None:
+    def test_record_first_write_and_exact_replay(self) -> None:
         now = datetime.now(timezone.utc)
-        animal_id = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "Assign")
-        first, command, confirmation, identity = self._assign(
+        animal_id = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "Record")
+        first, command, confirmation, identity = self._record(
             tenant_id=TENANT_A,
             principal_id=PRINCIPAL_A,
             user_id=USER_A,
@@ -671,172 +697,236 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             now=now,
         )
         self.assertFalse(first.replayed)
-        self.assertEqual(first.identifier.animal_id, animal_id)
-        state = self._identifier_state(TENANT_A, PRINCIPAL_A, command.id, identity)
-        self.assertEqual(state["identifiers"], 1)
+        self.assertEqual(first.event.animal_id, animal_id)
+        state = self._event_state(TENANT_A, PRINCIPAL_A, command.id, identity)
+        self.assertEqual(state["events"], 1)
         self.assertEqual(state["idempotency"], ("committed", command.id, None))
         self.assertIsNotNone(self._confirmation_consumed_at(TENANT_A, PRINCIPAL_A, confirmation.id))
         self.assertEqual(state["audit"], 1)
 
-        replayed = self._coordinator().assign_identifier(
-            principal=_principal(PRINCIPAL_A, "corr-assign-replay", now),
+        replayed = self._coordinator().record_lifecycle_event(
+            principal=_principal(PRINCIPAL_A, "corr-record-replay", now),
             requested_tenant_id=TENANT_A,
-            request=LivestockIdentifierAssignRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
+            request=LivestockLifecycleRecordRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
             session=self._session(),
             now=now,
         )
-        after = self._identifier_state(TENANT_A, PRINCIPAL_A, command.id, identity)
+        after = self._event_state(TENANT_A, PRINCIPAL_A, command.id, identity)
         self.assertTrue(replayed.replayed)
-        self.assertEqual(replayed.identifier.id, first.identifier.id)
+        self.assertEqual(replayed.event.id, first.event.id)
         self.assertEqual(replayed.transaction_id, first.transaction_id)
-        self.assertEqual(after["identifiers"], 1)
+        self.assertEqual(after["events"], 1)
         self.assertEqual(after["audit"], 1)
         self.assertEqual(after["idempotency"], ("committed", command.id, None))
 
-    def test_retire_first_write_and_exact_replay(self) -> None:
+    def test_correct_first_write_and_exact_replay(self) -> None:
         now = datetime.now(timezone.utc)
-        animal_id = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "Retire")
-        assigned, assign_command, _, _ = self._assign(
+        animal_id = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "Correct")
+        recorded, record_command, _, _ = self._record(
             tenant_id=TENANT_A,
             principal_id=PRINCIPAL_A,
             user_id=USER_A,
             animal_id=animal_id,
             now=now,
-            value="RB-RETIRE",
         )
-        first, command, confirmation, identity = self._retire(
+        first, command, confirmation, identity = self._correct(
             tenant_id=TENANT_A,
             principal_id=PRINCIPAL_A,
             user_id=USER_A,
-            identifier_id=assigned.identifier.id,
-            now=now,
+            animal_id=animal_id,
+            supersedes_event_id=recorded.event.id,
+            now=now + timedelta(seconds=1),
         )
         self.assertFalse(first.replayed)
-        self.assertEqual(first.retirement.identifier_id, assign_command.id)
-        self.assertEqual(first.retirement.provenance.source_type, "fixture")
+        self.assertEqual(first.event.supersedes_event_id, record_command.id)
+        self.assertEqual(first.event.confirmation.id, confirmation.id)
+        self.assertEqual(first.event.confirmation.approved_by_user_id, USER_A)
         cursor = self._inspect_conn.cursor()
         try:
             self._set_local(cursor, PRINCIPAL_A, TENANT_A)
             cursor.execute(
-                "SELECT outcome, result_retirement_id FROM ranchos.livestock_idempotency WHERE identity = %s",
+                "SELECT outcome, result_lifecycle_event_id FROM ranchos.livestock_idempotency WHERE identity = %s",
                 (identity,),
             )
             row = cursor.fetchone()
-            cursor.execute("SELECT COUNT(*) FROM ranchos.animal_identifier_retirements WHERE id = %s", (command.id,))
-            retirements = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_lifecycle_events WHERE id = %s", (command.id,))
+            events = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_lifecycle_events WHERE id = %s", (record_command.id,))
+            originals = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_mutation_audit WHERE confirmation_id = %s", (confirmation.id,))
             audit = cursor.fetchone()[0]
             self._inspect_conn.commit()
         finally:
             cursor.close()
-        self.assertEqual(retirements, 1)
+        self.assertEqual(events, 1)
+        self.assertEqual(originals, 1)
         self.assertEqual(row[0], "committed")
         self.assertEqual(str(row[1]), command.id)
         self.assertEqual(audit, 1)
 
-        replayed = self._coordinator().retire_identifier(
-            principal=_principal(PRINCIPAL_A, "corr-retire-replay", now),
+        replayed = self._coordinator().correct_lifecycle_event(
+            principal=_principal(PRINCIPAL_A, "corr-correct-replay", now),
             requested_tenant_id=TENANT_A,
-            request=LivestockIdentifierRetireRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
+            request=LivestockLifecycleCorrectRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
             session=self._session(),
-            now=now,
+            now=now + timedelta(seconds=1),
         )
         self.assertTrue(replayed.replayed)
-        self.assertEqual(replayed.retirement.id, first.retirement.id)
+        self.assertEqual(replayed.event.id, first.event.id)
         self.assertEqual(replayed.transaction_id, first.transaction_id)
         cursor = self._inspect_conn.cursor()
         try:
             self._set_local(cursor, PRINCIPAL_A, TENANT_A)
-            cursor.execute("SELECT COUNT(*) FROM ranchos.animal_identifier_retirements WHERE id = %s", (command.id,))
-            retirements = cursor.fetchone()[0]
+            cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_lifecycle_events WHERE id = %s", (command.id,))
+            events = cursor.fetchone()[0]
             cursor.execute("SELECT COUNT(*) FROM ranchos.livestock_mutation_audit WHERE confirmation_id = %s", (confirmation.id,))
             audit = cursor.fetchone()[0]
             self._inspect_conn.commit()
         finally:
             cursor.close()
-        self.assertEqual(retirements, 1)
+        self.assertEqual(events, 1)
         self.assertEqual(audit, 1)
 
-    def test_cf2_rejection_rolls_back_assign(self) -> None:
+    def test_cf2_rejection_rolls_back_record(self) -> None:
         now = datetime.now(timezone.utc)
         animal_id = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "CF2")
         before = self._counts(TENANT_A, PRINCIPAL_A)
         cases = (
             ("expired", now - timedelta(minutes=3), None, None),
-            ("used", now, now - timedelta(seconds=5), None),
-            ("unbound", now, None, "not-the-canonical-digest"),
+            ("used", now - timedelta(seconds=30), now - timedelta(seconds=5), None),
+            ("unbound", now - timedelta(seconds=30), None, "not-the-canonical-digest"),
         )
         for label, issued_at, consumed_at, digest in cases:
             with self.subTest(label=label):
                 with self.assertRaises(LivestockMutationError) as raised:
-                    self._assign(
+                    self._record(
                         tenant_id=TENANT_A,
                         principal_id=PRINCIPAL_A,
                         user_id=USER_A,
                         animal_id=animal_id,
                         now=now,
-                        value=f"RB-{label}",
                         issued_at=issued_at,
                         consumed_at=consumed_at,
                         digest=digest,
                     )
                 self.assertEqual(raised.exception.code, LivestockMutationErrorCode.CONFIRMATION_INVALID)
                 after = self._counts(TENANT_A, PRINCIPAL_A)
-                self.assertEqual(after["identifiers"], before["identifiers"])
-                self.assertEqual(after["retirements"], before["retirements"])
+                self.assertEqual(after["events"], before["events"])
                 self.assertEqual(after["audit"], before["audit"])
+                self.assertEqual(after["idempotency"], before["idempotency"])
 
     def test_tenant_b_is_denied_and_isolated(self) -> None:
         now = datetime.now(timezone.utc)
         animal_a = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "IsoA")
-        assigned, command, confirmation, identity = self._assign(
+        recorded, command, confirmation, identity = self._record(
             tenant_id=TENANT_A,
             principal_id=PRINCIPAL_A,
             user_id=USER_A,
             animal_id=animal_a,
             now=now,
-            value="RB-ISO",
         )
-        self.assertEqual(self._counts(TENANT_B, PRINCIPAL_B)["identifiers"], 0)
-        self.assertEqual(self._counts(TENANT_B, PRINCIPAL_B)["retirements"], 0)
+        self.assertEqual(self._counts(TENANT_B, PRINCIPAL_B)["events"], 0)
         session = self._session()
         session.begin()
         session.set_local(principal_id=PRINCIPAL_B, environment="development", tenant_id=TENANT_B)
         self.assertIsNone(session.load_confirmation(confirmation.id))
-        self.assertIsNone(session.load_idempotency(TENANT_A, IDENTIFIER_ASSIGN_OPERATION, identity))
-        self.assertIsNone(session.lock_identifier(TENANT_A, assigned.identifier.id))
+        self.assertIsNone(session.load_idempotency(TENANT_A, LIFECYCLE_RECORD_OPERATION, identity))
+        self.assertEqual(session.load_lifecycle_events_for_animal(TENANT_A, animal_a), ())
+        self.assertIsNone(session.lock_animal(TENANT_A, animal_a))
         session.rollback()
         with self.assertRaises(LivestockMutationError) as raised:
-            self._coordinator().assign_identifier(
+            self._coordinator().record_lifecycle_event(
                 principal=_principal(PRINCIPAL_B, "corr-iso-b", now),
                 requested_tenant_id=TENANT_B,
-                request=LivestockIdentifierAssignRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
+                request=LivestockLifecycleRecordRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
                 session=self._session(),
                 now=now,
             )
         self.assertEqual(raised.exception.code, LivestockMutationErrorCode.CONFIRMATION_INVALID)
-        self.assertEqual(self._identifier_state(TENANT_A, PRINCIPAL_A, command.id, identity)["identifiers"], 1)
-        self.assertEqual(self._identifier_state(TENANT_B, PRINCIPAL_B, command.id, identity)["identifiers"], 0)
+        self.assertEqual(self._event_state(TENANT_A, PRINCIPAL_A, command.id, identity)["events"], 1)
+        self.assertEqual(self._event_state(TENANT_B, PRINCIPAL_B, command.id, identity)["events"], 0)
+        self.assertEqual(recorded.event.id, command.id)
 
-    def test_concurrent_assign_one_wins_then_reuse_after_retire(self) -> None:
+    def test_manager_correction_is_denied_before_transaction(self) -> None:
+        now = datetime.now(timezone.utc)
+        animal_id = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "Mgr")
+        recorded, _, _, _ = self._record(
+            tenant_id=TENANT_A,
+            principal_id=PRINCIPAL_A,
+            user_id=USER_A,
+            animal_id=animal_id,
+            now=now,
+        )
+        before = self._counts(TENANT_A, PRINCIPAL_A)
+        with self.assertRaises(LivestockMutationError) as raised:
+            self._correct(
+                tenant_id=TENANT_A,
+                principal_id=PRINCIPAL_M,
+                user_id=USER_M,
+                animal_id=animal_id,
+                supersedes_event_id=recorded.event.id,
+                now=now + timedelta(seconds=1),
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.ADMISSION_DENIED)
+        after = self._counts(TENANT_A, PRINCIPAL_A)
+        self.assertEqual(after["events"], before["events"])
+        self.assertEqual(after["audit"], before["audit"])
+        self.assertEqual(after["consumed"], before["consumed"])
+
+    def test_occurrence_order_rejection_rolls_back(self) -> None:
+        now = datetime.now(timezone.utc)
+        animal_id = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "Order")
+        first, _, _, _ = self._record(
+            tenant_id=TENANT_A,
+            principal_id=PRINCIPAL_A,
+            user_id=USER_A,
+            animal_id=animal_id,
+            now=now,
+            occurred_at=now,
+        )
+        before = self._counts(TENANT_A, PRINCIPAL_A)
+        with self.assertRaises(LivestockMutationError) as raised:
+            self._record(
+                tenant_id=TENANT_A,
+                principal_id=PRINCIPAL_A,
+                user_id=USER_A,
+                animal_id=animal_id,
+                now=now + timedelta(seconds=1),
+                occurred_at=now - timedelta(minutes=5),
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.LIFECYCLE_INVALID)
+        after = self._counts(TENANT_A, PRINCIPAL_A)
+        self.assertEqual(after["events"], before["events"])
+        self.assertEqual(after["audit"], before["audit"])
+        self.assertEqual(first.event.event_type, RoutineLifecycleEventType.INTAKE)
+
+    def test_concurrent_second_correction_one_winner(self) -> None:
         now = datetime.now(timezone.utc)
         animal_id = self._create_animal(TENANT_A, PRINCIPAL_A, USER_A, now, "Race")
+        recorded, _, _, _ = self._record(
+            tenant_id=TENANT_A,
+            principal_id=PRINCIPAL_A,
+            user_id=USER_A,
+            animal_id=animal_id,
+            now=now,
+        )
         first_id = str(uuid4())
         second_id = str(uuid4())
         first_confirmation_id = str(uuid4())
         second_confirmation_id = str(uuid4())
         first_identity = f"idem-race-{first_id}"
         second_identity = f"idem-race-{second_id}"
-        first_command = _assign_command(first_id, animal_id, now, "RB-RACE")
-        second_command = _assign_command(second_id, animal_id, now, "RB-RACE")
+        later = now + timedelta(seconds=1)
+        first_command = _correct_command(first_id, animal_id, recorded.event.id, later, USER_A)
+        second_command = _correct_command(second_id, animal_id, recorded.event.id, later, USER_A)
         first_confirmation = self._insert_confirmation(
             tenant_id=TENANT_A,
             principal_id=PRINCIPAL_A,
             user_id=USER_A,
             confirmation_id=first_confirmation_id,
-            operation=IDENTIFIER_ASSIGN_OPERATION,
-            target_manifest=first_command.id,
-            digest=canonical_identifier_assign_digest(
+            operation=LIFECYCLE_CORRECT_OPERATION,
+            target_manifest=first_command.supersedes_event_id,
+            digest=canonical_lifecycle_correct_digest(
                 tenant_id=TENANT_A,
                 command=first_command,
                 confirmation_id=first_confirmation_id,
@@ -845,16 +935,16 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
                 validator_version=VALIDATOR_VERSION,
             ),
             identity=first_identity,
-            issued_at=now,
+            issued_at=later - timedelta(seconds=30),
         )
         second_confirmation = self._insert_confirmation(
             tenant_id=TENANT_A,
             principal_id=PRINCIPAL_A,
             user_id=USER_A,
             confirmation_id=second_confirmation_id,
-            operation=IDENTIFIER_ASSIGN_OPERATION,
-            target_manifest=second_command.id,
-            digest=canonical_identifier_assign_digest(
+            operation=LIFECYCLE_CORRECT_OPERATION,
+            target_manifest=second_command.supersedes_event_id,
+            digest=canonical_lifecycle_correct_digest(
                 tenant_id=TENANT_A,
                 command=second_command,
                 confirmation_id=second_confirmation_id,
@@ -863,7 +953,7 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
                 validator_version=VALIDATOR_VERSION,
             ),
             identity=second_identity,
-            issued_at=now,
+            issued_at=later - timedelta(seconds=30),
         )
         results = []
         errors = []
@@ -871,12 +961,12 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
         def worker(command, confirmation, identity, correlation):
             connection = self._connect()
             try:
-                result = self._coordinator().assign_identifier(
-                    principal=_principal(PRINCIPAL_A, correlation, now),
+                result = self._coordinator().correct_lifecycle_event(
+                    principal=_principal(PRINCIPAL_A, correlation, later),
                     requested_tenant_id=TENANT_A,
-                    request=LivestockIdentifierAssignRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
+                    request=LivestockLifecycleCorrectRequest(command, confirmation, identity, POLICY_VERSION, VALIDATOR_VERSION),
                     session=LivestockPgSession(connection),
-                    now=now,
+                    now=later,
                 )
                 results.append(result)
             except LivestockMutationError as error:
@@ -894,49 +984,21 @@ class LivestockIdentifierMutationsDisposablePgTests(unittest.TestCase):
             thread.join()
         self.assertEqual(len(results), 1)
         self.assertEqual(len(errors), 1)
-        self.assertEqual(errors[0].code, LivestockMutationErrorCode.IDENTIFIER_NOT_AVAILABLE)
-        winner = results[0].identifier
-        self.assertEqual(winner.normalized_value, "RB-RACE")
+        self.assertEqual(errors[0].code, LivestockMutationErrorCode.LIFECYCLE_INVALID)
+        winner = results[0].event
+        self.assertEqual(winner.supersedes_event_id, recorded.event.id)
         cursor = self._inspect_conn.cursor()
         try:
             self._set_local(cursor, PRINCIPAL_A, TENANT_A)
-            cursor.execute("SELECT id FROM ranchos.animal_identifiers WHERE normalized_value = %s ORDER BY id", ("RB-RACE",))
-            assignment_ids = [str(row[0]) for row in cursor.fetchall()]
+            cursor.execute(
+                "SELECT id FROM ranchos.livestock_lifecycle_events WHERE supersedes_event_id = %s ORDER BY id",
+                (recorded.event.id,),
+            )
+            successor_ids = [str(row[0]) for row in cursor.fetchall()]
             self._inspect_conn.commit()
         finally:
             cursor.close()
-        self.assertEqual(assignment_ids, [winner.id])
-
-        retired, _, _, _ = self._retire(
-            tenant_id=TENANT_A,
-            principal_id=PRINCIPAL_A,
-            user_id=USER_A,
-            identifier_id=winner.id,
-            now=now,
-        )
-        self.assertEqual(retired.retirement.identifier_id, winner.id)
-        reused, reuse_command, _, _ = self._assign(
-            tenant_id=TENANT_A,
-            principal_id=PRINCIPAL_A,
-            user_id=USER_A,
-            animal_id=animal_id,
-            now=now + timedelta(minutes=2),
-            value="RB-RACE",
-        )
-        self.assertNotEqual(reused.identifier.id, winner.id)
-        self.assertEqual(reused.identifier.id, reuse_command.id)
-        self.assertEqual(reused.identifier.normalized_value, "RB-RACE")
-        cursor = self._inspect_conn.cursor()
-        try:
-            self._set_local(cursor, PRINCIPAL_A, TENANT_A)
-            cursor.execute("SELECT id FROM ranchos.animal_identifiers WHERE normalized_value = %s ORDER BY created_at, id", ("RB-RACE",))
-            assignment_ids = [str(row[0]) for row in cursor.fetchall()]
-            self._inspect_conn.commit()
-        finally:
-            cursor.close()
-        self.assertEqual(len(assignment_ids), 2)
-        self.assertIn(winner.id, assignment_ids)
-        self.assertIn(reused.identifier.id, assignment_ids)
+        self.assertEqual(successor_ids, [winner.id])
 
 
 if __name__ == "__main__":

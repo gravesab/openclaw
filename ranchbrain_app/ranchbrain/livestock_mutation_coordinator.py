@@ -2,14 +2,14 @@
 
 Transport-free. Receives a server-derived VerifiedPrincipal and an injected
 TenantContextResolver. The coordinator owns one transaction, SET LOCAL, CF-2
-consumption, and idempotency for animal_create plus identifier assign/retire.
-It does not implement ingress, a principal verifier, HTTP, lifecycle
-mutations, or confirmation issuance.
+consumption, and idempotency for animal_create, identifier assign/retire, and
+lifecycle record/correct. It does not implement ingress, a principal verifier,
+HTTP, or confirmation issuance.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from enum import Enum
 from hashlib import sha256
@@ -23,17 +23,23 @@ from ranchbrain.livestock_write_model import (
     IdentifierAssignCommandV1,
     IdentifierRetireCommandV1,
     IdentifierRetirementV1,
+    LifecycleCorrectionConfirmationV1,
     LivestockAnimalV1,
     LivestockWriteError,
     LivestockWriteErrorCode,
+    RoutineLifecycleEventCommandV1,
+    RoutineLifecycleEventV1,
     assign_identifier,
     create_animal,
+    record_routine_lifecycle_event,
     retire_identifier,
 )
 from ranchbrain.livestock_write_repository import (
     ANIMAL_CREATE_OPERATION,
     IDENTIFIER_ASSIGN_OPERATION,
     IDENTIFIER_RETIRE_OPERATION,
+    LIFECYCLE_CORRECT_OPERATION,
+    LIFECYCLE_RECORD_OPERATION,
     LivestockAuditRecord,
     LivestockConfirmationRecord,
     LivestockIdempotencyRecord,
@@ -52,6 +58,7 @@ class LivestockMutationErrorCode(str, Enum):
     IDEMPOTENCY_CONFLICT = "livestock_mutation_idempotency_conflict"
     IDENTIFIER_NOT_AVAILABLE = "livestock_mutation_identifier_not_available"
     IDENTIFIER_INVALID = "livestock_mutation_identifier_invalid"
+    LIFECYCLE_INVALID = "livestock_mutation_lifecycle_invalid"
     TARGET_NOT_FOUND = "livestock_mutation_target_not_found"
     TRANSACTION_FAILED = "livestock_mutation_transaction_failed"
 
@@ -110,6 +117,42 @@ class LivestockIdentifierRetireRequest:
 @dataclass(frozen=True)
 class LivestockIdentifierRetireResult:
     retirement: IdentifierRetirementV1
+    replayed: bool
+    transaction_id: str
+    confirmation_id: str
+    idempotency_outcome: str
+
+
+@dataclass(frozen=True)
+class LivestockLifecycleRecordRequest:
+    command: RoutineLifecycleEventCommandV1
+    confirmation: LivestockConfirmationRecord
+    idempotency_identity: str
+    policy_version: str
+    validator_version: str
+
+
+@dataclass(frozen=True)
+class LivestockLifecycleRecordResult:
+    event: RoutineLifecycleEventV1
+    replayed: bool
+    transaction_id: str
+    confirmation_id: str
+    idempotency_outcome: str
+
+
+@dataclass(frozen=True)
+class LivestockLifecycleCorrectRequest:
+    command: RoutineLifecycleEventCommandV1
+    confirmation: LivestockConfirmationRecord
+    idempotency_identity: str
+    policy_version: str
+    validator_version: str
+
+
+@dataclass(frozen=True)
+class LivestockLifecycleCorrectResult:
+    event: RoutineLifecycleEventV1
     replayed: bool
     transaction_id: str
     confirmation_id: str
@@ -216,6 +259,66 @@ def canonical_identifier_retire_digest(
             "provenance_source_version": command.provenance.source_version,
             "reason": command.reason.value,
             "retired_at": command.retired_at.isoformat(),
+            "tenant_id": tenant_id,
+            "validator_version": validator_version,
+        }
+    )
+
+
+def canonical_lifecycle_record_digest(
+    *,
+    tenant_id: str,
+    command: RoutineLifecycleEventCommandV1,
+    confirmation_id: str,
+    idempotency_identity: str,
+    policy_version: str,
+    validator_version: str,
+) -> str:
+    return _canonical_digest(
+        {
+            "animal_id": command.animal_id,
+            "confirmation_id": confirmation_id,
+            "event_type": command.event_type.value,
+            "id": command.id,
+            "idempotency_identity": idempotency_identity,
+            "occurred_at": command.occurred_at.isoformat(),
+            "operation": LIFECYCLE_RECORD_OPERATION,
+            "policy_version": policy_version,
+            "provenance_observed_at": command.provenance.observed_at.isoformat(),
+            "provenance_source_id": command.provenance.source_id,
+            "provenance_source_type": command.provenance.source_type,
+            "provenance_source_version": command.provenance.source_version,
+            "tenant_id": tenant_id,
+            "validator_version": validator_version,
+        }
+    )
+
+
+def canonical_lifecycle_correct_digest(
+    *,
+    tenant_id: str,
+    command: RoutineLifecycleEventCommandV1,
+    confirmation_id: str,
+    idempotency_identity: str,
+    policy_version: str,
+    validator_version: str,
+) -> str:
+    return _canonical_digest(
+        {
+            "animal_id": command.animal_id,
+            "confirmation_id": confirmation_id,
+            "correction_reason": None if command.correction_reason is None else command.correction_reason.value,
+            "event_type": command.event_type.value,
+            "id": command.id,
+            "idempotency_identity": idempotency_identity,
+            "occurred_at": command.occurred_at.isoformat(),
+            "operation": LIFECYCLE_CORRECT_OPERATION,
+            "policy_version": policy_version,
+            "provenance_observed_at": command.provenance.observed_at.isoformat(),
+            "provenance_source_id": command.provenance.source_id,
+            "provenance_source_type": command.provenance.source_type,
+            "provenance_source_version": command.provenance.source_version,
+            "supersedes_event_id": command.supersedes_event_id,
             "tenant_id": tenant_id,
             "validator_version": validator_version,
         }
@@ -565,6 +668,262 @@ class LivestockMutationCoordinator:
         except Exception as error:
             self._abort(session, begun, error)
 
+    def record_lifecycle_event(
+        self,
+        *,
+        principal: VerifiedPrincipal,
+        requested_tenant_id: str | None,
+        request: LivestockLifecycleRecordRequest,
+        session: LivestockMutationSession,
+        now: datetime | None = None,
+    ) -> LivestockLifecycleRecordResult:
+        current_time = now or datetime.now(timezone.utc)
+        context = self._admit(
+            principal=principal,
+            requested_tenant_id=requested_tenant_id,
+            capability=Capability.LIVESTOCK_LIFECYCLE_WRITE,
+            identity=request.idempotency_identity,
+            policy_version=request.policy_version,
+            validator_version=request.validator_version,
+            confirmation_id=request.confirmation.id,
+            now=current_time,
+        )
+        if request.command.supersedes_event_id is not None or request.command.correction_reason is not None:
+            raise LivestockMutationError("lifecycle record is not a correction", LivestockMutationErrorCode.ADMISSION_DENIED)
+        digest = canonical_lifecycle_record_digest(
+            tenant_id=context.tenant_id,
+            command=request.command,
+            confirmation_id=request.confirmation.id,
+            idempotency_identity=request.idempotency_identity,
+            policy_version=request.policy_version,
+            validator_version=request.validator_version,
+        )
+        begun = False
+        try:
+            session.begin()
+            begun = True
+            session.set_local(principal_id=context.principal_id, environment=context.environment, tenant_id=context.tenant_id)
+            trusted_now = session.current_timestamp()
+            transaction_id = str(uuid4())
+            reservation = self._repository.reserve_idempotency(
+                session,
+                context=context,
+                identity=request.idempotency_identity,
+                digest=digest,
+                transaction_id=transaction_id,
+                operation=LIFECYCLE_RECORD_OPERATION,
+            )
+            if reservation.replayed:
+                if reservation.record.event is None:
+                    raise LivestockMutationError("replay is missing its original lifecycle event", LivestockMutationErrorCode.TRANSACTION_FAILED)
+                session.commit()
+                return LivestockLifecycleRecordResult(
+                    reservation.record.event,
+                    True,
+                    reservation.record.transaction_id,
+                    request.confirmation.id,
+                    "replayed",
+                )
+
+            self._repository.consume_confirmation(
+                session,
+                confirmation_id=request.confirmation.id,
+                context=context,
+                digest=digest,
+                idempotency_identity=request.idempotency_identity,
+                target_manifest=request.command.id,
+                policy_version=request.policy_version,
+                validator_version=request.validator_version,
+                now=trusted_now,
+                operation=LIFECYCLE_RECORD_OPERATION,
+            )
+            if session.lock_animal(context.tenant_id, request.command.animal_id) is None:
+                raise LivestockMutationError("lifecycle record animal is missing", LivestockMutationErrorCode.TARGET_NOT_FOUND)
+            session.lock_lifecycle_animal_history(context.tenant_id, request.command.animal_id)
+            existing = session.load_lifecycle_events_for_animal(context.tenant_id, request.command.animal_id)
+            event = record_routine_lifecycle_event(context, request.command, existing, trusted_now)
+            self._repository.persist_lifecycle_event(session, event)
+            self._repository.insert_audit(
+                session,
+                self._audit_record(
+                    context=context,
+                    transaction_id=transaction_id,
+                    operation=LIFECYCLE_RECORD_OPERATION,
+                    target_id=event.id,
+                    policy_version=request.policy_version,
+                    validator_version=request.validator_version,
+                    provenance_source_type=event.provenance.source_type,
+                    provenance_source_id=event.provenance.source_id,
+                    provenance_source_version=event.provenance.source_version,
+                    confirmation_id=request.confirmation.id,
+                    result_metadata="recorded",
+                    recorded_at=trusted_now,
+                ),
+            )
+            self._repository.finalize_idempotency(
+                session,
+                LivestockIdempotencyRecord(
+                    context.tenant_id,
+                    LIFECYCLE_RECORD_OPERATION,
+                    request.idempotency_identity,
+                    digest,
+                    LIFECYCLE_RECORD_OPERATION,
+                    "committed",
+                    transaction_id,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    event.id,
+                    event,
+                ),
+            )
+            session.commit()
+            return LivestockLifecycleRecordResult(event, False, transaction_id, request.confirmation.id, "committed")
+        except Exception as error:
+            self._abort(session, begun, error)
+
+    def correct_lifecycle_event(
+        self,
+        *,
+        principal: VerifiedPrincipal,
+        requested_tenant_id: str | None,
+        request: LivestockLifecycleCorrectRequest,
+        session: LivestockMutationSession,
+        now: datetime | None = None,
+    ) -> LivestockLifecycleCorrectResult:
+        current_time = now or datetime.now(timezone.utc)
+        self._admit(
+            principal=principal,
+            requested_tenant_id=requested_tenant_id,
+            capability=Capability.LIVESTOCK_LIFECYCLE_WRITE,
+            identity=request.idempotency_identity,
+            policy_version=request.policy_version,
+            validator_version=request.validator_version,
+            confirmation_id=request.confirmation.id,
+            now=current_time,
+        )
+        context = self._admit(
+            principal=principal,
+            requested_tenant_id=requested_tenant_id,
+            capability=Capability.LIVESTOCK_LIFECYCLE_CORRECT,
+            identity=request.idempotency_identity,
+            policy_version=request.policy_version,
+            validator_version=request.validator_version,
+            confirmation_id=request.confirmation.id,
+            now=current_time,
+        )
+        if request.command.supersedes_event_id is None or request.command.correction_reason is None:
+            raise LivestockMutationError(
+                "lifecycle correction requires a superseded event and controlled reason",
+                LivestockMutationErrorCode.ADMISSION_DENIED,
+            )
+        digest = canonical_lifecycle_correct_digest(
+            tenant_id=context.tenant_id,
+            command=request.command,
+            confirmation_id=request.confirmation.id,
+            idempotency_identity=request.idempotency_identity,
+            policy_version=request.policy_version,
+            validator_version=request.validator_version,
+        )
+        begun = False
+        try:
+            session.begin()
+            begun = True
+            session.set_local(principal_id=context.principal_id, environment=context.environment, tenant_id=context.tenant_id)
+            trusted_now = session.current_timestamp()
+            transaction_id = str(uuid4())
+            reservation = self._repository.reserve_idempotency(
+                session,
+                context=context,
+                identity=request.idempotency_identity,
+                digest=digest,
+                transaction_id=transaction_id,
+                operation=LIFECYCLE_CORRECT_OPERATION,
+            )
+            if reservation.replayed:
+                if reservation.record.event is None:
+                    raise LivestockMutationError("replay is missing its original lifecycle event", LivestockMutationErrorCode.TRANSACTION_FAILED)
+                session.commit()
+                return LivestockLifecycleCorrectResult(
+                    reservation.record.event,
+                    True,
+                    reservation.record.transaction_id,
+                    request.confirmation.id,
+                    "replayed",
+                )
+
+            self._repository.consume_confirmation(
+                session,
+                confirmation_id=request.confirmation.id,
+                context=context,
+                digest=digest,
+                idempotency_identity=request.idempotency_identity,
+                target_manifest=request.command.supersedes_event_id,
+                policy_version=request.policy_version,
+                validator_version=request.validator_version,
+                now=trusted_now,
+                operation=LIFECYCLE_CORRECT_OPERATION,
+            )
+            if session.lock_animal(context.tenant_id, request.command.animal_id) is None:
+                raise LivestockMutationError("lifecycle correction animal is missing", LivestockMutationErrorCode.TARGET_NOT_FOUND)
+            session.lock_lifecycle_animal_history(context.tenant_id, request.command.animal_id)
+            existing = session.load_lifecycle_events_for_animal(context.tenant_id, request.command.animal_id)
+            bound = replace(
+                request.command,
+                confirmation=LifecycleCorrectionConfirmationV1(
+                    request.confirmation.id,
+                    context.user_id,
+                    context.correlation_id,
+                    request.confirmation.issued_at,
+                ),
+            )
+            event = record_routine_lifecycle_event(context, bound, existing, trusted_now)
+            self._repository.persist_lifecycle_event(session, event)
+            self._repository.insert_audit(
+                session,
+                self._audit_record(
+                    context=context,
+                    transaction_id=transaction_id,
+                    operation=LIFECYCLE_CORRECT_OPERATION,
+                    target_id=event.id,
+                    policy_version=request.policy_version,
+                    validator_version=request.validator_version,
+                    provenance_source_type=event.provenance.source_type,
+                    provenance_source_id=event.provenance.source_id,
+                    provenance_source_version=event.provenance.source_version,
+                    confirmation_id=request.confirmation.id,
+                    result_metadata="corrected",
+                    recorded_at=trusted_now,
+                ),
+            )
+            self._repository.finalize_idempotency(
+                session,
+                LivestockIdempotencyRecord(
+                    context.tenant_id,
+                    LIFECYCLE_CORRECT_OPERATION,
+                    request.idempotency_identity,
+                    digest,
+                    LIFECYCLE_CORRECT_OPERATION,
+                    "committed",
+                    transaction_id,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    event.id,
+                    event,
+                ),
+            )
+            session.commit()
+            return LivestockLifecycleCorrectResult(event, False, transaction_id, request.confirmation.id, "committed")
+        except Exception as error:
+            self._abort(session, begun, error)
+
     def _admit(
         self,
         *,
@@ -649,7 +1008,7 @@ class LivestockMutationCoordinator:
             case LivestockWriteErrorCode.IDENTIFIER_NOT_AVAILABLE:
                 return LivestockMutationErrorCode.IDENTIFIER_NOT_AVAILABLE
             case LivestockWriteErrorCode.INVALID:
-                return LivestockMutationErrorCode.IDENTIFIER_INVALID
+                return LivestockMutationErrorCode.LIFECYCLE_INVALID if "lifecycle" in str(error) else LivestockMutationErrorCode.IDENTIFIER_INVALID
             case LivestockWriteErrorCode.FORBIDDEN:
                 return LivestockMutationErrorCode.ADMISSION_DENIED
             case LivestockWriteErrorCode.CONTEXT_MISMATCH:
@@ -671,6 +1030,8 @@ class LivestockMutationCoordinator:
                 return LivestockMutationErrorCode.IDENTIFIER_NOT_AVAILABLE
             case LivestockPersistenceErrorCode.IDENTIFIER_INVALID:
                 return LivestockMutationErrorCode.IDENTIFIER_INVALID
+            case LivestockPersistenceErrorCode.LIFECYCLE_INVALID:
+                return LivestockMutationErrorCode.LIFECYCLE_INVALID
             case LivestockPersistenceErrorCode.TARGET_NOT_FOUND:
                 return LivestockMutationErrorCode.TARGET_NOT_FOUND
             case _ as unreachable:

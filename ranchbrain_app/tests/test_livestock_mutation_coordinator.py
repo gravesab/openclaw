@@ -7,12 +7,16 @@ from ranchbrain.livestock_mutation_coordinator import (
     LivestockAnimalCreateRequest,
     LivestockIdentifierAssignRequest,
     LivestockIdentifierRetireRequest,
+    LivestockLifecycleCorrectRequest,
+    LivestockLifecycleRecordRequest,
     LivestockMutationCoordinator,
     LivestockMutationError,
     LivestockMutationErrorCode,
     canonical_animal_create_digest,
     canonical_identifier_assign_digest,
     canonical_identifier_retire_digest,
+    canonical_lifecycle_correct_digest,
+    canonical_lifecycle_record_digest,
 )
 from ranchbrain.livestock_read_model import LivestockFactProvenance
 from ranchbrain.livestock_write_model import (
@@ -21,13 +25,20 @@ from ranchbrain.livestock_write_model import (
     IdentifierAssignCommandV1,
     IdentifierRetireCommandV1,
     IdentifierRetirementReason,
+    LifecycleCorrectionConfirmationV1,
+    LifecycleCorrectionReason,
+    RoutineLifecycleEventCommandV1,
+    RoutineLifecycleEventType,
     assign_identifier as assign_identifier_model,
     create_animal,
+    record_routine_lifecycle_event,
 )
 from ranchbrain.livestock_write_repository import (
     ANIMAL_CREATE_OPERATION,
     IDENTIFIER_ASSIGN_OPERATION,
     IDENTIFIER_RETIRE_OPERATION,
+    LIFECYCLE_CORRECT_OPERATION,
+    LIFECYCLE_RECORD_OPERATION,
     LivestockAuditRecord,
     LivestockConfirmationRecord,
     LivestockPersistenceError,
@@ -55,9 +66,13 @@ ANIMAL_A = "00000000-0000-0000-0000-000000000301"
 IDENTIFIER_A = "00000000-0000-0000-0000-000000000401"
 IDENTIFIER_B = "00000000-0000-0000-0000-000000000402"
 RETIREMENT_A = "00000000-0000-0000-0000-000000000501"
+EVENT_A = "00000000-0000-0000-0000-000000000601"
+EVENT_B = "00000000-0000-0000-0000-000000000602"
 CONFIRM_A = "00000000-0000-0000-0000-000000000308"
 CONFIRM_I = "00000000-0000-0000-0000-000000000408"
 CONFIRM_R = "00000000-0000-0000-0000-000000000508"
+CONFIRM_L = "00000000-0000-0000-0000-000000000608"
+CONFIRM_C = "00000000-0000-0000-0000-000000000708"
 
 
 def principal(**overrides) -> VerifiedPrincipal:
@@ -156,7 +171,7 @@ def request(cmd=None, **overrides):
 
 
 class FakeSession:
-    def __init__(self, *, now=NOW, fail_on=None, confirmation_row=None, animals=None, identifiers=None, retirements=None):
+    def __init__(self, *, now=NOW, fail_on=None, confirmation_row=None, animals=None, identifiers=None, retirements=None, events=None):
         self.now = now
         self.fail_on = fail_on
         self.events = []
@@ -168,6 +183,7 @@ class FakeSession:
         self.animals = list(animals or [])
         self.identifiers = list(identifiers or [])
         self.retirements = list(retirements or [])
+        self.lifecycle_events = list(events or [])
         self.audits = []
         self._snapshot = None
         if confirmation_row is not None:
@@ -183,6 +199,7 @@ class FakeSession:
             "animals": list(self.animals),
             "identifiers": list(self.identifiers),
             "retirements": list(self.retirements),
+            "lifecycle_events": list(self.lifecycle_events),
             "audits": list(self.audits),
         }
 
@@ -300,6 +317,27 @@ class FakeSession:
             raise LivestockPersistenceError("identifier is already retired", LivestockPersistenceErrorCode.IDENTIFIER_INVALID)
         self.retirements.append(retirement)
 
+    def lock_lifecycle_animal_history(self, tenant_id, animal_id):
+        self.events.append("lock_lifecycle_animal_history")
+
+    def load_lifecycle_events_for_animal(self, tenant_id, animal_id):
+        return tuple(
+            event
+            for event in self.lifecycle_events
+            if event.tenant_id == tenant_id and event.animal_id == animal_id
+        )
+
+    def insert_lifecycle_event(self, event):
+        self.events.append("persist_lifecycle")
+        if self.fail_on == "persist_lifecycle":
+            raise RuntimeError("forced persist failure")
+        if event.supersedes_event_id is not None and any(
+            existing.tenant_id == event.tenant_id and existing.supersedes_event_id == event.supersedes_event_id
+            for existing in self.lifecycle_events
+        ):
+            raise LivestockPersistenceError("lifecycle event is already superseded", LivestockPersistenceErrorCode.LIFECYCLE_INVALID)
+        self.lifecycle_events.append(event)
+
     def insert_audit(self, record: LivestockAuditRecord):
         self.events.append("insert_audit")
         self.audits.append(record)
@@ -318,6 +356,7 @@ class FakeSession:
             self.animals = self._snapshot["animals"]
             self.identifiers = self._snapshot["identifiers"]
             self.retirements = self._snapshot["retirements"]
+            self.lifecycle_events = self._snapshot["lifecycle_events"]
             self.audits = self._snapshot["audits"]
 
 
@@ -1190,3 +1229,468 @@ class LivestockIdentifierMutationCoordinatorTests(unittest.TestCase):
         self.assertEqual(session.retirements, [])
         self.assertEqual(session.audits, [])
         self.assertEqual(session.idempotency, {})
+
+
+def lifecycle_provenance(source_id=EVENT_A):
+    return LivestockFactProvenance("fixture", source_id, "fixture-v1", NOW)
+
+
+def record_command(**overrides):
+    values = {
+        "id": EVENT_A,
+        "animal_id": ANIMAL_A,
+        "event_type": RoutineLifecycleEventType.INTAKE,
+        "occurred_at": NOW,
+        "provenance": lifecycle_provenance(),
+    }
+    values.update(overrides)
+    return RoutineLifecycleEventCommandV1(**values)
+
+
+def ignored_correction_confirmation():
+    return LifecycleCorrectionConfirmationV1(
+        "ignored-caller-confirmation",
+        USER_A,
+        "ignored-correlation",
+        NOW - timedelta(minutes=5),
+    )
+
+
+def correct_command(**overrides):
+    values = {
+        "id": EVENT_B,
+        "animal_id": ANIMAL_A,
+        "event_type": RoutineLifecycleEventType.INTAKE,
+        "occurred_at": NOW - timedelta(minutes=1),
+        "provenance": lifecycle_provenance(EVENT_B),
+        "supersedes_event_id": EVENT_A,
+        "correction_reason": LifecycleCorrectionReason.INCORRECT_TIME,
+        "confirmation": ignored_correction_confirmation(),
+    }
+    values.update(overrides)
+    return RoutineLifecycleEventCommandV1(**values)
+
+
+def record_digest(cmd, confirmation_id=CONFIRM_L, identity="idem-l", tenant_id=TENANT_A):
+    return canonical_lifecycle_record_digest(
+        tenant_id=tenant_id,
+        command=cmd,
+        confirmation_id=confirmation_id,
+        idempotency_identity=identity,
+        policy_version="policy-v1",
+        validator_version="validator-v1",
+    )
+
+
+def correct_digest(cmd, confirmation_id=CONFIRM_C, identity="idem-c", tenant_id=TENANT_A):
+    return canonical_lifecycle_correct_digest(
+        tenant_id=tenant_id,
+        command=cmd,
+        confirmation_id=confirmation_id,
+        idempotency_identity=identity,
+        policy_version="policy-v1",
+        validator_version="validator-v1",
+    )
+
+
+def record_confirmation(cmd=None, **overrides):
+    cmd = cmd or record_command()
+    issued = NOW - timedelta(seconds=30)
+    values = {
+        "id": CONFIRM_L,
+        "tenant_id": TENANT_A,
+        "actor_user_id": USER_A,
+        "principal_id": PRINCIPAL_A,
+        "operation": LIFECYCLE_RECORD_OPERATION,
+        "target_manifest": cmd.id,
+        "command_digest": record_digest(cmd),
+        "policy_version": "policy-v1",
+        "validator_version": "validator-v1",
+        "idempotency_identity": "idem-l",
+        "issued_at": issued,
+        "expires_at": issued + timedelta(minutes=2),
+        "consumed_at": None,
+    }
+    values.update(overrides)
+    if "command_digest" not in overrides:
+        values["command_digest"] = record_digest(
+            cmd,
+            confirmation_id=values["id"],
+            identity=values["idempotency_identity"],
+        )
+    return LivestockConfirmationRecord(**values)
+
+
+def correct_confirmation(cmd=None, **overrides):
+    cmd = cmd or correct_command()
+    issued = NOW - timedelta(seconds=30)
+    values = {
+        "id": CONFIRM_C,
+        "tenant_id": TENANT_A,
+        "actor_user_id": USER_A,
+        "principal_id": PRINCIPAL_A,
+        "operation": LIFECYCLE_CORRECT_OPERATION,
+        "target_manifest": cmd.supersedes_event_id,
+        "command_digest": correct_digest(cmd),
+        "policy_version": "policy-v1",
+        "validator_version": "validator-v1",
+        "idempotency_identity": "idem-c",
+        "issued_at": issued,
+        "expires_at": issued + timedelta(minutes=2),
+        "consumed_at": None,
+    }
+    values.update(overrides)
+    if "command_digest" not in overrides:
+        values["command_digest"] = correct_digest(
+            cmd,
+            confirmation_id=values["id"],
+            identity=values["idempotency_identity"],
+        )
+    return LivestockConfirmationRecord(**values)
+
+
+def record_request(cmd=None, **overrides):
+    cmd = cmd or record_command()
+    values = {
+        "command": cmd,
+        "confirmation": record_confirmation(cmd),
+        "idempotency_identity": "idem-l",
+        "policy_version": "policy-v1",
+        "validator_version": "validator-v1",
+    }
+    values.update(overrides)
+    return LivestockLifecycleRecordRequest(**values)
+
+
+def correct_request(cmd=None, **overrides):
+    cmd = cmd or correct_command()
+    values = {
+        "command": cmd,
+        "confirmation": correct_confirmation(cmd),
+        "idempotency_identity": "idem-c",
+        "policy_version": "policy-v1",
+        "validator_version": "validator-v1",
+    }
+    values.update(overrides)
+    return LivestockLifecycleCorrectRequest(**values)
+
+
+def recorded_event(tenant_id=TENANT_A):
+    context = TenantContext(tenant_id, USER_A, PRINCIPAL_A, Role.MANAGER, "development", "request-a")
+    return record_routine_lifecycle_event(context, record_command(), (), NOW - timedelta(minutes=2))
+
+
+class LivestockLifecycleMutationCoordinatorTests(unittest.TestCase):
+    def test_admission_rejects_missing_tenant_viewer_and_correction_shape_before_transaction(self):
+        session = FakeSession()
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator().record_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=None,
+                request=record_request(),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.ADMISSION_DENIED)
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator(Role.VIEWER).record_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=record_request(),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.ADMISSION_DENIED)
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator().record_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=record_request(correct_command()),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.ADMISSION_DENIED)
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator(Role.OWNER).correct_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=correct_request(record_command()),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.ADMISSION_DENIED)
+        self.assertEqual(session.events, [])
+
+    def test_admission_rejects_manager_correction_before_transaction(self):
+        session = FakeSession(animals=[animal_row()], events=[recorded_event()])
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator(Role.MANAGER).correct_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=correct_request(),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.ADMISSION_DENIED)
+        self.assertEqual(session.events, [])
+
+    def test_first_write_rejects_expired_used_unbound_wrong_matrix_id_and_wrong_target(self):
+        expired = record_confirmation(issued_at=NOW - timedelta(minutes=3), expires_at=NOW - timedelta(minutes=1))
+        reused = record_confirmation(consumed_at=NOW - timedelta(seconds=1))
+        unbound = record_confirmation(command_digest="not-the-canonical-digest")
+        wrong_op = record_confirmation(operation=ANIMAL_CREATE_OPERATION)
+        wrong_target = record_confirmation(target_manifest=ANIMAL_A)
+        for invalid in (expired, reused, unbound, wrong_op, wrong_target):
+            session = FakeSession(confirmation_row=invalid, animals=[animal_row()])
+            with self.assertRaises(LivestockMutationError) as raised:
+                coordinator().record_lifecycle_event(
+                    principal=principal(),
+                    requested_tenant_id=TENANT_A,
+                    request=record_request(confirmation=invalid),
+                    session=session,
+                    now=NOW,
+                )
+            self.assertEqual(raised.exception.code, LivestockMutationErrorCode.CONFIRMATION_INVALID)
+            self.assertIn("rollback", session.events)
+            self.assertEqual(session.lifecycle_events, [])
+            self.assertEqual(session.audits, [])
+
+        wrong_correct_target = correct_confirmation(target_manifest=EVENT_B)
+        session = FakeSession(confirmation_row=wrong_correct_target, animals=[animal_row()], events=[recorded_event()])
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator(Role.OWNER).correct_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=correct_request(confirmation=wrong_correct_target),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.CONFIRMATION_INVALID)
+        self.assertEqual(len(session.lifecycle_events), 1)
+
+    def test_successful_record_locks_animal_history_then_persists_in_order(self):
+        admitted = record_confirmation()
+        session = FakeSession(confirmation_row=admitted, animals=[animal_row()])
+        result = coordinator().record_lifecycle_event(
+            principal=principal(),
+            requested_tenant_id=TENANT_A,
+            request=record_request(confirmation=admitted),
+            session=session,
+            now=NOW,
+        )
+        self.assertFalse(result.replayed)
+        self.assertEqual(result.event.id, EVENT_A)
+        self.assertEqual(result.event.event_type, RoutineLifecycleEventType.INTAKE)
+        self.assertEqual(
+            session.events,
+            [
+                "begin",
+                "set_local",
+                "current_timestamp",
+                "reserve_idempotency",
+                "consume_confirmation",
+                "lock_animal",
+                "lock_lifecycle_animal_history",
+                "persist_lifecycle",
+                "insert_audit",
+                "finalize_idempotency",
+                "commit",
+            ],
+        )
+        finalized = session.idempotency[(TENANT_A, LIFECYCLE_RECORD_OPERATION, "idem-l")]
+        self.assertEqual(finalized.result_lifecycle_event_id, EVENT_A)
+        self.assertIsNone(finalized.result_animal_id)
+        self.assertEqual(session.audits[0].operation, LIFECYCLE_RECORD_OPERATION)
+
+    def test_successful_correct_synthesizes_cf2_confirmation_and_does_not_overwrite(self):
+        admitted = correct_confirmation()
+        original = recorded_event()
+        session = FakeSession(confirmation_row=admitted, animals=[animal_row()], events=[original])
+        result = coordinator(Role.OWNER).correct_lifecycle_event(
+            principal=principal(),
+            requested_tenant_id=TENANT_A,
+            request=correct_request(confirmation=admitted),
+            session=session,
+            now=NOW,
+        )
+        self.assertFalse(result.replayed)
+        self.assertEqual(result.event.supersedes_event_id, EVENT_A)
+        self.assertEqual(result.event.confirmation.id, CONFIRM_C)
+        self.assertEqual(result.event.confirmation.approved_by_user_id, USER_A)
+        self.assertEqual(result.event.confirmation.correlation_id, "request-a")
+        self.assertNotEqual(result.event.confirmation.id, ignored_correction_confirmation().id)
+        self.assertEqual(len(session.lifecycle_events), 2)
+        self.assertEqual(session.lifecycle_events[0].id, EVENT_A)
+        self.assertEqual(session.lifecycle_events[1].id, EVENT_B)
+        finalized = session.idempotency[(TENANT_A, LIFECYCLE_CORRECT_OPERATION, "idem-c")]
+        self.assertEqual(finalized.result_lifecycle_event_id, EVENT_B)
+        self.assertIsNone(finalized.result_identifier_id)
+
+    def test_identical_record_and_correct_replays_do_not_consume_persist_or_audit(self):
+        admitted = record_confirmation()
+        session = FakeSession(confirmation_row=admitted, animals=[animal_row()])
+        first = coordinator().record_lifecycle_event(
+            principal=principal(),
+            requested_tenant_id=TENANT_A,
+            request=record_request(confirmation=admitted),
+            session=session,
+            now=NOW,
+        )
+        session.events.clear()
+        replayed = coordinator().record_lifecycle_event(
+            principal=principal(),
+            requested_tenant_id=TENANT_A,
+            request=record_request(confirmation=admitted),
+            session=session,
+            now=NOW,
+        )
+        self.assertTrue(replayed.replayed)
+        self.assertEqual(replayed.event.id, first.event.id)
+        self.assertEqual(session.events, ["begin", "set_local", "current_timestamp", "commit"])
+        self.assertEqual(len(session.lifecycle_events), 1)
+        self.assertEqual(len(session.audits), 1)
+
+        session.now = NOW + timedelta(seconds=1)
+        correct_admitted = correct_confirmation()
+        session.confirmations[correct_admitted.id] = correct_admitted
+        first_correct = coordinator(Role.OWNER).correct_lifecycle_event(
+            principal=principal(),
+            requested_tenant_id=TENANT_A,
+            request=correct_request(confirmation=correct_admitted),
+            session=session,
+            now=NOW,
+        )
+        session.events.clear()
+        replayed_correct = coordinator(Role.OWNER).correct_lifecycle_event(
+            principal=principal(),
+            requested_tenant_id=TENANT_A,
+            request=correct_request(confirmation=correct_admitted),
+            session=session,
+            now=NOW,
+        )
+        self.assertTrue(replayed_correct.replayed)
+        self.assertEqual(replayed_correct.event.id, first_correct.event.id)
+        self.assertEqual(session.events, ["begin", "set_local", "current_timestamp", "commit"])
+        self.assertEqual(len(session.lifecycle_events), 2)
+        self.assertEqual(len(session.audits), 2)
+
+    def test_same_idempotency_identity_with_different_digest_conflicts(self):
+        admitted = record_confirmation()
+        session = FakeSession(confirmation_row=admitted, animals=[animal_row()])
+        coordinator().record_lifecycle_event(
+            principal=principal(),
+            requested_tenant_id=TENANT_A,
+            request=record_request(confirmation=admitted),
+            session=session,
+            now=NOW,
+        )
+        other_id = str(uuid4())
+        other = record_command(id=other_id, provenance=lifecycle_provenance(other_id))
+        other_confirmation = record_confirmation(other, id=str(uuid4()), idempotency_identity="idem-l")
+        session.confirmations[other_confirmation.id] = other_confirmation
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator().record_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=record_request(other, confirmation=other_confirmation, idempotency_identity="idem-l"),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.IDEMPOTENCY_CONFLICT)
+        self.assertEqual(len(session.lifecycle_events), 1)
+
+    def test_missing_animal_out_of_order_and_second_supersession_fail_closed(self):
+        admitted = record_confirmation()
+        session = FakeSession(confirmation_row=admitted)
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator().record_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=record_request(confirmation=admitted),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.TARGET_NOT_FOUND)
+        self.assertTrue(session.rolled_back)
+
+        existing = recorded_event()
+        too_early = record_command(id=EVENT_B, occurred_at=NOW - timedelta(minutes=5), provenance=lifecycle_provenance(EVENT_B))
+        early_confirmation = record_confirmation(too_early, id=str(uuid4()), idempotency_identity="idem-early")
+        early_session = FakeSession(confirmation_row=early_confirmation, animals=[animal_row()], events=[existing])
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator().record_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=record_request(too_early, confirmation=early_confirmation, idempotency_identity="idem-early"),
+                session=early_session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.LIFECYCLE_INVALID)
+
+        first = coordinator(Role.OWNER).correct_lifecycle_event(
+            principal=principal(),
+            requested_tenant_id=TENANT_A,
+            request=correct_request(),
+            session=FakeSession(
+                confirmation_row=correct_confirmation(),
+                animals=[animal_row()],
+                events=[existing],
+            ),
+            now=NOW,
+        ).event
+        second_id = str(uuid4())
+        second = correct_command(id=second_id, provenance=lifecycle_provenance(second_id))
+        second_confirmation = correct_confirmation(second, id=str(uuid4()), idempotency_identity="idem-c2")
+        already = FakeSession(
+            confirmation_row=second_confirmation,
+            animals=[animal_row()],
+            events=[existing, first],
+        )
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator(Role.OWNER).correct_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=correct_request(second, confirmation=second_confirmation, idempotency_identity="idem-c2"),
+                session=already,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.LIFECYCLE_INVALID)
+
+    def test_persist_failure_rolls_back_record_and_correct(self):
+        admitted = record_confirmation()
+        session = FakeSession(confirmation_row=admitted, animals=[animal_row()], fail_on="persist_lifecycle")
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator().record_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=record_request(confirmation=admitted),
+                session=session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.TRANSACTION_FAILED)
+        self.assertTrue(session.rolled_back)
+        self.assertEqual(session.lifecycle_events, [])
+        self.assertEqual(session.audits, [])
+        self.assertEqual(session.idempotency, {})
+
+        correct_admitted = correct_confirmation()
+        original = recorded_event()
+        correct_session = FakeSession(
+            confirmation_row=correct_admitted,
+            animals=[animal_row()],
+            events=[original],
+            fail_on="persist_lifecycle",
+        )
+        with self.assertRaises(LivestockMutationError) as raised:
+            coordinator(Role.OWNER).correct_lifecycle_event(
+                principal=principal(),
+                requested_tenant_id=TENANT_A,
+                request=correct_request(confirmation=correct_admitted),
+                session=correct_session,
+                now=NOW,
+            )
+        self.assertEqual(raised.exception.code, LivestockMutationErrorCode.TRANSACTION_FAILED)
+        self.assertTrue(correct_session.rolled_back)
+        self.assertEqual([event.id for event in correct_session.lifecycle_events], [EVENT_A])
+        self.assertEqual(correct_session.audits, [])
+        self.assertEqual(correct_session.idempotency, {})

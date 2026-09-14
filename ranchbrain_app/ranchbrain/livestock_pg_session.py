@@ -2,8 +2,8 @@
 
 Accepts an already-open PEP 249 connection. This module does not import a
 PostgreSQL driver, call connect(), read an environment URL, or use tools/**
-clients. It implements coordinator session methods for animal_create and the
-identifier assign/retire pair.
+clients. It implements coordinator session methods for animal_create, identifier
+assign/retire, and lifecycle record/correct.
 """
 
 from __future__ import annotations
@@ -18,9 +18,12 @@ from ranchbrain.livestock_write_model import (
     AnimalIdentifierV1,
     IdentifierRetirementReason,
     IdentifierRetirementV1,
+    LifecycleCorrectionReason,
     LivestockAnimalV1,
     LivestockAuditInputV1,
     LivestockWriteOperation,
+    RoutineLifecycleEventType,
+    RoutineLifecycleEventV1,
 )
 from ranchbrain.livestock_write_repository import (
     LivestockAuditRecord,
@@ -77,6 +80,17 @@ def _reraise_identifier_write(error: BaseException) -> None:
         ) from error
     if code == "23503":
         raise LivestockPersistenceError("identifier write target is missing", LivestockPersistenceErrorCode.TARGET_NOT_FOUND) from error
+    raise error
+
+
+def _reraise_lifecycle_write(error: BaseException) -> None:
+    code = _pgcode(error)
+    if code == "23505":
+        raise LivestockPersistenceError("lifecycle event is already superseded", LivestockPersistenceErrorCode.LIFECYCLE_INVALID) from error
+    if code == "23514":
+        raise LivestockPersistenceError("lifecycle correction must supersede one matching event", LivestockPersistenceErrorCode.LIFECYCLE_INVALID) from error
+    if code == "23503":
+        raise LivestockPersistenceError("lifecycle write target is missing", LivestockPersistenceErrorCode.TARGET_NOT_FOUND) from error
     raise error
 
 
@@ -164,6 +178,7 @@ class LivestockPgSession:
             """
             SELECT i.tenant_id, i.scope, i.identity, i.key_digest, i.operation, i.outcome,
                    i.transaction_id, i.result_animal_id, i.result_identifier_id, i.result_retirement_id,
+                   i.result_lifecycle_event_id,
                    a.id, a.display_name, a.species_code, a.production_type_code, a.breed_code,
                    a.provenance_source_type, a.provenance_source_id, a.provenance_source_version,
                    a.provenance_observed_at, a.created_by_user_id, a.created_at,
@@ -172,7 +187,10 @@ class LivestockPgSession:
                    ident.provenance_observed_at, ident.created_by_user_id, ident.created_at,
                    ret.id, ret.identifier_id, ret.reason, ret.retired_at,
                    ret.provenance_source_type, ret.provenance_source_id, ret.provenance_source_version,
-                   ret.provenance_observed_at, ret.created_by_user_id, ret.created_at
+                   ret.provenance_observed_at, ret.created_by_user_id, ret.created_at,
+                   ev.id, ev.animal_id, ev.event_type, ev.occurred_at, ev.supersedes_event_id, ev.correction_reason,
+                   ev.provenance_source_type, ev.provenance_source_id, ev.provenance_source_version,
+                   ev.provenance_observed_at, ev.created_by_user_id, ev.created_at
             FROM ranchos.livestock_idempotency AS i
             LEFT JOIN ranchos.livestock_animals AS a
               ON a.tenant_id = i.tenant_id AND a.id = i.result_animal_id
@@ -180,6 +198,8 @@ class LivestockPgSession:
               ON ident.tenant_id = i.tenant_id AND ident.id = i.result_identifier_id
             LEFT JOIN ranchos.animal_identifier_retirements AS ret
               ON ret.tenant_id = i.tenant_id AND ret.id = i.result_retirement_id
+            LEFT JOIN ranchos.livestock_lifecycle_events AS ev
+              ON ev.tenant_id = i.tenant_id AND ev.id = i.result_lifecycle_event_id
             WHERE i.tenant_id = %s AND i.scope = %s AND i.identity = %s
             """,
             (tenant_id, scope, identity),
@@ -197,11 +217,13 @@ class LivestockPgSession:
             _text(row[5]),
             transaction_id,
             _optional_text(row[7]),
-            None if row[10] is None else self._animal_from_row(tenant, transaction_id, row[10:21]),
+            None if row[11] is None else self._animal_from_row(tenant, transaction_id, row[11:22]),
             _optional_text(row[8]),
-            None if row[21] is None else self._identifier_from_row(tenant, transaction_id, row[21:32]),
+            None if row[22] is None else self._identifier_from_row(tenant, transaction_id, row[22:33]),
             _optional_text(row[9]),
-            None if row[32] is None else self._retirement_from_row(tenant, transaction_id, row[32:43]),
+            None if row[33] is None else self._retirement_from_row(tenant, transaction_id, row[33:43]),
+            _optional_text(row[10]),
+            None if row[43] is None else self._event_from_row(tenant, transaction_id, row[43:55]),
         )
 
     def insert_idempotency_reservation(self, record: LivestockIdempotencyRecord) -> None:
@@ -209,8 +231,8 @@ class LivestockPgSession:
             """
             INSERT INTO ranchos.livestock_idempotency (
                 tenant_id, scope, identity, key_digest, operation, outcome, transaction_id,
-                result_animal_id, result_identifier_id, result_retirement_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                result_animal_id, result_identifier_id, result_retirement_id, result_lifecycle_event_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 record.tenant_id,
@@ -223,6 +245,7 @@ class LivestockPgSession:
                 record.result_animal_id,
                 record.result_identifier_id,
                 record.result_retirement_id,
+                record.result_lifecycle_event_id,
             ),
             "livestock idempotency reserve did not insert one row",
         )
@@ -231,7 +254,8 @@ class LivestockPgSession:
         self._execute_one(
             """
             UPDATE ranchos.livestock_idempotency
-            SET outcome = %s, result_animal_id = %s, result_identifier_id = %s, result_retirement_id = %s
+            SET outcome = %s, result_animal_id = %s, result_identifier_id = %s, result_retirement_id = %s,
+                result_lifecycle_event_id = %s
             WHERE tenant_id = %s AND scope = %s AND identity = %s
             """,
             (
@@ -239,6 +263,7 @@ class LivestockPgSession:
                 record.result_animal_id,
                 record.result_identifier_id,
                 record.result_retirement_id,
+                record.result_lifecycle_event_id,
                 record.tenant_id,
                 record.scope,
                 record.identity,
@@ -411,6 +436,57 @@ class LivestockPgSession:
         except Exception as error:
             _reraise_retirement_write(error)
 
+    def lock_lifecycle_animal_history(self, tenant_id: str, animal_id: str) -> None:
+        # 002 grants SELECT/INSERT only, so SELECT FOR UPDATE/SHARE is unavailable.
+        self._execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"{tenant_id}:lifecycle:{animal_id}",),
+        )
+
+    def load_lifecycle_events_for_animal(self, tenant_id: str, animal_id: str) -> tuple[RoutineLifecycleEventV1, ...]:
+        rows = self._fetchall(
+            """
+            SELECT id, animal_id, event_type, occurred_at, supersedes_event_id, correction_reason,
+                   provenance_source_type, provenance_source_id, provenance_source_version,
+                   provenance_observed_at, created_by_user_id, created_at
+            FROM ranchos.livestock_lifecycle_events
+            WHERE tenant_id = %s AND animal_id = %s
+            ORDER BY occurred_at, id
+            """,
+            (tenant_id, animal_id),
+        )
+        return tuple(self._event_from_row(tenant_id, tenant_id, row) for row in rows)
+
+    def insert_lifecycle_event(self, event: RoutineLifecycleEventV1) -> None:
+        try:
+            self._execute_one(
+                """
+                INSERT INTO ranchos.livestock_lifecycle_events (
+                    tenant_id, id, animal_id, event_type, occurred_at, supersedes_event_id, correction_reason,
+                    provenance_source_type, provenance_source_id, provenance_source_version,
+                    provenance_observed_at, created_by_user_id, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    event.tenant_id,
+                    event.id,
+                    event.animal_id,
+                    event.event_type.value,
+                    event.occurred_at,
+                    event.supersedes_event_id,
+                    None if event.correction_reason is None else event.correction_reason.value,
+                    event.provenance.source_type,
+                    event.provenance.source_id,
+                    event.provenance.source_version,
+                    event.provenance.observed_at,
+                    event.audit.actor_user_id,
+                    event.audit.recorded_at,
+                ),
+                "livestock lifecycle event insert did not insert one row",
+            )
+        except Exception as error:
+            _reraise_lifecycle_write(error)
+
     def insert_audit(self, record: LivestockAuditRecord) -> None:
         self._execute_one(
             """
@@ -505,6 +581,29 @@ class LivestockPgSession:
                 correlation_id,
                 row[9],
             ),
+        )
+
+    def _event_from_row(self, tenant_id: str, correlation_id: str, row: tuple[object, ...]) -> RoutineLifecycleEventV1:
+        supersedes = _optional_text(row[4])
+        operation = LivestockWriteOperation.LIFECYCLE_RECORD if supersedes is None else LivestockWriteOperation.LIFECYCLE_CORRECT
+        reason = None if row[5] is None else LifecycleCorrectionReason(_text(row[5]))
+        return RoutineLifecycleEventV1(
+            _text(row[0]),
+            tenant_id,
+            _text(row[1]),
+            RoutineLifecycleEventType(_text(row[2])),
+            row[3],
+            LivestockFactProvenance(_text(row[6]), _text(row[7]), _text(row[8]), row[9]),
+            LivestockAuditInputV1(
+                operation,
+                _text(row[10]),
+                self._require_principal(),
+                correlation_id,
+                row[11],
+            ),
+            supersedes,
+            reason,
+            None,
         )
 
     def _execute(self, operation: str, parameters: tuple[object, ...] = ()) -> None:

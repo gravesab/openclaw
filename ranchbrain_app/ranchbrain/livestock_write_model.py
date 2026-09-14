@@ -182,17 +182,38 @@ class AnimalIdentifierV1:
 
 
 @dataclass(frozen=True)
+class IdentifierRetireCommandV1:
+    id: str
+    identifier_id: str
+    reason: IdentifierRetirementReason
+    retired_at: datetime
+    provenance: LivestockFactProvenance
+
+    def __post_init__(self) -> None:
+        if not all(isinstance(value, str) and value.strip() for value in (self.id, self.identifier_id)):
+            raise LivestockWriteError("identifier retirement requires stable references", LivestockWriteErrorCode.INVALID)
+        if not isinstance(self.reason, IdentifierRetirementReason):
+            raise LivestockWriteError("identifier retirement reason is not in the controlled catalog", LivestockWriteErrorCode.INVALID)
+        if not isinstance(self.provenance, LivestockFactProvenance):
+            raise LivestockWriteError("identifier retirement requires fact provenance", LivestockWriteErrorCode.INVALID)
+        _require_aware(self.retired_at, "identifier retired_at")
+
+
+@dataclass(frozen=True)
 class IdentifierRetirementV1:
     id: str
     tenant_id: str
     identifier_id: str
     reason: IdentifierRetirementReason
     retired_at: datetime
+    provenance: LivestockFactProvenance
     audit: LivestockAuditInputV1
 
     def __post_init__(self) -> None:
         if not self.id or not self.identifier_id or not isinstance(self.reason, IdentifierRetirementReason):
             raise LivestockWriteError("identifier retirement requires controlled references and reason", LivestockWriteErrorCode.INVALID)
+        if not isinstance(self.provenance, LivestockFactProvenance):
+            raise LivestockWriteError("identifier retirement requires fact provenance", LivestockWriteErrorCode.INVALID)
         _require_aware(self.retired_at, "identifier retired_at")
 
 
@@ -239,26 +260,26 @@ def assign_identifier(
 
 def retire_identifier(
     context: TenantContext,
-    *,
-    retirement_id: str,
+    command: IdentifierRetireCommandV1,
     identifier: AnimalIdentifierV1,
-    reason: IdentifierRetirementReason,
-    retired_at: datetime,
     existing_retirements: Iterable[IdentifierRetirementV1],
     recorded_at: datetime,
 ) -> IdentifierRetirementV1:
     _require_capability(context, Capability.LIVESTOCK_IDENTIFIER_WRITE)
     _require_tenant(context, identifier.tenant_id)
+    if command.identifier_id != identifier.id:
+        raise LivestockWriteError("identifier retirement is not bound to the loaded assignment", LivestockWriteErrorCode.CONTEXT_MISMATCH)
     if any(retirement.identifier_id == identifier.id for retirement in existing_retirements):
         raise LivestockWriteError("identifier is already retired", LivestockWriteErrorCode.INVALID)
-    if retired_at < identifier.effective_at:
+    if command.retired_at < identifier.effective_at:
         raise LivestockWriteError("identifier retirement cannot precede assignment", LivestockWriteErrorCode.INVALID)
     return IdentifierRetirementV1(
-        retirement_id,
+        command.id,
         context.tenant_id,
         identifier.id,
-        reason,
-        retired_at,
+        command.reason,
+        command.retired_at,
+        command.provenance,
         audit_input(context, LivestockWriteOperation.IDENTIFIER_RETIRE, recorded_at),
     )
 

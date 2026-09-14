@@ -2,7 +2,7 @@
 
 The coordinator must already have begun a transaction and set transaction-local
 Ranch OS settings. This module does not parse identity, issue SET or RESET, open
-ingress, or authorize the other four first-slice mutations.
+ingress, or authorize lifecycle mutations.
 """
 
 from __future__ import annotations
@@ -12,11 +12,13 @@ from datetime import datetime, timedelta
 from enum import Enum
 from typing import Protocol
 
-from ranchbrain.livestock_write_model import LivestockAnimalV1
+from ranchbrain.livestock_write_model import AnimalIdentifierType, AnimalIdentifierV1, IdentifierRetirementV1, LivestockAnimalV1
 from ranchbrain.tenancy import TenantContext
 
 
 ANIMAL_CREATE_OPERATION = "ranchos.livestock.animal-create"
+IDENTIFIER_ASSIGN_OPERATION = "ranchos.livestock.identifier-assign"
+IDENTIFIER_RETIRE_OPERATION = "ranchos.livestock.identifier-retire"
 CONFIRMATION_TTL = timedelta(minutes=2)
 
 
@@ -24,6 +26,9 @@ class LivestockPersistenceErrorCode(str, Enum):
     CONFIRMATION_INVALID = "livestock_confirmation_invalid"
     IDEMPOTENCY_CONFLICT = "livestock_idempotency_conflict"
     IDEMPOTENCY_AMBIGUOUS = "livestock_idempotency_ambiguous"
+    IDENTIFIER_NOT_AVAILABLE = "livestock_identifier_not_available"
+    IDENTIFIER_INVALID = "livestock_identifier_invalid"
+    TARGET_NOT_FOUND = "livestock_target_not_found"
 
 
 class LivestockPersistenceError(RuntimeError):
@@ -60,6 +65,10 @@ class LivestockIdempotencyRecord:
     transaction_id: str
     result_animal_id: str | None = None
     animal: LivestockAnimalV1 | None = None
+    result_identifier_id: str | None = None
+    identifier: AnimalIdentifierV1 | None = None
+    result_retirement_id: str | None = None
+    retirement: IdentifierRetirementV1 | None = None
 
 
 @dataclass(frozen=True)
@@ -101,13 +110,71 @@ class LivestockMutationSession(Protocol):
     def insert_idempotency_reservation(self, record: LivestockIdempotencyRecord) -> None: ...
     def finalize_idempotency(self, record: LivestockIdempotencyRecord) -> None: ...
     def insert_animal(self, animal: LivestockAnimalV1) -> None: ...
+    def lock_animal(self, tenant_id: str, animal_id: str) -> LivestockAnimalV1 | None: ...
+    def lock_identifier(self, tenant_id: str, identifier_id: str) -> AnimalIdentifierV1 | None: ...
+    def lock_active_identifier_slot(
+        self,
+        tenant_id: str,
+        identifier_type: AnimalIdentifierType,
+        normalized_value: str,
+    ) -> None: ...
+    def load_identifiers_for_collision(
+        self,
+        tenant_id: str,
+        identifier_type: AnimalIdentifierType,
+        normalized_value: str,
+    ) -> tuple[AnimalIdentifierV1, ...]: ...
+    def load_retirements_for_identifiers(
+        self,
+        tenant_id: str,
+        identifier_ids: tuple[str, ...],
+    ) -> tuple[IdentifierRetirementV1, ...]: ...
+    def insert_identifier(self, identifier: AnimalIdentifierV1) -> None: ...
+    def insert_retirement(self, retirement: IdentifierRetirementV1) -> None: ...
     def insert_audit(self, record: LivestockAuditRecord) -> None: ...
     def commit(self) -> None: ...
     def rollback(self) -> None: ...
 
 
+def _committed_result_is_exact(record: LivestockIdempotencyRecord) -> bool:
+    match record.operation:
+        case operation if operation == ANIMAL_CREATE_OPERATION:
+            return (
+                record.result_animal_id is not None
+                and record.animal is not None
+                and record.animal.id == record.result_animal_id
+                and record.result_identifier_id is None
+                and record.identifier is None
+                and record.result_retirement_id is None
+                and record.retirement is None
+            )
+        case operation if operation == IDENTIFIER_ASSIGN_OPERATION:
+            return (
+                record.result_identifier_id is not None
+                and record.identifier is not None
+                and record.identifier.id == record.result_identifier_id
+                and record.result_animal_id is None
+                and record.animal is None
+                and record.result_retirement_id is None
+                and record.retirement is None
+            )
+        case operation if operation == IDENTIFIER_RETIRE_OPERATION:
+            return (
+                record.result_retirement_id is not None
+                and record.retirement is not None
+                and record.retirement.id == record.result_retirement_id
+                and record.result_animal_id is None
+                and record.animal is None
+                and record.result_identifier_id is None
+                and record.identifier is None
+            )
+        case _ as unreachable:
+            _ = unreachable
+            return False
+
+
 class LivestockWriteRepository:
-    """Persist allowlisted animal_create effects after transaction-local settings exist."""
+    """Persist allowlisted first-slice livestock effects after transaction-local settings exist."""
 
     def consume_confirmation(
         self,
@@ -121,6 +188,7 @@ class LivestockWriteRepository:
         policy_version: str,
         validator_version: str,
         now: datetime,
+        operation: str,
     ) -> None:
         stored = session.load_confirmation(confirmation_id)
         if stored is None:
@@ -135,7 +203,7 @@ class LivestockWriteRepository:
             stored.tenant_id != context.tenant_id
             or stored.actor_user_id != context.user_id
             or stored.principal_id != context.principal_id
-            or stored.operation != ANIMAL_CREATE_OPERATION
+            or stored.operation != operation
             or stored.command_digest != digest
             or stored.idempotency_identity != idempotency_identity
             or stored.target_manifest != target_manifest
@@ -153,46 +221,40 @@ class LivestockWriteRepository:
         identity: str,
         digest: str,
         transaction_id: str,
+        operation: str,
     ) -> IdempotencyReservation:
-        scope = ANIMAL_CREATE_OPERATION
-        existing = session.load_idempotency(context.tenant_id, scope, identity)
+        existing = session.load_idempotency(context.tenant_id, operation, identity)
         if existing is None:
             reserved = LivestockIdempotencyRecord(
                 context.tenant_id,
-                scope,
+                operation,
                 identity,
                 digest,
-                ANIMAL_CREATE_OPERATION,
+                operation,
                 "reserved",
                 transaction_id,
             )
             session.insert_idempotency_reservation(reserved)
             return IdempotencyReservation(False, reserved)
-        if existing.key_digest != digest:
+        if existing.key_digest != digest or existing.operation != operation or existing.scope != operation:
             raise LivestockPersistenceError("idempotency identity reused with a different digest", LivestockPersistenceErrorCode.IDEMPOTENCY_CONFLICT)
-        if (
-            existing.outcome != "committed"
-            or existing.result_animal_id is None
-            or existing.animal is None
-            or existing.animal.id != existing.result_animal_id
-        ):
+        if existing.outcome != "committed" or not _committed_result_is_exact(existing):
             raise LivestockPersistenceError("idempotency outcome is ambiguous", LivestockPersistenceErrorCode.IDEMPOTENCY_AMBIGUOUS)
         return IdempotencyReservation(True, existing)
 
     def persist_animal(self, session: LivestockMutationSession, animal: LivestockAnimalV1) -> None:
         session.insert_animal(animal)
 
+    def persist_identifier(self, session: LivestockMutationSession, identifier: AnimalIdentifierV1) -> None:
+        session.insert_identifier(identifier)
+
+    def persist_retirement(self, session: LivestockMutationSession, retirement: IdentifierRetirementV1) -> None:
+        session.insert_retirement(retirement)
+
     def insert_audit(self, session: LivestockMutationSession, record: LivestockAuditRecord) -> None:
         session.insert_audit(record)
 
     def finalize_idempotency(self, session: LivestockMutationSession, record: LivestockIdempotencyRecord) -> None:
-        if (
-            record.outcome != "committed"
-            or record.scope != ANIMAL_CREATE_OPERATION
-            or record.operation != ANIMAL_CREATE_OPERATION
-            or record.result_animal_id is None
-            or record.animal is None
-            or record.animal.id != record.result_animal_id
-        ):
+        if record.outcome != "committed" or record.scope != record.operation or not _committed_result_is_exact(record):
             raise LivestockPersistenceError("idempotency outcome is ambiguous", LivestockPersistenceErrorCode.IDEMPOTENCY_AMBIGUOUS)
         session.finalize_idempotency(record)

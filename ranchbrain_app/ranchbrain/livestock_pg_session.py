@@ -1,9 +1,9 @@
-"""DEV-only animal_create PostgreSQL session adapter.
+"""DEV-only livestock PostgreSQL session adapter.
 
 Accepts an already-open PEP 249 connection. This module does not import a
 PostgreSQL driver, call connect(), read an environment URL, or use tools/**
-clients. It implements only the coordinator session methods needed for
-animal_create.
+clients. It implements coordinator session methods for animal_create and the
+identifier assign/retire pair.
 """
 
 from __future__ import annotations
@@ -13,11 +13,21 @@ from typing import Protocol
 from uuid import UUID
 
 from ranchbrain.livestock_read_model import LivestockFactProvenance
-from ranchbrain.livestock_write_model import LivestockAnimalV1, LivestockAuditInputV1, LivestockWriteOperation
+from ranchbrain.livestock_write_model import (
+    AnimalIdentifierType,
+    AnimalIdentifierV1,
+    IdentifierRetirementReason,
+    IdentifierRetirementV1,
+    LivestockAnimalV1,
+    LivestockAuditInputV1,
+    LivestockWriteOperation,
+)
 from ranchbrain.livestock_write_repository import (
     LivestockAuditRecord,
     LivestockConfirmationRecord,
     LivestockIdempotencyRecord,
+    LivestockPersistenceError,
+    LivestockPersistenceErrorCode,
 )
 
 _RUNTIME_ROLE = "ranchos_dev_runtime"
@@ -26,6 +36,7 @@ _RUNTIME_ROLE = "ranchos_dev_runtime"
 class _Cursor(Protocol):
     def execute(self, operation: str, parameters: tuple[object, ...] = ()) -> object: ...
     def fetchone(self) -> tuple[object, ...] | None: ...
+    def fetchall(self) -> list[tuple[object, ...]]: ...
     def close(self) -> None: ...
     rowcount: int
 
@@ -52,8 +63,39 @@ def _optional_text(value: object) -> str | None:
     return _text(value)
 
 
+def _pgcode(error: BaseException) -> str | None:
+    code = getattr(error, "pgcode", None)
+    return code if isinstance(code, str) else None
+
+
+def _reraise_identifier_write(error: BaseException) -> None:
+    code = _pgcode(error)
+    if code == "23505":
+        raise LivestockPersistenceError(
+            "identifier value is already active in this tenant",
+            LivestockPersistenceErrorCode.IDENTIFIER_NOT_AVAILABLE,
+        ) from error
+    if code == "23503":
+        raise LivestockPersistenceError("identifier write target is missing", LivestockPersistenceErrorCode.TARGET_NOT_FOUND) from error
+    raise error
+
+
+def _reraise_retirement_write(error: BaseException) -> None:
+    code = _pgcode(error)
+    if code == "23505":
+        raise LivestockPersistenceError("identifier is already retired", LivestockPersistenceErrorCode.IDENTIFIER_INVALID) from error
+    if code == "23514":
+        raise LivestockPersistenceError(
+            "identifier retirement cannot precede assignment",
+            LivestockPersistenceErrorCode.IDENTIFIER_INVALID,
+        ) from error
+    if code == "23503":
+        raise LivestockPersistenceError("identifier write target is missing", LivestockPersistenceErrorCode.TARGET_NOT_FOUND) from error
+    raise error
+
+
 class LivestockPgSession:
-    """Transaction-local runtime session for disposable animal_create proof."""
+    """Transaction-local runtime session for disposable livestock mutation proof."""
 
     def __init__(self, connection: _Connection):
         if getattr(connection, "autocommit", False):
@@ -121,57 +163,54 @@ class LivestockPgSession:
         row = self._fetchone(
             """
             SELECT i.tenant_id, i.scope, i.identity, i.key_digest, i.operation, i.outcome,
-                   i.transaction_id, i.result_animal_id,
+                   i.transaction_id, i.result_animal_id, i.result_identifier_id, i.result_retirement_id,
                    a.id, a.display_name, a.species_code, a.production_type_code, a.breed_code,
                    a.provenance_source_type, a.provenance_source_id, a.provenance_source_version,
-                   a.provenance_observed_at, a.created_by_user_id, a.created_at
+                   a.provenance_observed_at, a.created_by_user_id, a.created_at,
+                   ident.id, ident.animal_id, ident.identifier_type, ident.normalized_value, ident.effective_at,
+                   ident.provenance_source_type, ident.provenance_source_id, ident.provenance_source_version,
+                   ident.provenance_observed_at, ident.created_by_user_id, ident.created_at,
+                   ret.id, ret.identifier_id, ret.reason, ret.retired_at,
+                   ret.provenance_source_type, ret.provenance_source_id, ret.provenance_source_version,
+                   ret.provenance_observed_at, ret.created_by_user_id, ret.created_at
             FROM ranchos.livestock_idempotency AS i
             LEFT JOIN ranchos.livestock_animals AS a
               ON a.tenant_id = i.tenant_id AND a.id = i.result_animal_id
+            LEFT JOIN ranchos.animal_identifiers AS ident
+              ON ident.tenant_id = i.tenant_id AND ident.id = i.result_identifier_id
+            LEFT JOIN ranchos.animal_identifier_retirements AS ret
+              ON ret.tenant_id = i.tenant_id AND ret.id = i.result_retirement_id
             WHERE i.tenant_id = %s AND i.scope = %s AND i.identity = %s
             """,
             (tenant_id, scope, identity),
         )
         if row is None:
             return None
-        animal = None
-        if row[8] is not None:
-            if self._principal_id is None:
-                raise RuntimeError("idempotency replay requires transaction-local principal")
-            animal = LivestockAnimalV1(
-                _text(row[8]),
-                _text(row[0]),
-                _text(row[9]),
-                _text(row[10]),
-                _text(row[11]),
-                _optional_text(row[12]),
-                LivestockFactProvenance(_text(row[13]), _text(row[14]), _text(row[15]), row[16]),
-                LivestockAuditInputV1(
-                    LivestockWriteOperation.ANIMAL_CREATE,
-                    _text(row[17]),
-                    self._principal_id,
-                    _text(row[6]),
-                    row[18],
-                ),
-            )
+        tenant = _text(row[0])
+        transaction_id = _text(row[6])
         return LivestockIdempotencyRecord(
-            _text(row[0]),
+            tenant,
             _text(row[1]),
             _text(row[2]),
             _text(row[3]),
             _text(row[4]),
             _text(row[5]),
-            _text(row[6]),
+            transaction_id,
             _optional_text(row[7]),
-            animal,
+            None if row[10] is None else self._animal_from_row(tenant, transaction_id, row[10:21]),
+            _optional_text(row[8]),
+            None if row[21] is None else self._identifier_from_row(tenant, transaction_id, row[21:32]),
+            _optional_text(row[9]),
+            None if row[32] is None else self._retirement_from_row(tenant, transaction_id, row[32:43]),
         )
 
     def insert_idempotency_reservation(self, record: LivestockIdempotencyRecord) -> None:
         self._execute_one(
             """
             INSERT INTO ranchos.livestock_idempotency (
-                tenant_id, scope, identity, key_digest, operation, outcome, transaction_id, result_animal_id
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                tenant_id, scope, identity, key_digest, operation, outcome, transaction_id,
+                result_animal_id, result_identifier_id, result_retirement_id
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 record.tenant_id,
@@ -182,6 +221,8 @@ class LivestockPgSession:
                 record.outcome,
                 record.transaction_id,
                 record.result_animal_id,
+                record.result_identifier_id,
+                record.result_retirement_id,
             ),
             "livestock idempotency reserve did not insert one row",
         )
@@ -190,10 +231,18 @@ class LivestockPgSession:
         self._execute_one(
             """
             UPDATE ranchos.livestock_idempotency
-            SET outcome = %s, result_animal_id = %s
+            SET outcome = %s, result_animal_id = %s, result_identifier_id = %s, result_retirement_id = %s
             WHERE tenant_id = %s AND scope = %s AND identity = %s
             """,
-            (record.outcome, record.result_animal_id, record.tenant_id, record.scope, record.identity),
+            (
+                record.outcome,
+                record.result_animal_id,
+                record.result_identifier_id,
+                record.result_retirement_id,
+                record.tenant_id,
+                record.scope,
+                record.identity,
+            ),
             "livestock idempotency finalize did not update one row",
         )
 
@@ -223,6 +272,144 @@ class LivestockPgSession:
             ),
             "livestock animal insert did not insert one row",
         )
+
+    def lock_animal(self, tenant_id: str, animal_id: str) -> LivestockAnimalV1 | None:
+        row = self._fetchone(
+            """
+            SELECT id, display_name, species_code, production_type_code, breed_code,
+                   provenance_source_type, provenance_source_id, provenance_source_version,
+                   provenance_observed_at, created_by_user_id, created_at
+            FROM ranchos.livestock_animals
+            WHERE tenant_id = %s AND id = %s
+            """,
+            (tenant_id, animal_id),
+        )
+        if row is None:
+            return None
+        return self._animal_from_row(tenant_id, tenant_id, row)
+
+    def lock_identifier(self, tenant_id: str, identifier_id: str) -> AnimalIdentifierV1 | None:
+        row = self._fetchone(
+            """
+            SELECT id, animal_id, identifier_type, normalized_value, effective_at,
+                   provenance_source_type, provenance_source_id, provenance_source_version,
+                   provenance_observed_at, created_by_user_id, created_at
+            FROM ranchos.animal_identifiers
+            WHERE tenant_id = %s AND id = %s
+            """,
+            (tenant_id, identifier_id),
+        )
+        if row is None:
+            return None
+        return self._identifier_from_row(tenant_id, tenant_id, row)
+
+    def lock_active_identifier_slot(
+        self,
+        tenant_id: str,
+        identifier_type: AnimalIdentifierType,
+        normalized_value: str,
+    ) -> None:
+        # 002 grants SELECT/INSERT only, so SELECT FOR UPDATE/SHARE is unavailable.
+        self._execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"{tenant_id}:{identifier_type.value}:{normalized_value}",),
+        )
+
+    def load_identifiers_for_collision(
+        self,
+        tenant_id: str,
+        identifier_type: AnimalIdentifierType,
+        normalized_value: str,
+    ) -> tuple[AnimalIdentifierV1, ...]:
+        rows = self._fetchall(
+            """
+            SELECT id, animal_id, identifier_type, normalized_value, effective_at,
+                   provenance_source_type, provenance_source_id, provenance_source_version,
+                   provenance_observed_at, created_by_user_id, created_at
+            FROM ranchos.animal_identifiers
+            WHERE tenant_id = %s AND identifier_type = %s AND normalized_value = %s
+            ORDER BY id
+            """,
+            (tenant_id, identifier_type.value, normalized_value),
+        )
+        return tuple(self._identifier_from_row(tenant_id, tenant_id, row) for row in rows)
+
+    def load_retirements_for_identifiers(
+        self,
+        tenant_id: str,
+        identifier_ids: tuple[str, ...],
+    ) -> tuple[IdentifierRetirementV1, ...]:
+        if not identifier_ids:
+            return ()
+        rows = self._fetchall(
+            """
+            SELECT id, identifier_id, reason, retired_at,
+                   provenance_source_type, provenance_source_id, provenance_source_version,
+                   provenance_observed_at, created_by_user_id, created_at
+            FROM ranchos.animal_identifier_retirements
+            WHERE tenant_id = %s AND identifier_id = ANY(%s::uuid[])
+            ORDER BY id
+            """,
+            (tenant_id, list(identifier_ids)),
+        )
+        return tuple(self._retirement_from_row(tenant_id, tenant_id, row) for row in rows)
+
+    def insert_identifier(self, identifier: AnimalIdentifierV1) -> None:
+        try:
+            self._execute_one(
+                """
+                INSERT INTO ranchos.animal_identifiers (
+                    tenant_id, id, animal_id, identifier_type, normalized_value, effective_at,
+                    provenance_source_type, provenance_source_id, provenance_source_version,
+                    provenance_observed_at, created_by_user_id, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    identifier.tenant_id,
+                    identifier.id,
+                    identifier.animal_id,
+                    identifier.identifier_type.value,
+                    identifier.normalized_value,
+                    identifier.effective_at,
+                    identifier.provenance.source_type,
+                    identifier.provenance.source_id,
+                    identifier.provenance.source_version,
+                    identifier.provenance.observed_at,
+                    identifier.audit.actor_user_id,
+                    identifier.audit.recorded_at,
+                ),
+                "livestock identifier insert did not insert one row",
+            )
+        except Exception as error:
+            _reraise_identifier_write(error)
+
+    def insert_retirement(self, retirement: IdentifierRetirementV1) -> None:
+        try:
+            self._execute_one(
+                """
+                INSERT INTO ranchos.animal_identifier_retirements (
+                    tenant_id, id, identifier_id, reason, retired_at,
+                    provenance_source_type, provenance_source_id, provenance_source_version,
+                    provenance_observed_at, created_by_user_id, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    retirement.tenant_id,
+                    retirement.id,
+                    retirement.identifier_id,
+                    retirement.reason.value,
+                    retirement.retired_at,
+                    retirement.provenance.source_type,
+                    retirement.provenance.source_id,
+                    retirement.provenance.source_version,
+                    retirement.provenance.observed_at,
+                    retirement.audit.actor_user_id,
+                    retirement.audit.recorded_at,
+                ),
+                "livestock identifier retirement insert did not insert one row",
+            )
+        except Exception as error:
+            _reraise_retirement_write(error)
 
     def insert_audit(self, record: LivestockAuditRecord) -> None:
         self._execute_one(
@@ -262,6 +449,64 @@ class LivestockPgSession:
     def rollback(self) -> None:
         self._connection.rollback()
 
+    def _require_principal(self) -> str:
+        if self._principal_id is None:
+            raise RuntimeError("livestock replay requires transaction-local principal")
+        return self._principal_id
+
+    def _animal_from_row(self, tenant_id: str, correlation_id: str, row: tuple[object, ...]) -> LivestockAnimalV1:
+        return LivestockAnimalV1(
+            _text(row[0]),
+            tenant_id,
+            _text(row[1]),
+            _text(row[2]),
+            _text(row[3]),
+            _optional_text(row[4]),
+            LivestockFactProvenance(_text(row[5]), _text(row[6]), _text(row[7]), row[8]),
+            LivestockAuditInputV1(
+                LivestockWriteOperation.ANIMAL_CREATE,
+                _text(row[9]),
+                self._require_principal(),
+                correlation_id,
+                row[10],
+            ),
+        )
+
+    def _identifier_from_row(self, tenant_id: str, correlation_id: str, row: tuple[object, ...]) -> AnimalIdentifierV1:
+        return AnimalIdentifierV1(
+            _text(row[0]),
+            tenant_id,
+            _text(row[1]),
+            AnimalIdentifierType(_text(row[2])),
+            _text(row[3]),
+            row[4],
+            LivestockFactProvenance(_text(row[5]), _text(row[6]), _text(row[7]), row[8]),
+            LivestockAuditInputV1(
+                LivestockWriteOperation.IDENTIFIER_ASSIGN,
+                _text(row[9]),
+                self._require_principal(),
+                correlation_id,
+                row[10],
+            ),
+        )
+
+    def _retirement_from_row(self, tenant_id: str, correlation_id: str, row: tuple[object, ...]) -> IdentifierRetirementV1:
+        return IdentifierRetirementV1(
+            _text(row[0]),
+            tenant_id,
+            _text(row[1]),
+            IdentifierRetirementReason(_text(row[2])),
+            row[3],
+            LivestockFactProvenance(_text(row[4]), _text(row[5]), _text(row[6]), row[7]),
+            LivestockAuditInputV1(
+                LivestockWriteOperation.IDENTIFIER_RETIRE,
+                _text(row[8]),
+                self._require_principal(),
+                correlation_id,
+                row[9],
+            ),
+        )
+
     def _execute(self, operation: str, parameters: tuple[object, ...] = ()) -> None:
         cursor = self._connection.cursor()
         try:
@@ -283,5 +528,13 @@ class LivestockPgSession:
         try:
             cursor.execute(operation, parameters)
             return cursor.fetchone()
+        finally:
+            cursor.close()
+
+    def _fetchall(self, operation: str, parameters: tuple[object, ...] = ()) -> list[tuple[object, ...]]:
+        cursor = self._connection.cursor()
+        try:
+            cursor.execute(operation, parameters)
+            return list(cursor.fetchall())
         finally:
             cursor.close()

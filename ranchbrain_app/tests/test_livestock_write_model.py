@@ -6,6 +6,7 @@ from ranchbrain.livestock_write_model import (
     AnimalCreateCommandV1,
     AnimalIdentifierType,
     IdentifierAssignCommandV1,
+    IdentifierRetireCommandV1,
     IdentifierRetirementReason,
     LifecycleCorrectionConfirmationV1,
     LifecycleCorrectionReason,
@@ -38,6 +39,16 @@ def animal_command():
 
 def identifier_command(identifier_id="identifier-1", value="RB-104"):
     return IdentifierAssignCommandV1(identifier_id, "animal-1", AnimalIdentifierType.EAR_TAG, value, NOW, provenance(identifier_id))
+
+
+def retire_command(retirement_id="retirement-1", identifier_id="identifier-1", retired_at=None, reason=IdentifierRetirementReason.REPLACED):
+    return IdentifierRetireCommandV1(
+        retirement_id,
+        identifier_id,
+        reason,
+        NOW + timedelta(minutes=1) if retired_at is None else retired_at,
+        provenance(retirement_id),
+    )
 
 
 def lifecycle_command(event_id="event-1", occurred_at=NOW, **overrides):
@@ -83,6 +94,10 @@ class LivestockWriteModelTests(unittest.TestCase):
         with self.assertRaises(LivestockWriteError) as raised:
             assign_identifier(viewer, identifier_command(), (), (), NOW)
         self.assertEqual(raised.exception.code, LivestockWriteErrorCode.FORBIDDEN)
+        assigned = assign_identifier(context(), identifier_command(), (), (), NOW)
+        with self.assertRaises(LivestockWriteError) as raised:
+            retire_identifier(viewer, retire_command(), assigned, (), NOW + timedelta(minutes=1))
+        self.assertEqual(raised.exception.code, LivestockWriteErrorCode.FORBIDDEN)
         with self.assertRaises(LivestockWriteError) as raised:
             record_routine_lifecycle_event(viewer, lifecycle_command(), (), NOW)
         self.assertEqual(raised.exception.code, LivestockWriteErrorCode.FORBIDDEN)
@@ -93,49 +108,55 @@ class LivestockWriteModelTests(unittest.TestCase):
             assign_identifier(context(), identifier_command("identifier-2"), (assigned,), (), NOW)
         self.assertEqual(raised.exception.code, LivestockWriteErrorCode.IDENTIFIER_NOT_AVAILABLE)
 
-        retirement = retire_identifier(
-            context(),
-            retirement_id="retirement-1",
-            identifier=assigned,
-            reason=IdentifierRetirementReason.REPLACED,
-            retired_at=NOW + timedelta(minutes=1),
-            existing_retirements=(),
-            recorded_at=NOW + timedelta(minutes=1),
-        )
+        retirement = retire_identifier(context(), retire_command(), assigned, (), NOW + timedelta(minutes=1))
+        self.assertEqual(retirement.provenance.source_id, "retirement-1")
         reused = assign_identifier(context(), identifier_command("identifier-2"), (assigned,), (retirement,), NOW + timedelta(minutes=2))
         self.assertEqual(reused.normalized_value, "RB-104")
         self.assertNotEqual(reused.id, assigned.id)
 
     def test_identifier_retirement_is_append_only_and_tenant_bound(self):
         assigned = assign_identifier(context(), identifier_command(), (), (), NOW)
-        with self.assertRaises(LivestockWriteError):
+        with self.assertRaises(LivestockWriteError) as raised:
             retire_identifier(
                 context(Role.MANAGER, "tenant-b"),
-                retirement_id="retirement-1",
-                identifier=assigned,
-                reason=IdentifierRetirementReason.LOST,
-                retired_at=NOW + timedelta(minutes=1),
-                existing_retirements=(),
-                recorded_at=NOW + timedelta(minutes=1),
+                retire_command(reason=IdentifierRetirementReason.LOST),
+                assigned,
+                (),
+                NOW + timedelta(minutes=1),
             )
+        self.assertEqual(raised.exception.code, LivestockWriteErrorCode.CONTEXT_MISMATCH)
+        with self.assertRaises(LivestockWriteError) as raised:
+            retire_identifier(
+                context(),
+                retire_command(identifier_id="identifier-other", reason=IdentifierRetirementReason.LOST),
+                assigned,
+                (),
+                NOW + timedelta(minutes=1),
+            )
+        self.assertEqual(raised.exception.code, LivestockWriteErrorCode.CONTEXT_MISMATCH)
         retirement = retire_identifier(
             context(),
-            retirement_id="retirement-1",
-            identifier=assigned,
-            reason=IdentifierRetirementReason.LOST,
-            retired_at=NOW + timedelta(minutes=1),
-            existing_retirements=(),
-            recorded_at=NOW + timedelta(minutes=1),
+            retire_command(reason=IdentifierRetirementReason.LOST),
+            assigned,
+            (),
+            NOW + timedelta(minutes=1),
         )
+        self.assertEqual(retirement.provenance.source_type, "fixture")
+        with self.assertRaises(LivestockWriteError):
+            IdentifierRetireCommandV1(
+                "retirement-2",
+                assigned.id,
+                IdentifierRetirementReason.LOST,
+                NOW + timedelta(minutes=2),
+                None,
+            )
         with self.assertRaises(LivestockWriteError):
             retire_identifier(
                 context(),
-                retirement_id="retirement-2",
-                identifier=assigned,
-                reason=IdentifierRetirementReason.LOST,
-                retired_at=NOW + timedelta(minutes=2),
-                existing_retirements=(retirement,),
-                recorded_at=NOW + timedelta(minutes=2),
+                retire_command("retirement-2", reason=IdentifierRetirementReason.LOST, retired_at=NOW + timedelta(minutes=2)),
+                assigned,
+                (retirement,),
+                NOW + timedelta(minutes=2),
             )
 
     def test_routine_events_are_closed_and_append_in_occurred_time_order(self):

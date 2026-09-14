@@ -74,10 +74,12 @@ ALTER TABLE ranchos.livestock_idempotency
     ADD COLUMN result_retirement_id uuid,
     ADD CONSTRAINT livestock_idempotency_committed_identifier_matches_tenant
         FOREIGN KEY (tenant_id, result_identifier_id)
-        REFERENCES ranchos.animal_identifiers (tenant_id, id),
+        REFERENCES ranchos.animal_identifiers (tenant_id, id)
+        NOT VALID,
     ADD CONSTRAINT livestock_idempotency_committed_retirement_matches_tenant
         FOREIGN KEY (tenant_id, result_retirement_id)
-        REFERENCES ranchos.animal_identifier_retirements (tenant_id, id),
+        REFERENCES ranchos.animal_identifier_retirements (tenant_id, id)
+        NOT VALID,
     ADD CONSTRAINT livestock_idempotency_result_matches_operation CHECK (
         (
             outcome = 'reserved'
@@ -103,7 +105,7 @@ ALTER TABLE ranchos.livestock_idempotency
             AND result_identifier_id IS NULL
             AND result_retirement_id IS NOT NULL
         )
-    );
+    ) NOT VALID;
 
 CREATE OR REPLACE FUNCTION ranchos.livestock_idempotency_enforce_finalize_only()
 RETURNS trigger

@@ -13,9 +13,11 @@ from pathlib import Path
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from uuid import uuid4
+import venv
 
 from ranchbrain.livestock_mutation_coordinator import (
     LivestockAnimalCreateRequest,
@@ -30,11 +32,6 @@ from ranchbrain.livestock_write_model import AnimalCreateCommandV1
 from ranchbrain.livestock_write_repository import LivestockConfirmationRecord, LivestockWriteRepository
 from ranchbrain.tenancy import Role, Tenant, TenantContextResolver, TenantMembership, User, VerifiedPrincipal
 
-try:
-    import psycopg2
-except ImportError:
-    psycopg2 = None
-
 
 PRINCIPAL_A = "00000000-0000-0000-0000-000000000001"
 PRINCIPAL_B = "00000000-0000-0000-0000-000000000002"
@@ -44,6 +41,7 @@ TENANT_A = "00000000-0000-0000-0000-0000000000a1"
 TENANT_B = "00000000-0000-0000-0000-0000000000b2"
 POLICY_VERSION = "policy-v1"
 VALIDATOR_VERSION = "validator-v1"
+DRIVER_SPEC = "psycopg2-binary==2.9.12"
 
 
 class LiveProofBlocked(RuntimeError):
@@ -185,29 +183,63 @@ def _request(command: AnimalCreateCommandV1, confirmation: LivestockConfirmation
 class LivestockAnimalCreateDisposablePgTests(unittest.TestCase):
     _bindir: Path
     _workdir: Path | None
+    _psycopg2: object
     _session_conn: object
     _inspect_conn: object
 
     @classmethod
     def setUpClass(cls) -> None:
-        if psycopg2 is None:
-            raise LiveProofBlocked("blocked: test-local driver unavailable")
         cls._bindir = _bindir()
         cls._workdir = Path(tempfile.mkdtemp(prefix="rpg", dir="/tmp"))
         cls._session_conn = None
         cls._inspect_conn = None
         try:
+            cls._psycopg2 = cls._install_driver()
             cls._start_cluster()
             cls._session_conn = cls._connect()
             cls._inspect_conn = cls._connect()
             cls._seed_tenancy()
-        except Exception:
+        except LiveProofBlocked:
             cls._destroy_cluster()
             raise
+        except Exception as error:
+            cls._destroy_cluster()
+            raise LiveProofBlocked(f"blocked: disposable animal-create cluster setup failed: {error}") from error
 
     @classmethod
     def tearDownClass(cls) -> None:
         cls._destroy_cluster()
+
+    @classmethod
+    def _install_driver(cls):
+        workdir = cls._workdir
+        if workdir is None:
+            raise LiveProofBlocked("blocked: disposable workdir missing")
+        venv_dir = workdir / "py"
+        try:
+            venv.create(venv_dir, with_pip=True, clear=True)
+        except Exception as error:
+            raise LiveProofBlocked("blocked: test-local driver venv unavailable") from error
+        pip = venv_dir / "bin" / "pip"
+        installed = subprocess.run(
+            [str(pip), "install", "--disable-pip-version-check", DRIVER_SPEC],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if installed.returncode != 0:
+            raise LiveProofBlocked("blocked: test-local driver unavailable")
+        sites = list((venv_dir / "lib").glob("python*/site-packages"))
+        if not sites:
+            raise LiveProofBlocked("blocked: test-local driver unavailable")
+        site_packages = str(sites[0])
+        if site_packages not in sys.path:
+            sys.path.insert(0, site_packages)
+        try:
+            import psycopg2
+        except ImportError as error:
+            raise LiveProofBlocked("blocked: test-local driver unavailable") from error
+        return psycopg2
 
     @classmethod
     def _start_cluster(cls) -> None:
@@ -289,17 +321,19 @@ class LivestockAnimalCreateDisposablePgTests(unittest.TestCase):
                 str(app_root / "migrations" / "001_ranch_os_tenancy_foundation.sql"),
                 "-f",
                 str(app_root / "migrations" / "002_livestock_read_model_foundation.sql"),
+                "-f",
+                str(app_root / "migrations" / "003_livestock_identifier_idempotency_outcomes.sql"),
             ],
         )
         if applied.returncode != 0:
-            raise LiveProofBlocked("blocked: committed 001/002 apply failed")
+            raise LiveProofBlocked("blocked: committed 001/002/003 apply failed")
 
     @classmethod
     def _connect(cls):
         workdir = cls._workdir
-        if workdir is None or psycopg2 is None:
+        if workdir is None:
             raise LiveProofBlocked("blocked: disposable connection prerequisites missing")
-        connection = psycopg2.connect(
+        connection = cls._psycopg2.connect(
             host=str(workdir / "s"),
             port=5432,
             user="ranchos_dev_migrator",

@@ -1,15 +1,17 @@
 # Ranch OS Livestock authoritative mutation persistence design
 
-Status: DEV SQL `001`–`004` and transport-free coordinator landed unapplied/disposable-only; ingress and CF-2 issuance remain design-only
+Status: DEV SQL `001`–`004` and transport-free coordinator landed unapplied/disposable-only; `005` CONF-021 challenge schema and CF-2 issuance remain design-only
 Scope: Future durable mutation boundary for animal, identifier, and lifecycle contracts, plus future DEV ingress and CF-2 confirmation issuance
-Last updated: 2026-09-14 by A.Graves
+Last updated: 2026-09-16 by A.Graves
 
 This document defines the approval gate for making the local
 `ranchbrain.livestock_write_model` contracts durable. Committed unapplied DEV
-SQL is `001`, `002`, `003`, and `004`. A transport-free DEV coordinator,
+SQL is `001`, `002`, `003`, and `004`. Planned unapplied SQL is
+`005_livestock_confirmation_challenges.sql`. A transport-free DEV coordinator,
 repository, and disposable PostgreSQL session adapter exist for all five
-first-slice matrix operations. They do not authorize a standing DEV database,
-HTTP or Gateway ingress, deployed runtime, device path, or Production.
+first-slice matrix operations. They do not authorize `005`, a standing DEV
+database, HTTP or Gateway ingress, deployed runtime, device path, or
+Production.
 
 The repository-wide [atomic transaction design](../../docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md), [confirmation policy](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md), and [identity policy](../../docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md) remain authoritative.
 
@@ -186,8 +188,11 @@ The committed `ranchos.livestock_confirmations` row is the single-use
 consumable confirmation record. Do not treat that row as proof of a human
 decision. A future Ranch OS layer must create and verify a server-stored
 [CONF-021 challenge](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md)
-before issuing that row. Confirmations are fresh and single-use. Freshness
-expires 2 minutes after issuance and is enforced with trusted
+before issuing that row. Confirm flow is `created → presented → confirmed`.
+Only an unexpired `presented` challenge may create the confirmation row.
+That row inherits the original challenge `issued_at` and `expires_at`; the
+TTL is not extended. Confirmations are fresh and single-use. Freshness
+expires 2 minutes after challenge issuance and is enforced with trusted
 transaction-time state. Identifier assignment binds the planned assignment ID
 as the confirmation target. Identifier retirement binds the existing
 identifier ID. Lifecycle record binds the planned lifecycle event ID
@@ -244,9 +249,10 @@ After this design amendment, a separately authorized change may land only:
 - `ranchbrain_app/tests/test_livestock_migration_contract.py`
 
 Those three paths and later `003`/`004` have landed. Preserve committed
-`001`–`004`. A future schema migration is required before CONF-021 challenge
-issuance implementation. This amendment does not add that migration, reopen
-apply, roles, HTTP, or Production.
+`001`–`004`. The next separately authorized SQL file is unapplied
+`ranchbrain_app/migrations/005_livestock_confirmation_challenges.sql`.
+This amendment does not add that migration, reopen apply, roles, HTTP, or
+Production.
 
 ## Approved final SQL implementation package
 
@@ -291,14 +297,20 @@ triggers, not coordinator-only.
   `expires_at = issued_at + interval '2 minutes'`; single-use `consumed_at`.
   This table is the consumable confirmation record created after a verified
   CONF-021 challenge. It is not the challenge and is not proof of a human
-  decision. Identifier-assignment target is the planned assignment ID.
+  decision. A confirmed unexpired `presented` challenge creates this row and
+  copies the original challenge `issued_at` and `expires_at`; the TTL is not
+  extended. Identifier-assignment target is the planned assignment ID.
   Identifier-retirement target is the existing identifier ID.
   Lifecycle-record target is the planned lifecycle event ID (`command.id`).
   Lifecycle-correct target is the existing `supersedes_event_id`. The digest
   still binds the complete command. Expiry and consumption compare against
   trusted transaction time (`CURRENT_TIMESTAMP`), not client clocks.
+- `ranchos.livestock_confirmation_challenges`: later unapplied `005` adds this
+  separate tenant-scoped CONF-021 challenge table. It is not the consumable
+  confirmation row. See Approved DEV CONF-021 challenge schema decisions.
 - `ranchos.livestock_mutation_audit`: as specified above; runtime `INSERT`
-  only.
+  only. Do not grant runtime `SELECT` on mutation audit for challenge
+  issuance, verification, or denial handling.
 
 Domain animals, assignments, retirements, and lifecycle events carry
 provenance columns: `provenance_source_type`, `provenance_source_id`,
@@ -446,13 +458,14 @@ or Production.
   bound to the server-derived principal, session reference, explicit tenant,
   matrix operation, target manifest, canonical digest, policy and validator
   versions, and expiry.
-- A confirmed challenge creates the single-use confirmation row. The
-  coordinator consumes that row. No second confirmation is issued or
-  consumed.
+- A confirmed challenge creates the single-use confirmation row. Only an
+  unexpired `presented` challenge may create that row. The coordinator
+  consumes that row. No second confirmation is issued or consumed.
 - First DEV ingress remains transport-free: no HTTP or Gateway route, plugin
   channel, device cryptography, or OIDC runtime adapter.
-- Session binding is required. Device binding and cryptographic key custody
-  remain separately unapproved.
+- Session binding is required. `session_reference` is opaque non-bearer
+  server metadata or a server-generated fingerprint, never a raw credential.
+  Device binding and cryptographic key custody remain separately unapproved.
 - The first non-deployed ingress uses an injected
   `TenantContextResolver` and a fixture `VerifiedPrincipalVerifier` only.
   Deployed membership loading and a real identity adapter remain separate.
@@ -462,8 +475,59 @@ or Production.
   confirmation data. It must never use request-supplied `issued_at`.
 - Failed issuance or admission needs a future sanitized durable denial-audit
   design. Do not repurpose the runtime write-only mutation audit.
-- A future schema migration is required before challenge issuance
-  implementation.
+- Challenge issuance implementation requires later unapplied
+  `005_livestock_confirmation_challenges.sql`. This amendment does not add
+  that file.
+
+## Approved DEV CONF-021 challenge schema decisions
+
+These decisions record the planned unapplied `005` contract. They do not add
+that migration, edit Python or tests, apply SQL, open ingress, or touch
+Production.
+
+- Preserve committed `001`–`004`. Challenge storage lands later only in a new
+  unapplied `005_livestock_confirmation_challenges.sql`.
+- Add a separate tenant-scoped table
+  `ranchos.livestock_confirmation_challenges`. Do not treat
+  `ranchos.livestock_confirmations` as the CONF-021 challenge. Challenge `id`
+  is the server-generated CONF-021 UUID and is not the confirmation id.
+- Bind the five first-slice matrix operation IDs only:
+  `ranchos.livestock.animal-create`, `ranchos.livestock.identifier-assign`,
+  `ranchos.livestock.identifier-retire`, `ranchos.livestock.lifecycle-record`,
+  and `ranchos.livestock.lifecycle-correct`.
+- Persist closed `challenge_format_version`
+  `ranchos.livestock.challenge.v1` and membership-safe `actor_user_id`
+  (`(tenant_id, actor_user_id) → ranchos.tenant_memberships`).
+- Persist server-derived `principal_id` (UUID) and required
+  `session_reference`. `session_reference` is opaque non-bearer server
+  metadata or a server-generated fingerprint, never a raw credential. Store
+  `device_binding = 'none'`. Do not add device id, key, or custody columns.
+- Persist non-empty `target_manifest`, issuer-calculated `command_digest`,
+  issuer-calculated `policy_version` and `validator_version`, unique
+  tenant-scoped `nonce_ref`, non-empty `material_effects`, and closed
+  `consequence_class = 'none'`. Caller `idempotency_identity` is opaque
+  input, not authority.
+- Persist closed `state`: `created`, `presented`, `confirmed`, `rejected`,
+  `cancelled`, `expired`, `superseded`. Confirm flow is
+  `created → presented → confirmed`. Only an unexpired `presented` challenge
+  may create the single confirmation record. All terminal states
+  (`confirmed`, `rejected`, `cancelled`, `expired`, `superseded`) are
+  immutable.
+- Persist trusted `issued_at` and `expires_at` with
+  `expires_at = issued_at + interval '2 minutes'`. The confirmation row
+  inherits those original challenge timestamps. Do not extend the TTL.
+- Persist nullable `supersedes_challenge_id` as a same-tenant challenge
+  reference. Persist nullable `confirmation_id` as a tenant-safe foreign key
+  to `livestock_confirmations (tenant_id, id)`, set only when
+  `state = 'confirmed'`.
+- ENABLE and FORCE RLS. Use `<table>_tenant_isolation` `USING`/`WITH CHECK`
+  on `ranchos.tenant_id`. `OWNER TO ranchos_dev_migrator`. Runtime has no
+  `BYPASSRLS`. `ranchos_dev_runtime` receives `SELECT`, `INSERT`, and
+  `UPDATE` only; no `DELETE`. Do not grant runtime `SELECT` on
+  `ranchos.livestock_mutation_audit` and do not reuse mutation audit for
+  challenge reads, verification, or denials.
+- Migrator-only apply and a never-apply-to-Production header are required on
+  that later SQL file.
 
 ## Remaining before apply
 
@@ -472,9 +536,9 @@ or Production.
   session adapter exist in source for all five first-slice operations.
   Standing DEV database, HTTP or Gateway ingress, deployed runtime, device
   path, and Production implementation are not authorized.
-- CONF-021 challenge storage, issuance, and verification remain unbuilt. A
-  future schema migration is required before that implementation. This
-  amendment does not add that migration.
+- CONF-021 challenge storage, issuance, and verification remain unbuilt.
+  Planned unapplied `005_livestock_confirmation_challenges.sql` is required
+  before that implementation. This amendment does not add that file.
 - Any later apply or live coordinator proof uses a disposable DEV database
   only, under a later explicit apply approval. A standing DEV database is
   not authorized.

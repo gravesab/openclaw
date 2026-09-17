@@ -1,17 +1,29 @@
-# Ranch OS Home and application shell design
+# Ranch OS unified application and Home shell design
 
-Status: Proposed for DEV design approval
-Scope: Shared Ranch OS Home and application-navigation boundary
-Last updated: 2026-08-27
+Status: Module-host contract approved for DEV planning only; implementation
+gates remain
+Scope: One RanchOS application per Apple platform, shared Home shell, and
+application-navigation boundary
+Last updated: 2026-09-17
 
-Ranch OS Home is the tenant-safe application shell for entering Ranch OS
-applications. It presents only applications and summaries authorized for the
-active ranch, makes ranch switching explicit, and brokers signed handoffs to
-domain applications. It does not own domain records, authenticate users, grant
-capabilities, or provide a cross-application database or search path.
+Ranch OS is one application on each Apple platform: iPhone, iPad, Mac, and
+Apple TV. A person installs and opens **RanchOS**, then selects an authorized
+domain experience such as Property Manager, Livestock Management, Ranch
+Finance, or My Health. Those experiences are compiled feature modules within
+the RanchOS application, not separately installed launchers and not dynamically
+downloaded applications.
+
+Ranch OS Home is the tenant-safe shell and default root for those feature
+modules. It presents only applications and summaries authorized for the active
+ranch, makes ranch switching explicit, and coordinates typed in-process
+navigation to a selected module. It does not own domain records, authenticate
+users, grant capabilities, or provide a cross-application database or search
+path.
 
 This document is a design contract. It does not authorize authentication work,
-database migrations, application implementation, deployment, Production
+database migrations, application implementation, Apple app targets,
+static-shell code, local fixtures, target restructuring, compilation,
+simulator or device work, repackaging an existing app, deployment, Production
 configuration, or changes to an existing domain system of record.
 
 ## Required foundation
@@ -81,7 +93,7 @@ Each definition contains:
 | `app_id`                  | Stable, non-secret application identifier such as `property` or `livestock`.                               |
 | `display_name`            | Presentation label only; never an authority value.                                                         |
 | `lifecycle_state`         | Controlled value: `planned`, `enabled`, `suspended`, or `retired`. Only `enabled` applications can launch. |
-| `supported_surfaces`      | Controlled set such as `iphone`, `ipad`, `macos`, and `web`.                                               |
+| `supported_surfaces`      | Controlled set such as `iphone`, `ipad`, `macos`, and `tvos`.                                              |
 | `launch_audience`         | Exact signed-handoff audience accepted by the domain application.                                          |
 | `route_contract_version`  | Version of the application's allowlisted route contract.                                                   |
 | `summary_contract`        | Optional versioned, read-only summary contract owned by the domain application.                            |
@@ -112,6 +124,113 @@ An effective registry entry is returned only when all of these are true:
 The server returns already-authorized entries. Clients may reorder or group
 those entries for presentation but must not synthesize entries, loosen
 capabilities, or reuse a registry response after tenant context changes.
+
+## Unified Swift application architecture
+
+RanchOS uses one app target and one user-visible RanchOS icon for each Apple
+platform family:
+
+| Platform family | Product shape                 | Hub navigation                                                                                                                               |
+| --------------- | ----------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| iPhone and iPad | One universal iOS RanchOS app | Home is the root. iPad can expose Home and authorized modules in a sidebar; iPhone presents the same destinations through an adaptive stack. |
+| macOS           | One RanchOS app               | A persistent sidebar and window-scoped Home state host authorized modules.                                                                   |
+| tvOS            | One RanchOS app               | Home is the focusable root. It presents only TV-supported modules and task-safe dashboard routes.                                            |
+
+The module-host contract in this section is approved as the RanchOS DEV
+planning direction. That approval selects the client boundary only; it does not
+approve a target restructure, Apple app targets, static-shell code, local
+fixtures, compilation, simulator or device work, authentication work, registry
+service, signer, database migration, module implementation, deployment, or
+Production change.
+
+This is a product and packaging boundary, not a new cross-domain backend. The
+RanchOS app contains a small shell plus statically linked Swift feature modules
+that each retain their own domain models, API client, route definitions, and
+authorization handling. The shell owns only:
+
+- session presentation and the current `TenantContext` lifecycle;
+- the authorized application registry and module selection;
+- platform navigation chrome, ranch switching, and a safe return to Home; and
+- context invalidation, sanitized shell telemetry, and app-wide accessibility
+  or appearance preferences that contain no tenant data.
+
+Each feature module owns its domain UI and domain-specific screen state. For
+example, Property Manager owns its assets, maintenance, and work-request
+screens; Livestock Management owns animal, care, identifier, lifecycle, feed,
+and operational-cost screens; Ranch Finance owns ledger and reporting screens;
+and the `health` module, presented as **My Health**, owns approved personal
+user-health experiences. The module must call
+its own authorized domain contract. It cannot obtain another module's
+repository, API client, database connection, storage key, or unrestricted
+navigation state from the shell.
+
+The registry chooses a known, compiled module by `app_id`; it never selects
+arbitrary Swift code, a remote bundle, a `WebView`, a custom URL, or an
+executable document. An enabled registry entry can only select a module that
+the installed RanchOS build declares as supported on that platform. Conversely,
+a compiled module is not shown or entered unless the effective registry permits
+it for the active tenant, capability set, environment, and platform.
+
+### Module host contract
+
+The shell provides a deliberately narrow host interface. A module receives a
+fresh, immutable presentation context containing the authorized application ID,
+surface, environment, correlation ID, and a revalidation-capable tenant
+context reference. It returns only a typed shell outcome:
+
+- remain in the module;
+- return to Home with an allowlisted presentation status; or
+- require fresh session or tenant resolution.
+
+The module host must not expose a mutable global tenant singleton, a generic
+cross-module router, raw handoff tokens, or a catch-all `Any` payload. Domain
+routes are closed, versioned types owned by the destination module. The shell
+can carry an opaque, allowlisted `resource_ref` to the destination, but the
+destination must reauthorize it before rendering or mutating data.
+
+An in-process module transition does not make authorization weaker. Before
+opening a module, RanchOS validates the current effective registry and creates
+a fresh route context. The module revalidates its destination route and every
+domain request. If context changes, the shell discards the module's navigation
+and tenant-bound view state, then returns to Home.
+
+### Migration from separate applications
+
+The existing standalone PropertyManager, Livestock, Finance, and TV fixtures
+are source applications during migration, not additional launch targets in the
+finished product. A module moves into RanchOS only after its domain contract,
+authentication behavior, navigation, accessibility, and target platform proof
+are independently accepted. Until then, its registry entry remains absent or
+explicitly unavailable; the shell must not advertise an incomplete module or
+silently deep-link into a separately installed app.
+
+Removing a standalone app icon is a later packaging and data-migration
+decision. It requires an approved per-module migration plan for local drafts,
+notifications, widget or shortcut targets, documents, app-group/keychain data,
+universal links, and a rollback or coexistence period. This design does not
+authorize that removal.
+
+### My Health module boundary
+
+My Health is a compiled RanchOS module with the stable internal `app_id` of
+`health`, its own domain routes, views, client, and privacy controls. It is the
+signed-in user's own human-health experience. It never becomes a destination
+for animal, veterinary, livestock-treatment, Property, Finance, or other
+tenant-owned records.
+
+Health has a stricter registry rule than ranch-operational modules. Tenant
+membership never makes My Health visible, discoverable, launchable, or
+summary-capable. The effective registry includes it only when the signed-in
+person satisfies a separately approved personal-privacy capability and the
+module is enabled for that exact platform and environment. Without that
+capability, RanchOS omits the module entirely rather than showing an unavailable
+tile, badge, placeholder, or route error that reveals its existence.
+
+The first Health module increment must be read-only, personal-context-bound,
+and explicitly scoped by a separate Health design. It starts on iPhone, iPad,
+or macOS only after privacy, retention, notification, offline, and recovery
+rules are approved. tvOS Health availability is not implied by the unified app
+and remains absent until its own privacy and interaction review approves it.
 
 ## Capability-gated visibility
 
@@ -163,13 +282,19 @@ A missing, stale, suspended, revoked, malformed, or ambiguous selection fails
 closed. The prior authorized context may remain active only when the switch was
 rejected before it changed; the UI must clearly state that no switch occurred.
 
-## Signed application handoff
+## External route handoff
 
-Home launches a domain application through a signed, short-lived
-`RanchOSAppHandoffV1` envelope. HTTPS universal links or an equivalent
-OS-verified application-link mechanism are recommended. An arbitrary custom
-URL scheme, unsigned query string, pasteboard value, or client-generated JSON
-object is not an authoritative handoff.
+Normal Home-to-module navigation stays inside the RanchOS process and uses the
+typed module-host contract. It does not use a URL scheme or client-created
+handoff object. The destination module still receives fresh context and
+reauthorizes its route and every domain request.
+
+External entry paths, including HTTPS universal links, notifications, widgets,
+shortcuts, restored activities, documents, and a temporary transition from an
+older standalone application, use a signed, short-lived
+`RanchOSAppHandoffV1` envelope. An arbitrary custom URL scheme, unsigned query
+string, pasteboard value, or client-generated JSON object is not an
+authoritative handoff.
 
 The handoff contains only non-secret routing claims:
 
@@ -192,12 +317,12 @@ key is not available to clients or domain applications. Key custody, rotation,
 algorithm selection, and Production trust establishment require separate
 security approval; this document does not create those resources.
 
-The target application must validate signature, issuer, audience, environment,
-version, time window, nonce, state, route, and return target. It must then
-resolve a fresh `TenantContext` and reauthorize the requested route and
-resource against current membership and capability. A valid signature never
-overrides revoked membership, suspended application state, RLS, or domain
-authorization.
+RanchOS must validate signature, issuer, audience, environment, version, time
+window, nonce, state, route, and return target before creating a module route
+context. The destination module must then resolve a fresh `TenantContext` and
+reauthorize the requested route and resource against current membership and
+capability. A valid signature never overrides revoked membership, suspended
+application state, RLS, or domain authorization.
 
 Accepted nonces are single-use. Replay, mutation, unknown versions, clock
 failure, key failure, or validation ambiguity denies launch without opening a
@@ -226,7 +351,7 @@ A missing or invalid return leaves the domain mutation result unchanged. Home
 shows a sanitized navigation failure and offers an authorized route back to
 Home; it must not retry the domain mutation.
 
-## Mobile and desktop navigation
+## Apple platform navigation
 
 Every surface keeps the active ranch visible and uses the same registry,
 handoff, return, and authorization contracts.
@@ -251,15 +376,31 @@ handoff, return, and authorization contracts.
 - Multiwindow scenes bind to one explicit tenant context each. A scene must not
   inherit another scene's tenant merely because the same user opened it.
 
-### Desktop and web
+### macOS
 
 - Persistent navigation shows Home, active ranch, and authorized applications.
-- Each window or browser session has an explicit tenant context. New windows
-  start at Home unless opened by a validated handoff.
-- Browser history and restored windows must revalidate handoffs, membership,
-  application availability, and routes before rendering tenant data.
+- Each window has an explicit tenant context. New windows start at Home unless
+  opened by a validated handoff.
+- Restored windows must revalidate handoffs, membership, application
+  availability, and routes before rendering tenant data.
 - Desktop menus, keyboard shortcuts, notifications, widgets, and recent-item
   lists use the same capability and tenant checks as visible navigation.
+
+### tvOS
+
+- Home is the application root and uses a focusable grid of authorized,
+  TV-supported modules. It shows no tile merely because that module exists on
+  iPhone, iPad, or Mac.
+- The active ranch is visible from Home and the global profile or switcher
+  destination. A ranch switch returns to Home and clears the prior module's
+  focus, navigation, and tenant-bound presentation state.
+- A TV module must declare a remote-safe, large-target route set. Text-heavy
+  administration, complex forms, and destructive or high-consequence mutation
+  flows remain unavailable until their dedicated tvOS interaction design and
+  domain authorization are approved.
+- Siri, notifications, Top Shelf, restoration, and deep links are external
+  entries and follow the same signed handoff and reauthorization path as every
+  other platform.
 
 Offline Home may show only a clearly marked, encrypted, tenant-partitioned
 snapshot previously authorized for that same principal and tenant. It must not
@@ -349,8 +490,26 @@ cache, deep-link, and database boundaries.
 3. A valid handoff whose membership is revoked before acceptance is denied.
 4. A valid return cannot switch tenants, grant a capability, inject a route,
    expose domain payloads, or cause a mutation to run again.
-5. Browser history, restored windows, universal links, notifications, widgets,
-   and shortcuts cannot bypass the same handoff and authorization checks.
+5. Restored windows, universal links, notifications, widgets, and shortcuts
+   cannot bypass the same handoff and authorization checks.
+
+### Unified Apple application
+
+1. Each supported platform installs one user-visible RanchOS product. Home,
+   Property Manager, Livestock Management, and Ranch Finance routes appear
+   within that product rather than requiring a second RanchOS-domain launcher.
+2. A registry entry can select only a compiled module declared for the running
+   platform. A module absent from the build or unsupported on that platform is
+   indistinguishable from an unavailable application to the client.
+3. Switching from Property Manager to Livestock Management, returning Home,
+   switching ranches, restoring a scene, and backgrounding then foregrounding
+   RanchOS never exposes the previous module's tenant-bound screen, draft, or
+   cached summary under a different module or tenant.
+4. iPhone and iPad exercise the same module routes with adaptive navigation;
+   Mac verifies independent window contexts; tvOS verifies focus movement,
+   readable unavailable states, and the absence of unsupported mutation routes.
+5. No feature module can discover, instantiate, or navigate to another module
+   through a raw route string, custom URL, `WebView`, or unrestricted payload.
 
 ### Domain ownership and data planes
 
@@ -367,8 +526,9 @@ cache, deep-link, and database boundaries.
 
 ## Implementation gates
 
-No shell implementation begins until these design choices are explicitly
-approved:
+No shell implementation, Apple app target work, static-shell code, fixture
+code, compilation, or simulator or device work begins until these design
+choices are explicitly approved:
 
 1. the platform owner and versioning process for `RanchOSAppRegistryV1`;
 2. the concrete capability names for application visibility, launch, summary
@@ -380,15 +540,21 @@ approved:
 5. the Health and personal-Finance privacy rules required before their tiles or
    summaries become visible; and
 6. tenant-partitioned cache, offline retention, and multiwindow invalidation
-   behavior for each supported client.
+   behavior for each supported client; and
+7. the RanchOS module-host API, compiled-module inventory, platform support
+   matrix, and per-module migration plan from each standalone application.
 
-After approval, the smallest safe DEV slice is a read-only Home containing an
-explicit tenant selector and Property application tile for two test tenants.
-It must use the shared `TenantContext`, a server-evaluated registry, one signed
-Property handoff/return route, redacted audit events, and adversarial
-cross-tenant tests. Livestock, Finance, Health, summaries, offline mode,
-notifications, widgets, and mutations remain disabled until their respective
-contracts and tests are approved.
+After those gates and a separate target decision, the smallest possible future
+DEV implementation would be a read-only Home containing an explicit tenant
+selector and Property application tile for two test tenants. It would use the
+shared `TenantContext`, a server-evaluated registry, one compiled read-only
+Property module route, redacted audit events, and adversarial cross-tenant
+tests. External Property entry and return routes would remain disabled unless
+the signed handoff contract is separately approved. Livestock, Finance,
+Health, tvOS, live integrations, any existing multi-module hub, summaries,
+offline mode, notifications, widgets, and mutations remain outside that future
+slice until their respective contracts and tests are approved. This document
+does not authorize starting that slice.
 
 ## Non-goals
 
@@ -402,11 +568,14 @@ This design does not define or authorize:
   impersonation;
 - a unified cross-domain mutation API, ledger, health record, animal record,
   asset record, or search index; or
+- a runtime plugin system, remotely downloaded feature code, arbitrary web
+  content, or an all-purpose browser inside RanchOS; or
 - Production activation or migration of an existing Ranch OS application.
 
 ## Related architecture
 
 - [Ranch OS multi-tenancy design](MULTI_TENANCY_DESIGN.md)
+- [RanchOS DEV read-only Home and Property module plan](RANCH_OS_DEV_HOME_PROPERTY_MODULE_PLAN.md)
 - [Livestock Management design](LIVESTOCK_MANAGEMENT_DESIGN.md)
 - [Livestock Management application blueprint](LIVESTOCK_MANAGEMENT_APPLICATION_BLUEPRINT.md)
 - [RanchBrain architecture](ARCHITECTURE.md)

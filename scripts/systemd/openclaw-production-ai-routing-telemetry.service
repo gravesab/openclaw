@@ -1,0 +1,11 @@
+[Unit]
+Description=Generate OpenClaw Production AI routing telemetry report
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=gravesab
+WorkingDirectory=/home/gravesab/ai/projects/openclaw-production-rc1-84cb187
+Environment=HOME=/home/gravesab
+ExecStart=/home/gravesab/ai/projects/openclaw-production-rc1-84cb187/tools/dashboard/.venv/bin/python /home/gravesab/ai/projects/openclaw-production-rc1-84cb187/tools/ai_intelligence/report_routing_telemetry.py

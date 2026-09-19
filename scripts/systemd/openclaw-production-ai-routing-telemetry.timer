@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh OpenClaw Production AI routing telemetry every eight minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=8min
+Persistent=true
+Unit=openclaw-production-ai-routing-telemetry.service
+
+[Install]
+WantedBy=timers.target

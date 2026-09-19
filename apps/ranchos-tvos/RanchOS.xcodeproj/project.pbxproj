@@ -7,57 +7,79 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		29B350D65C0B73FF4A20C479 /* TodayDashboardFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF5C173217CEF3D1B718802A /* TodayDashboardFixtureTests.swift */; };
-		35CC45B11686B4F3EFE064FC /* RanchOSTVApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 689771A263873E911F5D8A04 /* RanchOSTVApp.swift */; };
-		8884C25A2FBFB695783A6248 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E71A8EAFBB9981AEE6C297A9 /* TodayView.swift */; };
-		B6D6AC526724531FB70B467B /* TodayDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DBDE915908D3B8BFDB9B46 /* TodayDashboard.swift */; };
-		BF8055A5221D3494FD748873 /* TodayDashboard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 07DBDE915908D3B8BFDB9B46 /* TodayDashboard.swift */; };
+		0E61120FCE9229A9A00BD0D1 /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
+		232C0D73D888423130882D6B /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
+		37B2FB76EC4C2819D2969DBA /* RanchOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */; };
+		470C65898CA093AE5DA8A254 /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
+		4A6B37C5F34BFD9BE7611950 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
+		517EC06CF4DBA324AB942CA4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
+		53B5820CF13D08C27E6866BC /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
+		5B11DAE14A7B9B8F4C62C0B6 /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
+		618564DE5DE8C8842183C933 /* RanchOSiOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */; };
+		7ABE342D35D442172B63444C /* RanchOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */; };
+		8A7EBE108BF376552C68B654 /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
+		8AF17A99B07B4D8E547B8E0E /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
+		8F624DC859A59696959F6829 /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
+		90C3BCFA7E0C18A55B992430 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
+		9499C316C9F3C1F528B1B11B /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
+		ABD0006DA9297148C764BC84 /* RanchOSHubModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */; };
+		C63530FD2A422C672ACB6D8A /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
+		C6657E06195C2E952E9F8AB8 /* RanchOSiOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */; };
+		DEFDE9802034BCAC2720FA29 /* RanchOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		07DBDE915908D3B8BFDB9B46 /* TodayDashboard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayDashboard.swift; sourceTree = "<group>"; };
-		689771A263873E911F5D8A04 /* RanchOSTVApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSTVApp.swift; sourceTree = "<group>"; };
-		74C05CB47C73336F25EBACF8 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		902198BEB993A86E58183B00 /* RanchOSFixtureTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSFixtureTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		D1495AE13D02AA93AC72EE5A /* RanchOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		E71A8EAFBB9981AEE6C297A9 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
-		EF5C173217CEF3D1B718802A /* TodayDashboardFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayDashboardFixtureTests.swift; sourceTree = "<group>"; };
+		1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSTVHomeView.swift; sourceTree = "<group>"; };
+		454C7A8A973451ABCEB01A80 /* RanchOSiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		571843A754007CC43A96B1D2 /* RanchOSTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "RanchOSiOS-Info.plist"; sourceTree = "<group>"; };
+		613AA46701E775DD8BDC30A4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSApp.swift; sourceTree = "<group>"; };
+		72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSHomeView.swift; sourceTree = "<group>"; };
+		A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSHubModelTests.swift; sourceTree = "<group>"; };
+		B980AF6909E06E60BF84C096 /* RanchOSHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		F4794115307799C91B51792F /* RanchOSMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchOSMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSHubModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
-		6C77D8D100E09B8C36E9A43B /* Tests */ = {
+		192278FA4A926AA119EC1998 /* HubSources */ = {
 			isa = PBXGroup;
 			children = (
-				EF5C173217CEF3D1B718802A /* TodayDashboardFixtureTests.swift */,
+				613AA46701E775DD8BDC30A4 /* Assets.xcassets */,
+				6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */,
+				72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */,
+				FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */,
+				5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */,
+				1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */,
 			);
-			path = Tests;
-			sourceTree = "<group>";
-		};
-		7309FDBA2FF7767B02AE9CC7 /* Sources */ = {
-			isa = PBXGroup;
-			children = (
-				74C05CB47C73336F25EBACF8 /* Info.plist */,
-				689771A263873E911F5D8A04 /* RanchOSTVApp.swift */,
-				07DBDE915908D3B8BFDB9B46 /* TodayDashboard.swift */,
-				E71A8EAFBB9981AEE6C297A9 /* TodayView.swift */,
-			);
-			path = Sources;
+			path = HubSources;
 			sourceTree = "<group>";
 		};
 		87B401673D44C3DA826970B8 = {
 			isa = PBXGroup;
 			children = (
-				7309FDBA2FF7767B02AE9CC7 /* Sources */,
-				6C77D8D100E09B8C36E9A43B /* Tests */,
+				192278FA4A926AA119EC1998 /* HubSources */,
+				ADA04D2104EDF342AC6F4A30 /* HubTests */,
 				BE768A9EBF118F940D948635 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		ADA04D2104EDF342AC6F4A30 /* HubTests */ = {
+			isa = PBXGroup;
+			children = (
+				A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */,
+			);
+			path = HubTests;
 			sourceTree = "<group>";
 		};
 		BE768A9EBF118F940D948635 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				D1495AE13D02AA93AC72EE5A /* RanchOS.app */,
-				902198BEB993A86E58183B00 /* RanchOSFixtureTests.xctest */,
+				B980AF6909E06E60BF84C096 /* RanchOSHubTests.xctest */,
+				454C7A8A973451ABCEB01A80 /* RanchOSiOS.app */,
+				F4794115307799C91B51792F /* RanchOSMac.app */,
+				571843A754007CC43A96B1D2 /* RanchOSTV.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -65,39 +87,76 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		EEAC092D5B3622342ABAA2DF /* RanchOS */ = {
+		2352E454A977876033968307 /* RanchOSHubTests */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 38506B5DF911726A69A1F7F9 /* Build configuration list for PBXNativeTarget "RanchOS" */;
+			buildConfigurationList = 7EF97EAC231ADEBCE73A4E64 /* Build configuration list for PBXNativeTarget "RanchOSHubTests" */;
 			buildPhases = (
-				50337272F4400E5081082C92 /* Sources */,
+				CDE2F198329144C4CB078C06 /* Sources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = RanchOS;
+			name = RanchOSHubTests;
 			packageProductDependencies = (
 			);
-			productName = RanchOS;
-			productReference = D1495AE13D02AA93AC72EE5A /* RanchOS.app */;
+			productName = RanchOSHubTests;
+			productReference = B980AF6909E06E60BF84C096 /* RanchOSHubTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		4C968AEC9BF500EABC43B942 /* RanchOSTV */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 450F1B0A4F6FA5623D2C91EA /* Build configuration list for PBXNativeTarget "RanchOSTV" */;
+			buildPhases = (
+				16BEB0CDE74B77923B1996B6 /* Sources */,
+				CA2FCA4F7F41643B390D5B1A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOSTV;
+			packageProductDependencies = (
+			);
+			productName = RanchOSTV;
+			productReference = 571843A754007CC43A96B1D2 /* RanchOSTV.app */;
 			productType = "com.apple.product-type.application";
 		};
-		F981AC258341819075C95327 /* RanchOSFixtureTests */ = {
+		729543D66B9E38D3FA7053EE /* RanchOSiOS */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 746EA934FAD066BA02C112DE /* Build configuration list for PBXNativeTarget "RanchOSFixtureTests" */;
+			buildConfigurationList = 4D00DCB9D3DC51C17D3A392D /* Build configuration list for PBXNativeTarget "RanchOSiOS" */;
 			buildPhases = (
-				4C080FA64E3A30507E7F44C4 /* Sources */,
+				E2986F75EB1E204C4AFE8A51 /* Sources */,
+				DC1D7A76D69C78E27F38703F /* Resources */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 			);
-			name = RanchOSFixtureTests;
+			name = RanchOSiOS;
 			packageProductDependencies = (
 			);
-			productName = RanchOSFixtureTests;
-			productReference = 902198BEB993A86E58183B00 /* RanchOSFixtureTests.xctest */;
-			productType = "com.apple.product-type.bundle.unit-test";
+			productName = RanchOSiOS;
+			productReference = 454C7A8A973451ABCEB01A80 /* RanchOSiOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		9A94689B7908CC1EBC9E4C16 /* RanchOSMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = D9E9A95B676C3B5CA2F49F3E /* Build configuration list for PBXNativeTarget "RanchOSMac" */;
+			buildPhases = (
+				35E7DA57674B48820CA969A9 /* Sources */,
+				9154477C9E81D90A6DFB9F7B /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOSMac;
+			packageProductDependencies = (
+			);
+			productName = RanchOSMac;
+			productReference = F4794115307799C91B51792F /* RanchOSMac.app */;
+			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
 
@@ -108,11 +167,19 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
-					EEAC092D5B3622342ABAA2DF = {
+					2352E454A977876033968307 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Manual;
 					};
-					F981AC258341819075C95327 = {
+					4C968AEC9BF500EABC43B942 = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					729543D66B9E38D3FA7053EE = {
+						DevelopmentTeam = "";
+						ProvisioningStyle = Manual;
+					};
+					9A94689B7908CC1EBC9E4C16 = {
 						DevelopmentTeam = "";
 						ProvisioningStyle = Manual;
 					};
@@ -132,46 +199,95 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				EEAC092D5B3622342ABAA2DF /* RanchOS */,
-				F981AC258341819075C95327 /* RanchOSFixtureTests */,
+				729543D66B9E38D3FA7053EE /* RanchOSiOS */,
+				9A94689B7908CC1EBC9E4C16 /* RanchOSMac */,
+				4C968AEC9BF500EABC43B942 /* RanchOSTV */,
+				2352E454A977876033968307 /* RanchOSHubTests */,
 			);
 		};
 /* End PBXProject section */
 
-/* Begin PBXSourcesBuildPhase section */
-		4C080FA64E3A30507E7F44C4 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
+/* Begin PBXResourcesBuildPhase section */
+		9154477C9E81D90A6DFB9F7B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				B6D6AC526724531FB70B467B /* TodayDashboard.swift in Sources */,
-				29B350D65C0B73FF4A20C479 /* TodayDashboardFixtureTests.swift in Sources */,
+				517EC06CF4DBA324AB942CA4 /* Assets.xcassets in Resources */,
+				C6657E06195C2E952E9F8AB8 /* RanchOSiOS-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		50337272F4400E5081082C92 /* Sources */ = {
+		CA2FCA4F7F41643B390D5B1A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4A6B37C5F34BFD9BE7611950 /* Assets.xcassets in Resources */,
+				618564DE5DE8C8842183C933 /* RanchOSiOS-Info.plist in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DC1D7A76D69C78E27F38703F /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				90C3BCFA7E0C18A55B992430 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		16BEB0CDE74B77923B1996B6 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				35CC45B11686B4F3EFE064FC /* RanchOSTVApp.swift in Sources */,
-				BF8055A5221D3494FD748873 /* TodayDashboard.swift in Sources */,
-				8884C25A2FBFB695783A6248 /* TodayView.swift in Sources */,
+				9499C316C9F3C1F528B1B11B /* RanchOSApp.swift in Sources */,
+				37B2FB76EC4C2819D2969DBA /* RanchOSHomeView.swift in Sources */,
+				53B5820CF13D08C27E6866BC /* RanchOSHubModel.swift in Sources */,
+				8F624DC859A59696959F6829 /* RanchOSTVHomeView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		35E7DA57674B48820CA969A9 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				470C65898CA093AE5DA8A254 /* RanchOSApp.swift in Sources */,
+				7ABE342D35D442172B63444C /* RanchOSHomeView.swift in Sources */,
+				232C0D73D888423130882D6B /* RanchOSHubModel.swift in Sources */,
+				8AF17A99B07B4D8E547B8E0E /* RanchOSTVHomeView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CDE2F198329144C4CB078C06 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				C63530FD2A422C672ACB6D8A /* RanchOSHubModel.swift in Sources */,
+				ABD0006DA9297148C764BC84 /* RanchOSHubModelTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E2986F75EB1E204C4AFE8A51 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5B11DAE14A7B9B8F4C62C0B6 /* RanchOSApp.swift in Sources */,
+				DEFDE9802034BCAC2720FA29 /* RanchOSHomeView.swift in Sources */,
+				8A7EBE108BF376552C68B654 /* RanchOSHubModel.swift in Sources */,
+				0E61120FCE9229A9A00BD0D1 /* RanchOSTVHomeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
-		69EF8FC29C309452496A496D /* Release */ = {
+		250263F7782CD443C7DB0198 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_APPICON_NAME = TVAppIcon;
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				CODE_SIGN_IDENTITY = "";
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Sources/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -182,25 +298,21 @@
 				TARGETED_DEVICE_FAMILY = 3;
 				TVOS_DEPLOYMENT_TARGET = 18.0;
 			};
-			name = Release;
+			name = Debug;
 		};
-		838056E1A2F72220D5A9E758 /* Release */ = {
+		6117A09B8574586B2CDD2F19 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				CODE_SIGN_IDENTITY = "";
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
-					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.tv.dev.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.macos.dev;
+				PRODUCT_NAME = RanchOS;
 				SDKROOT = macosx;
 			};
 			name = Release;
@@ -261,6 +373,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -273,17 +386,12 @@
 			};
 			name = Debug;
 		};
-		DB70CE356E49982A49F87131 /* Debug */ = {
+		A65F6E84AAD7A450348E218D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ASSETCATALOG_COMPILER_APPICON_NAME = "App Icon & Top Shelf Image";
+				ASSETCATALOG_COMPILER_APPICON_NAME = TVAppIcon;
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				CODE_SIGN_IDENTITY = "";
-				DEVELOPMENT_TEAM = "";
-				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = Sources/Info.plist;
+				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -294,17 +402,13 @@
 				TARGETED_DEVICE_FAMILY = 3;
 				TVOS_DEPLOYMENT_TARGET = 18.0;
 			};
-			name = Debug;
+			name = Release;
 		};
-		ECB37305825248AB702F4C79 /* Debug */ = {
+		B3E04E6DD0D2FF120033D230 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGNING_ALLOWED = NO;
-				CODE_SIGNING_REQUIRED = NO;
-				CODE_SIGN_IDENTITY = "";
 				COMBINE_HIDPI_IMAGES = YES;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -312,10 +416,82 @@
 					"@loader_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
-				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.tv.dev.tests;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.hub.dev.tests;
 				SDKROOT = macosx;
 			};
 			name = Debug;
+		};
+		C8919201FDE2CA22A9BC9FE5 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.macos.dev;
+				PRODUCT_NAME = RanchOS;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
+		D7266496BF2BA3EF5973181C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "HubSources/RanchOSiOS-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.dev;
+				PRODUCT_NAME = RanchOS;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		E0A9EA3B795035A6821CEA15 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "HubSources/RanchOSiOS-Info.plist";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.dev;
+				PRODUCT_NAME = RanchOS;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		EB9A28F69CB4A74E73ECA515 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				COMBINE_HIDPI_IMAGES = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+					"@loader_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.hub.dev.tests;
+				SDKROOT = macosx;
+			};
+			name = Release;
 		};
 		FFF06EA59666E542F7ACA31C /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -367,6 +543,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -381,20 +558,29 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		38506B5DF911726A69A1F7F9 /* Build configuration list for PBXNativeTarget "RanchOS" */ = {
+		450F1B0A4F6FA5623D2C91EA /* Build configuration list for PBXNativeTarget "RanchOSTV" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				DB70CE356E49982A49F87131 /* Debug */,
-				69EF8FC29C309452496A496D /* Release */,
+				250263F7782CD443C7DB0198 /* Debug */,
+				A65F6E84AAD7A450348E218D /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
-		746EA934FAD066BA02C112DE /* Build configuration list for PBXNativeTarget "RanchOSFixtureTests" */ = {
+		4D00DCB9D3DC51C17D3A392D /* Build configuration list for PBXNativeTarget "RanchOSiOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
-				ECB37305825248AB702F4C79 /* Debug */,
-				838056E1A2F72220D5A9E758 /* Release */,
+				E0A9EA3B795035A6821CEA15 /* Debug */,
+				D7266496BF2BA3EF5973181C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		7EF97EAC231ADEBCE73A4E64 /* Build configuration list for PBXNativeTarget "RanchOSHubTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B3E04E6DD0D2FF120033D230 /* Debug */,
+				EB9A28F69CB4A74E73ECA515 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
@@ -404,6 +590,15 @@
 			buildConfigurations = (
 				90D92987401455846C7400CA /* Debug */,
 				FFF06EA59666E542F7ACA31C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		D9E9A95B676C3B5CA2F49F3E /* Build configuration list for PBXNativeTarget "RanchOSMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				C8919201FDE2CA22A9BC9FE5 /* Debug */,
+				6117A09B8574586B2CDD2F19 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

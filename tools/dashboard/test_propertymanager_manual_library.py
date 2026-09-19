@@ -75,6 +75,45 @@ class PropertyManagerManualLibraryTests(unittest.TestCase):
             ):
                 self.assertFalse(dashboard.propertymanager_manual_library_client_authorized())
 
+    def test_existing_asset_pdf_link_uses_governed_metadata(self):
+        row = ("Assets/pump-aaaaaaaaaaaa.pdf", "Pump.pdf", "Pump Manual", 123, "a" * 64)
+        connection = mock.Mock()
+        cursor = connection.cursor.return_value
+        cursor.fetchone.return_value = row
+        with mock.patch.object(dashboard, "ranchbrain_db", return_value=connection):
+            result = dashboard.pdf_upload_find_available_asset_pdf("Assets/pump-aaaaaaaaaaaa.pdf")
+        self.assertEqual(result["sha256"], "a" * 64)
+        self.assertEqual(result["relative_path"], row[0])
+
+    def test_existing_asset_pdf_link_rejects_non_asset_library_path(self):
+        with self.assertRaises(ValueError):
+            dashboard.pdf_upload_find_available_asset_pdf("Projects/pump-aaaaaaaaaaaa.pdf")
+
+    def test_existing_asset_pdf_link_registers_governed_locator(self):
+        existing = {
+            "relative_path": "Assets/pump-aaaaaaaaaaaa.pdf",
+            "original_filename": "Pump.pdf",
+            "title": "Pump Manual",
+            "size_bytes": 123,
+            "sha256": "a" * 64,
+        }
+        with mock.patch.object(dashboard, "propertymanager_manual_library_list_assets", return_value=[{"id": "asset-1"}]), mock.patch.object(
+            dashboard, "pdf_upload_find_available_asset_pdf", return_value=existing
+        ), mock.patch.object(dashboard, "propertymanager_manual_library_register") as register:
+            response = dashboard.app.test_client().post(
+                "/pm/manual-library/link-existing",
+                data={
+                    "asset_id": "asset-1",
+                    "relative_path": existing["relative_path"],
+                    "manufacturer": "Drummond",
+                    "model_number": "63319",
+                },
+            )
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("library_notice=linked", response.headers["Location"])
+        self.assertEqual(register.call_args.args[0], "asset-1")
+        self.assertEqual(register.call_args.args[1]["source_locator"], "dashboard-library://Assets/pump-aaaaaaaaaaaa.pdf")
+
 
 if __name__ == "__main__":
     unittest.main()

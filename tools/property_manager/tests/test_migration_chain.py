@@ -28,13 +28,15 @@ MIGRATIONS = (
     "009_maintenance_proposals.sql",
     "010_handbook_ingestion_v1.sql",
     "011_work_request_intake.sql",
+    "012_asset_manual_parts.sql",
+    "013_asset_placed_in_service_date.sql",
 )
 REAPPLICABLE_MIGRATIONS = (
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "011"
+EXPECTED_VERSION = "013"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -260,9 +262,9 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                             (id, area, item, warning_days, critical_days, last_done, next_due, kind)
                            VALUES ('00000000-0000-0000-0000-000000000098', 'New', 'Work request', 0, 0, now(), now(), 'Work Request')"""
                     )
-        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010", "011"])
+        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013"])
         self.assertEqual(applied[-1], EXPECTED_VERSION)
-        self.assertEqual(self._extract_contract(), manifest.snapshots["011"].schema_contract)
+        self.assertEqual(self._extract_contract(), manifest.snapshots["013"].schema_contract)
 
         # The 005/006/009 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.
@@ -282,6 +284,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "asset_meter_reading",
                 "asset_manual",
                 "asset_manual_chunk",
+                "asset_manual_part",
                 "asset_manual_state_event",
                 "asset_manual_version",
                 "asset_task_mapping_proposals",
@@ -298,7 +301,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         )
 
         expected_columns = {
-            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at"},
+            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at", "placed_in_service_date"},
             "asset_meter": {"meter_epoch", "row_version"},
             "asset_meter_reading": {
                 "previous_reading_id",
@@ -377,6 +380,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             },
             "asset_manual_chunk": {"manual_version_id", "chunk_ordinal", "content", "content_sha256", "search_vector"},
             "asset_manual_state_event": {"manual_version_id", "event_type", "from_state", "to_state", "actor_id"},
+            "asset_manual_part": {
+                "manual_version_id", "reference_number", "oem_part_number", "name", "quantity",
+                "source_page_number", "source_excerpt", "provenance",
+            },
         }
         for table, columns in handbook_columns.items():
             actual = set(

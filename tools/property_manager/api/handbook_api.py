@@ -29,6 +29,7 @@ MANUAL_LIBRARY_SERVICE_TOKEN = os.environ.get(
     "PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN", ""
 ).strip()
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PART_REFERENCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def _dashboard_library_required(fn):
@@ -171,6 +172,49 @@ def _normalize_extraction_chunks(raw: object) -> list[dict]:
                 "section_heading": heading,
                 "content": content,
                 "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            }
+        )
+    return normalized
+
+
+def _normalize_manual_parts(raw: object) -> list[dict]:
+    """Accept source-cited manual parts without treating diagram labels as OEM numbers."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 500:
+        raise ValueError("parts must be an array with at most 500 entries")
+    normalized: list[dict] = []
+    references: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("Each manual part must be an object")
+        reference_number = str(item.get("reference_number") or "").strip()
+        if not _PART_REFERENCE_RE.fullmatch(reference_number) or reference_number in references:
+            raise ValueError("Each manual part needs a unique diagram reference_number")
+        references.add(reference_number)
+        name = " ".join(str(item.get("name") or "").split())[:300]
+        if not name:
+            raise ValueError("Each manual part needs a name")
+        quantity = item.get("quantity")
+        source_page_number = item.get("source_page_number")
+        if type(quantity) is not int or type(source_page_number) is not int:
+            raise ValueError("Manual part quantity and source_page_number must be integers")
+        if quantity < 1 or source_page_number < 1:
+            raise ValueError("Manual part quantity and source_page_number must be positive")
+        source_excerpt = " ".join(str(item.get("source_excerpt") or "").split())[:500]
+        if not source_excerpt:
+            raise ValueError("Each manual part needs a source_excerpt")
+        # A diagram label is useful for maintenance lookup, but is not evidence
+        # of a manufacturer orderable part number.
+        normalized.append(
+            {
+                "id": str(uuid4()),
+                "reference_number": reference_number,
+                "oem_part_number": "",
+                "name": name,
+                "quantity": quantity,
+                "source_page_number": source_page_number,
+                "source_excerpt": source_excerpt,
             }
         )
     return normalized
@@ -352,8 +396,10 @@ def register_handbook_routes(app: Flask) -> None:
             return validation_error("JSON object body required")
         try:
             chunks = _normalize_extraction_chunks(payload.get("chunks"))
+            parts = _normalize_manual_parts(payload.get("parts"))
         except ValueError as exc:
-            return validation_error(str(exc), field="chunks")
+            field = "parts" if "part" in str(exc).lower() else "chunks"
+            return validation_error(str(exc), field=field)
         extractor_name = " ".join(str(payload.get("extractor_name") or "").split())[:100]
         extractor_version = " ".join(str(payload.get("extractor_version") or "").split())[:64]
         if not extractor_name or not extractor_version:
@@ -380,12 +426,23 @@ def register_handbook_routes(app: Flask) -> None:
                 chunk["id"], chunk["ordinal"], chunk["page_number"], chunk["section_heading"], chunk["content"],
                 chunk["content_sha256"], json.dumps({"extractor": "local_mac"}),
             ])
+        parts_sql = ", ".join("(%s::uuid, %s, %s, %s, %s, %s, %s, %s::jsonb)" for _ in parts)
+        if not parts_sql:
+            parts_sql = "(NULL::uuid, NULL::varchar, NULL::varchar, NULL::varchar, NULL::integer, NULL::integer, NULL::varchar, NULL::jsonb)"
+        for part in parts:
+            values_params.extend([
+                part["id"], part["reference_number"], part["oem_part_number"], part["name"],
+                part["quantity"], part["source_page_number"], part["source_excerpt"],
+                json.dumps({"part_number_source": "manual_diagram_reference"}),
+            ])
         event_id = str(uuid4())
         actor_id = server_submitter_identity()
         created = pm_db.execute_top_level_one_json(
             f"""
             WITH supplied_chunks (id, chunk_ordinal, page_number, section_heading, content, content_sha256, extraction_metadata) AS (
                 VALUES {values_sql}
+            ), supplied_parts (id, reference_number, oem_part_number, name, quantity, source_page_number, source_excerpt, provenance) AS (
+                VALUES {parts_sql}
             ), extractable_version AS (
                 SELECT v.id, v.manual_id
                 FROM propertymanager.asset_manual m
@@ -401,6 +458,14 @@ def register_handbook_routes(app: Flask) -> None:
                 SELECT c.id, v.id, c.chunk_ordinal, c.page_number, c.section_heading, c.content,
                        c.content_sha256, c.extraction_metadata::jsonb
                 FROM supplied_chunks c CROSS JOIN extractable_version v
+            ), inserted_parts AS (
+                INSERT INTO propertymanager.asset_manual_part
+                    (id, manual_version_id, reference_number, oem_part_number, name, quantity,
+                     source_page_number, source_excerpt, provenance)
+                SELECT p.id, v.id, p.reference_number, p.oem_part_number, p.name, p.quantity,
+                       p.source_page_number, p.source_excerpt, p.provenance
+                FROM supplied_parts p CROSS JOIN extractable_version v
+                WHERE p.id IS NOT NULL
             ), extracted_version AS (
                 UPDATE propertymanager.asset_manual_version v
                 SET ingestion_status = 'extracted', extractor_name = %s, extractor_version = %s

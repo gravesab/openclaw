@@ -374,6 +374,69 @@ class HandbookAPITests(unittest.TestCase):
         self.assertNotIn("source_locator", response.get_json())
         self.assertIn("asset_manual_chunk", write.call_args.args[0])
 
+    def test_local_extraction_records_diagram_parts_without_claiming_oem_numbers(self):
+        extracted = self.stored_manual(ingestion_status="extracted")
+        with mock.patch.object(self.api.pm_db, "execute_one_json", return_value=self.stored_manual()), mock.patch.object(
+            self.api.pm_db,
+            "execute_top_level_one_json",
+            return_value=extracted,
+        ) as write:
+            response = self.client.post(
+                "/v1/assets/asset-1/manuals/manual-1/versions/version-1/extraction",
+                headers=self.app_headers(),
+                json={
+                    "extractor_name": "PropertyManager Mac local Gemma",
+                    "extractor_version": "gemma4:12b-mlx",
+                    "chunks": [{"page_number": 6, "content": "1 Pump Cord 1"}],
+                    "parts": [
+                        {
+                            "reference_number": "1",
+                            "name": "Pump Cord",
+                            "quantity": 1,
+                            "source_page_number": 6,
+                            "source_excerpt": "1 Pump Cord 1",
+                        }
+                    ],
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertIn("asset_manual_part", write.call_args.args[0])
+        self.assertIn("manual_diagram_reference", " ".join(str(value) for value in write.call_args.args[1]))
+
+    def test_local_extraction_rejects_duplicate_diagram_part_references(self):
+        response = self.client.post(
+            "/v1/assets/asset-1/manuals/manual-1/versions/version-1/extraction",
+            headers=self.app_headers(),
+            json={
+                "extractor_name": "PropertyManager Mac local Gemma",
+                "extractor_version": "gemma4:12b-mlx",
+                "chunks": [{"page_number": 6, "content": "parts"}],
+                "parts": [
+                    {"reference_number": "9", "name": "Screw", "quantity": 8, "source_page_number": 6, "source_excerpt": "9 Screw 8"},
+                    {"reference_number": "9", "name": "Screw", "quantity": 4, "source_page_number": 6, "source_excerpt": "9 Screw 4"},
+                ],
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["field"], "parts")
+
+    def test_local_extraction_rejects_fractional_part_quantities(self):
+        response = self.client.post(
+            "/v1/assets/asset-1/manuals/manual-1/versions/version-1/extraction",
+            headers=self.app_headers(),
+            json={
+                "extractor_name": "PropertyManager Mac local Gemma",
+                "extractor_version": "gemma4:12b-mlx",
+                "chunks": [{"page_number": 6, "content": "parts"}],
+                "parts": [{
+                    "reference_number": "9", "name": "Screw", "quantity": 1.5,
+                    "source_page_number": 6, "source_excerpt": "9 Screw 8",
+                }],
+            },
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["field"], "parts")
+
 
 if __name__ == "__main__":
     unittest.main()

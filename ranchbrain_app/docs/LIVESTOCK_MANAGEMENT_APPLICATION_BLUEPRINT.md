@@ -1,7 +1,7 @@
 # Ranch OS Livestock Management application blueprint
 
-Status: Proposed for DEV application design review  
-Scope: Tenant-safe Livestock Management UI, domain API, and AI read boundary  
+Status: Proposed for DEV application design review
+Scope: Tenant-safe Livestock Management UI, domain API, and AI read boundary
 Last updated: 2026-08-26
 
 Livestock Management is a dedicated Ranch OS application. This blueprint

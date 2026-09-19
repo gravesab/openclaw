@@ -1,7 +1,7 @@
 # Ranch OS multi-tenancy design
 
-Status: Approved for DEV foundation work  
-Scope: Ranch OS modules, beginning with RanchBrain  
+Status: Approved for DEV foundation work
+Scope: Ranch OS modules, beginning with RanchBrain
 Last updated: 2026-09-03
 
 Ranch OS supports multiple ranches and multiple users in a shared data

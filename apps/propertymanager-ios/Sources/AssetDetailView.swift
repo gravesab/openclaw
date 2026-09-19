@@ -12,6 +12,8 @@ struct AssetDetailView: View {
     @State private var editingTask: AssetTaskSummary?
     @State private var isActivating = false
     @State private var isDeactivating = false
+    @State private var isSavingPlacedInServiceDate = false
+    @State private var placedInServiceDate = Date()
     @State private var showDeactivateConfirm = false
     @State private var errorMessage: String?
 
@@ -23,6 +25,7 @@ struct AssetDetailView: View {
                         proposedMeterBanner(asset)
                     }
                     meterCard(asset)
+                    assetDetailsCard(asset)
                     serviceCard(asset)
                     historyCard
                     deactivateCard
@@ -93,6 +96,42 @@ struct AssetDetailView: View {
         .task {
             await loadAsset()
         }
+    }
+
+    @ViewBuilder
+    private func assetDetailsCard(_ asset: RanchAsset) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Asset details")
+                .font(.headline)
+            DatePicker("Put into service", selection: $placedInServiceDate, displayedComponents: .date)
+            HStack {
+                Button("Save date") {
+                    Task { await savePlacedInServiceDate(placedInServiceDate) }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSavingPlacedInServiceDate)
+
+                if asset.placedInServiceDate != nil {
+                    Button("Clear date", role: .destructive) {
+                        Task { await savePlacedInServiceDate(nil) }
+                    }
+                    .disabled(isSavingPlacedInServiceDate)
+                }
+            }
+            if let date = asset.placedInServiceDate {
+                Text("Recorded as \(date, format: .dateTime.year().month().day())")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No date recorded yet.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -267,7 +306,24 @@ struct AssetDetailView: View {
     private func loadAsset() async {
         do {
             asset = try await store.client.fetchAsset(id: assetId)
+            if let placedInServiceDate = asset?.placedInServiceDate {
+                self.placedInServiceDate = placedInServiceDate
+            }
             await loadReadings()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    private func savePlacedInServiceDate(_ date: Date?) async {
+        isSavingPlacedInServiceDate = true
+        defer { isSavingPlacedInServiceDate = false }
+        do {
+            asset = try await store.client.updatePlacedInServiceDate(id: assetId, date: date)
+            if let date {
+                placedInServiceDate = date
+            }
+            await store.refreshAssets()
         } catch {
             errorMessage = error.localizedDescription
         }

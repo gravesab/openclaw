@@ -166,6 +166,7 @@ struct RanchAsset: Identifiable, Codable, Hashable {
     var model: String?
     var category: String?
     var location: String?
+    var placedInServiceDate: Date?
     var aliases: [String]?
     var qrToken: String?
     var meter: AssetMeter?
@@ -177,6 +178,7 @@ struct RanchAsset: Identifiable, Codable, Hashable {
     enum CodingKeys: String, CodingKey {
         case id, name, manufacturer, model, category, location, aliases, tasks, meter
         case externalId = "external_id"
+        case placedInServiceDate = "placed_in_service_date"
         case qrToken = "qr_token"
         case proposedMeter = "proposed_meter"
         case meterActivatedAt = "meter_activated_at"
@@ -192,6 +194,7 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         model = try c.decodeIfPresent(String.self, forKey: .model)
         category = try c.decodeIfPresent(String.self, forKey: .category)
         location = try c.decodeIfPresent(String.self, forKey: .location)
+        placedInServiceDate = FlexibleDate.decode(c, key: .placedInServiceDate)
         aliases = try c.decodeIfPresent([String].self, forKey: .aliases)
         qrToken = try c.decodeIfPresent(String.self, forKey: .qrToken)
         meter = try c.decodeIfPresent(AssetMeter.self, forKey: .meter)
@@ -210,6 +213,7 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(model, forKey: .model)
         try c.encodeIfPresent(category, forKey: .category)
         try c.encodeIfPresent(location, forKey: .location)
+        try c.encodeIfPresent(placedInServiceDate, forKey: .placedInServiceDate)
         try c.encodeIfPresent(aliases, forKey: .aliases)
         try c.encodeIfPresent(qrToken, forKey: .qrToken)
         try c.encodeIfPresent(meter, forKey: .meter)
@@ -388,6 +392,14 @@ enum FlexibleDate {
     }
 
     static func parse(_ raw: String) -> Date? {
+        let civilDate = DateFormatter()
+        civilDate.locale = Locale(identifier: "en_US_POSIX")
+        civilDate.calendar = Calendar(identifier: .gregorian)
+        civilDate.dateFormat = "yyyy-MM-dd"
+        civilDate.isLenient = false
+        if let date = civilDate.date(from: raw) {
+            return date
+        }
         let full = ISO8601DateFormatter()
         full.formatOptions = [.withInternetDateTime]
         if let date = full.date(from: raw) {

@@ -163,7 +163,7 @@ def select_routed_model(
     from tools.ai_intelligence.ollama_config import to_ollama_model_name
     from tools.ai_intelligence.omlx_config import is_omlx_configured
 
-    ollama_models = available_ollama_models(ollama_url, timeout_seconds)
+    ollama_models: set[str] | None = None
     unavailable: list[dict[str, str]] = []
     for candidate in route["candidates"]:
         model_id = candidate["model_id"]
@@ -173,6 +173,8 @@ def select_routed_model(
             unavailable.append({"model_id": model_id, "reason": "omlx-not-configured"})
             continue
         if model_id.startswith("ollama-"):
+            if ollama_models is None:
+                ollama_models = available_ollama_models(ollama_url, timeout_seconds)
             try:
                 ollama_name = to_ollama_model_name(model_id)
             except ValueError as exc:

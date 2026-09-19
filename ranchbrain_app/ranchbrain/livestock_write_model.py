@@ -216,6 +216,8 @@ def assign_identifier(
         _require_tenant(context, identifier.tenant_id)
     for retirement in retirements:
         _require_tenant(context, retirement.tenant_id)
+    if any(identifier.id == command.id for identifier in existing):
+        raise LivestockWriteError("identifier assignment id is already recorded", LivestockWriteErrorCode.INVALID)
     retired_ids = _active_identifier_ids(retirements)
     collision = any(
         identifier.id not in retired_ids
@@ -312,6 +314,13 @@ class RoutineLifecycleEventV1:
     confirmation: LifecycleCorrectionConfirmationV1 | None = None
 
 
+def _active_lifecycle_events(existing: tuple[RoutineLifecycleEventV1, ...]) -> tuple[RoutineLifecycleEventV1, ...]:
+    superseded_ids = {
+        event.supersedes_event_id for event in existing if event.supersedes_event_id is not None
+    }
+    return tuple(event for event in existing if event.id not in superseded_ids)
+
+
 def record_routine_lifecycle_event(
     context: TenantContext,
     command: RoutineLifecycleEventCommandV1,
@@ -326,9 +335,11 @@ def record_routine_lifecycle_event(
         _require_tenant(context, event.tenant_id)
         if event.animal_id != command.animal_id:
             raise LivestockWriteError("lifecycle history is not for the requested animal", LivestockWriteErrorCode.CONTEXT_MISMATCH)
+    if any(event.id == command.id for event in existing):
+        raise LivestockWriteError("lifecycle event id is already recorded", LivestockWriteErrorCode.INVALID)
 
     if command.supersedes_event_id is None:
-        prior_times = [event.occurred_at for event in existing if event.supersedes_event_id is None]
+        prior_times = [event.occurred_at for event in _active_lifecycle_events(existing)]
         if prior_times and command.occurred_at <= max(prior_times):
             raise LivestockWriteError("routine lifecycle events must append in occurred-time order", LivestockWriteErrorCode.INVALID)
         operation = LivestockWriteOperation.LIFECYCLE_RECORD

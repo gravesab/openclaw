@@ -171,3 +171,108 @@ class LivestockWriteModelTests(unittest.TestCase):
         self.assertEqual(corrected.supersedes_event_id, intake.id)
         with self.assertRaises(LivestockWriteError):
             record_routine_lifecycle_event(context(Role.OWNER), correction, (intake, corrected), NOW + timedelta(minutes=3))
+
+    def test_retired_identifier_assignment_id_cannot_be_reused(self):
+        assigned = assign_identifier(context(), identifier_command(), (), (), NOW)
+        retirement = retire_identifier(
+            context(),
+            retirement_id="retirement-1",
+            identifier=assigned,
+            reason=IdentifierRetirementReason.REPLACED,
+            retired_at=NOW + timedelta(minutes=1),
+            existing_retirements=(),
+            recorded_at=NOW + timedelta(minutes=1),
+        )
+        with self.assertRaises(LivestockWriteError) as raised:
+            assign_identifier(
+                context(),
+                identifier_command("identifier-1", "RB-999"),
+                (assigned,),
+                (retirement,),
+                NOW + timedelta(minutes=2),
+            )
+        self.assertEqual(raised.exception.code, LivestockWriteErrorCode.INVALID)
+
+    def test_duplicate_lifecycle_event_id_is_rejected_for_append_and_correction(self):
+        intake = record_routine_lifecycle_event(context(), lifecycle_command(), (), NOW)
+        with self.assertRaises(LivestockWriteError) as append_raised:
+            record_routine_lifecycle_event(
+                context(),
+                lifecycle_command("event-1", NOW + timedelta(minutes=1), event_type=RoutineLifecycleEventType.TAGGED),
+                (intake,),
+                NOW + timedelta(minutes=1),
+            )
+        self.assertEqual(append_raised.exception.code, LivestockWriteErrorCode.INVALID)
+        tagged = record_routine_lifecycle_event(
+            context(),
+            lifecycle_command("event-2", NOW + timedelta(minutes=1), event_type=RoutineLifecycleEventType.TAGGED),
+            (intake,),
+            NOW + timedelta(minutes=1),
+        )
+        confirmation = LifecycleCorrectionConfirmationV1("confirmation-1", "user-a", "request-a", NOW + timedelta(minutes=2))
+        correction = lifecycle_command(
+            "event-1",
+            NOW + timedelta(minutes=3),
+            event_type=RoutineLifecycleEventType.TAGGED,
+            supersedes_event_id="event-2",
+            correction_reason=LifecycleCorrectionReason.INCORRECT_TIME,
+            confirmation=confirmation,
+        )
+        with self.assertRaises(LivestockWriteError) as correction_raised:
+            record_routine_lifecycle_event(context(Role.OWNER), correction, (intake, tagged), NOW + timedelta(minutes=3))
+        self.assertEqual(correction_raised.exception.code, LivestockWriteErrorCode.INVALID)
+
+    def test_forward_correction_governs_intervening_append_order(self):
+        intake = record_routine_lifecycle_event(context(), lifecycle_command(), (), NOW)
+        confirmation = LifecycleCorrectionConfirmationV1("confirmation-1", "user-a", "request-a", NOW + timedelta(minutes=1))
+        corrected = record_routine_lifecycle_event(
+            context(Role.OWNER),
+            lifecycle_command(
+                "event-2",
+                NOW + timedelta(minutes=10),
+                supersedes_event_id="event-1",
+                correction_reason=LifecycleCorrectionReason.INCORRECT_TIME,
+                confirmation=confirmation,
+            ),
+            (intake,),
+            NOW + timedelta(minutes=2),
+        )
+        with self.assertRaises(LivestockWriteError) as intervening:
+            record_routine_lifecycle_event(
+                context(),
+                lifecycle_command("event-3", NOW + timedelta(minutes=5), event_type=RoutineLifecycleEventType.TAGGED),
+                (intake, corrected),
+                NOW + timedelta(minutes=6),
+            )
+        self.assertEqual(intervening.exception.code, LivestockWriteErrorCode.INVALID)
+        later = record_routine_lifecycle_event(
+            context(),
+            lifecycle_command("event-4", NOW + timedelta(minutes=11), event_type=RoutineLifecycleEventType.TAGGED),
+            (intake, corrected),
+            NOW + timedelta(minutes=11),
+        )
+        self.assertEqual(later.event_type, RoutineLifecycleEventType.TAGGED)
+
+    def test_backward_correction_does_not_block_later_valid_append(self):
+        intake = record_routine_lifecycle_event(context(), lifecycle_command(), (), NOW)
+        confirmation = LifecycleCorrectionConfirmationV1("confirmation-1", "user-a", "request-a", NOW + timedelta(minutes=1))
+        corrected = record_routine_lifecycle_event(
+            context(Role.OWNER),
+            lifecycle_command(
+                "event-2",
+                NOW - timedelta(minutes=10),
+                supersedes_event_id="event-1",
+                correction_reason=LifecycleCorrectionReason.INCORRECT_TIME,
+                confirmation=confirmation,
+            ),
+            (intake,),
+            NOW + timedelta(minutes=2),
+        )
+        later = record_routine_lifecycle_event(
+            context(),
+            lifecycle_command("event-3", NOW - timedelta(minutes=5), event_type=RoutineLifecycleEventType.TAGGED),
+            (intake, corrected),
+            NOW + timedelta(minutes=3),
+        )
+        self.assertEqual(later.occurred_at, NOW - timedelta(minutes=5))
+        self.assertEqual(later.event_type, RoutineLifecycleEventType.TAGGED)

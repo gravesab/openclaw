@@ -653,7 +653,7 @@ BEGIN
             USING ERRCODE = '23514';
     END IF;
     IF NEW.source_activity_id IS DISTINCT FROM original_activity THEN
-        RAISE EXCEPTION 'reversal journal must invert the original lines'
+        RAISE EXCEPTION 'reversal must keep the source activity'
             USING ERRCODE = '23514';
     END IF;
     SELECT reverses_journal_id
@@ -665,39 +665,31 @@ BEGIN
             USING ERRCODE = '23514';
     END IF;
     IF EXISTS (
-        SELECT expected.line_no, expected.account_id, expected.debit, expected.credit
-        FROM (
-            SELECT
-                original_line.line_no,
-                original_line.account_id,
-                original_line.credit AS debit,
-                original_line.debit AS credit
-            FROM ranchos.finance_journal_lines original_line
-            WHERE original_line.tenant_id = NEW.tenant_id
-              AND original_line.journal_entry_id = original_journal
-        ) expected
-        EXCEPT
-        SELECT reversed_line.line_no, reversed_line.account_id, reversed_line.debit, reversed_line.credit
-        FROM ranchos.finance_journal_lines reversed_line
-        WHERE reversed_line.tenant_id = NEW.tenant_id
-          AND reversed_line.journal_entry_id = NEW.journal_entry_id
+        SELECT 1
+        FROM ranchos.finance_journal_lines original_line
+        LEFT JOIN ranchos.finance_journal_lines reversed_line
+          ON reversed_line.tenant_id = NEW.tenant_id
+         AND reversed_line.journal_entry_id = NEW.journal_entry_id
+         AND reversed_line.line_no = original_line.line_no
+         AND reversed_line.account_id = original_line.account_id
+        WHERE original_line.tenant_id = NEW.tenant_id
+          AND original_line.journal_entry_id = original_journal
+          AND (
+              reversed_line.journal_entry_id IS NULL
+              OR reversed_line.debit IS DISTINCT FROM original_line.credit
+              OR reversed_line.credit IS DISTINCT FROM original_line.debit
+          )
     ) OR EXISTS (
-        SELECT reversed_line.line_no, reversed_line.account_id, reversed_line.debit, reversed_line.credit
+        SELECT 1
         FROM ranchos.finance_journal_lines reversed_line
+        LEFT JOIN ranchos.finance_journal_lines original_line
+          ON original_line.tenant_id = NEW.tenant_id
+         AND original_line.journal_entry_id = original_journal
+         AND original_line.line_no = reversed_line.line_no
+         AND original_line.account_id = reversed_line.account_id
         WHERE reversed_line.tenant_id = NEW.tenant_id
           AND reversed_line.journal_entry_id = NEW.journal_entry_id
-        EXCEPT
-        SELECT expected.line_no, expected.account_id, expected.debit, expected.credit
-        FROM (
-            SELECT
-                original_line.line_no,
-                original_line.account_id,
-                original_line.credit AS debit,
-                original_line.debit AS credit
-            FROM ranchos.finance_journal_lines original_line
-            WHERE original_line.tenant_id = NEW.tenant_id
-              AND original_line.journal_entry_id = original_journal
-        ) expected
+          AND original_line.journal_entry_id IS NULL
     ) THEN
         RAISE EXCEPTION 'reversal journal must invert the original lines'
             USING ERRCODE = '23514';

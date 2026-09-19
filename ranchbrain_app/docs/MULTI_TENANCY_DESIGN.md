@@ -2,7 +2,7 @@
 
 Status: Approved for DEV foundation work  
 Scope: Ranch OS modules, beginning with RanchBrain  
-Last updated: 2026-09-03
+Last updated: 2026-09-19
 
 Ranch OS supports multiple ranches and multiple users in a shared data
 platform. A ranch's information must never be visible, searchable, mutable, or
@@ -54,6 +54,21 @@ database/RLS work, runtime integration, device work, or Production.
 | `livestock.identifier.write`  | Yes   | Yes     | No     |
 | `livestock.lifecycle.write`   | Yes   | Yes     | No     |
 | `livestock.lifecycle.correct` | Yes   | No      | No     |
+
+The following Finance capabilities are DEV-only contracts authorized only
+through the same server-derived `TenantContext` boundary. A second equal
+Finance administrator is a second tenant owner. Tenant owner means full Ranch
+OS owner authority, not Finance-only authority. Owner has all five; manager
+has the first four only; viewer has `finance.read` only. This does not
+authorize Production, connectors, credentials, HTTP ingress, or money movement.
+
+| Capability                       | Owner | Manager | Viewer |
+| -------------------------------- | ----- | ------- | ------ |
+| `finance.read`                   | Yes   | Yes     | Yes    |
+| `finance.chart.write`            | Yes   | Yes     | No     |
+| `finance.source.write`           | Yes   | Yes     | No     |
+| `finance.interpretation.write`   | Yes   | Yes     | No     |
+| `finance.interpretation.correct` | Yes   | No      | No     |
 
 An asset belongs to a tenant, not to the user who created it. Tenant-owned
 records retain `created_by_user_id` and `updated_by_user_id` for attribution,

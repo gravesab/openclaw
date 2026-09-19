@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import inspect
 
 import pytest
 
@@ -122,6 +123,21 @@ def test_dual_member_can_explicitly_select_either_authorized_tenant(selected_ten
         (Role.VIEWER, Capability.LIVESTOCK_IDENTIFIER_WRITE, False),
         (Role.VIEWER, Capability.LIVESTOCK_LIFECYCLE_WRITE, False),
         (Role.VIEWER, Capability.LIVESTOCK_LIFECYCLE_CORRECT, False),
+        (Role.OWNER, Capability.FINANCE_READ, True),
+        (Role.OWNER, Capability.FINANCE_CHART_WRITE, True),
+        (Role.OWNER, Capability.FINANCE_SOURCE_WRITE, True),
+        (Role.OWNER, Capability.FINANCE_INTERPRETATION_WRITE, True),
+        (Role.OWNER, Capability.FINANCE_INTERPRETATION_CORRECT, True),
+        (Role.MANAGER, Capability.FINANCE_READ, True),
+        (Role.MANAGER, Capability.FINANCE_CHART_WRITE, True),
+        (Role.MANAGER, Capability.FINANCE_SOURCE_WRITE, True),
+        (Role.MANAGER, Capability.FINANCE_INTERPRETATION_WRITE, True),
+        (Role.MANAGER, Capability.FINANCE_INTERPRETATION_CORRECT, False),
+        (Role.VIEWER, Capability.FINANCE_READ, True),
+        (Role.VIEWER, Capability.FINANCE_CHART_WRITE, False),
+        (Role.VIEWER, Capability.FINANCE_SOURCE_WRITE, False),
+        (Role.VIEWER, Capability.FINANCE_INTERPRETATION_WRITE, False),
+        (Role.VIEWER, Capability.FINANCE_INTERPRETATION_CORRECT, False),
     ],
 )
 def test_livestock_write_capability_matrix_is_enforced_on_tenant_context(role, capability, allowed):
@@ -151,6 +167,11 @@ def test_owner_capability_set_is_explicit_and_matches_approved_matrix():
             Capability.LIVESTOCK_LIFECYCLE_WRITE,
             Capability.LIVESTOCK_LIFECYCLE_CORRECT,
             Capability.TV_TODAY_READ,
+            Capability.FINANCE_READ,
+            Capability.FINANCE_CHART_WRITE,
+            Capability.FINANCE_SOURCE_WRITE,
+            Capability.FINANCE_INTERPRETATION_WRITE,
+            Capability.FINANCE_INTERPRETATION_CORRECT,
         }
     )
 
@@ -169,6 +190,39 @@ def test_owner_capability_set_is_explicit_and_matches_approved_matrix():
 def test_malformed_principal_construction_fails_with_tenancy_error(change):
     with pytest.raises(TenancyError):
         principal(**change)
+
+
+def test_resolver_does_not_accept_caller_supplied_effective_tenant_role_or_capability():
+    parameters = set(inspect.signature(TenantContextResolver.resolve).parameters)
+    assert parameters == {"self", "principal", "requested_tenant_id", "capability", "now"}
+
+
+def test_second_equal_finance_administrator_is_a_second_tenant_owner():
+    memberships = [
+        TenantMembership(tenant_id="tenant-a", user_id="user-a", role=Role.OWNER),
+        TenantMembership(tenant_id="tenant-a", user_id="user-b", role=Role.OWNER),
+    ]
+    users = [
+        User(id="user-a", principal_id="principal-a"),
+        User(id="user-b", principal_id="principal-b"),
+    ]
+    first = resolver(users=users, memberships=memberships).resolve(
+        principal=principal(),
+        requested_tenant_id="tenant-a",
+        capability=Capability.FINANCE_INTERPRETATION_CORRECT,
+        now=NOW,
+    )
+    second = resolver(users=users, memberships=memberships).resolve(
+        principal=principal(id="principal-b", correlation_id="request-b"),
+        requested_tenant_id="tenant-a",
+        capability=Capability.FINANCE_INTERPRETATION_CORRECT,
+        now=NOW,
+    )
+    assert first.role is Role.OWNER
+    assert first.user_id == "user-a"
+    assert second.role is Role.OWNER
+    assert second.user_id == "user-b"
+    assert first.tenant_id == second.tenant_id == "tenant-a"
 
 
 def test_malformed_current_time_fails_with_tenancy_error_not_datetime_error():

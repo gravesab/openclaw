@@ -42,6 +42,11 @@ class Capability(str, Enum):
     LIVESTOCK_LIFECYCLE_WRITE = "livestock.lifecycle.write"
     LIVESTOCK_LIFECYCLE_CORRECT = "livestock.lifecycle.correct"
     TV_TODAY_READ = "tv.today.read"
+    FINANCE_READ = "finance.read"
+    FINANCE_CHART_WRITE = "finance.chart.write"
+    FINANCE_SOURCE_WRITE = "finance.source.write"
+    FINANCE_INTERPRETATION_WRITE = "finance.interpretation.write"
+    FINANCE_INTERPRETATION_CORRECT = "finance.interpretation.correct"
 
 
 ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = {
@@ -54,6 +59,11 @@ ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = {
             Capability.LIVESTOCK_LIFECYCLE_WRITE,
             Capability.LIVESTOCK_LIFECYCLE_CORRECT,
             Capability.TV_TODAY_READ,
+            Capability.FINANCE_READ,
+            Capability.FINANCE_CHART_WRITE,
+            Capability.FINANCE_SOURCE_WRITE,
+            Capability.FINANCE_INTERPRETATION_WRITE,
+            Capability.FINANCE_INTERPRETATION_CORRECT,
         }
     ),
     Role.MANAGER: frozenset(
@@ -64,9 +74,20 @@ ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = {
             Capability.LIVESTOCK_IDENTIFIER_WRITE,
             Capability.LIVESTOCK_LIFECYCLE_WRITE,
             Capability.TV_TODAY_READ,
+            Capability.FINANCE_READ,
+            Capability.FINANCE_CHART_WRITE,
+            Capability.FINANCE_SOURCE_WRITE,
+            Capability.FINANCE_INTERPRETATION_WRITE,
         }
     ),
-    Role.VIEWER: frozenset({Capability.MEMORY_READ, Capability.LIVESTOCK_READ, Capability.TV_TODAY_READ}),
+    Role.VIEWER: frozenset(
+        {
+            Capability.MEMORY_READ,
+            Capability.LIVESTOCK_READ,
+            Capability.TV_TODAY_READ,
+            Capability.FINANCE_READ,
+        }
+    ),
 }
 
 

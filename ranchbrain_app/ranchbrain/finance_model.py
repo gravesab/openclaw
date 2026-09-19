@@ -283,6 +283,11 @@ def reverse_journal_lines(lines: tuple[JournalLine, ...]) -> tuple[JournalLine, 
     return tuple(JournalLine(line.account_id, debit=line.credit, credit=line.debit) for line in lines)
 
 
+def _require_unique_ids(values: list[str], message: str) -> None:
+    if len(values) != len(set(values)):
+        raise FinanceError(message, FinanceErrorCode.INVALID)
+
+
 def _index_interpretations(interpretations: tuple[Interpretation, ...]) -> dict[str, Interpretation]:
     indexed: dict[str, Interpretation] = {}
     for interpretation in interpretations:
@@ -326,6 +331,69 @@ def _referenced_account_ids(interpretation: Interpretation) -> set[str]:
     }
 
 
+def _is_independent_posting(interpretation: Interpretation) -> bool:
+    return interpretation.reverses_id is None and interpretation.supersedes_id is None
+
+
+def _require_correction_target(indexed: dict[str, Interpretation], target_id: str) -> Interpretation:
+    target = indexed.get(target_id)
+    if target is None:
+        raise FinanceError("correction target is unknown", FinanceErrorCode.UNKNOWN_INTERPRETATION)
+    if target.reverses_id is not None:
+        raise FinanceError("reversal cannot be a correction target", FinanceErrorCode.INVALID)
+    return target
+
+
+def _validate_ledger(
+    accounts: tuple[Account, ...],
+    activities: tuple[SourceActivity, ...],
+    interpretations: tuple[Interpretation, ...],
+) -> None:
+    account_ids = [account.id for account in accounts]
+    _require_unique_ids(account_ids, "account ids must be unique")
+    known_accounts = set(account_ids)
+    activity_ids = [activity.id for activity in activities]
+    _require_unique_ids(activity_ids, "source activity ids must be unique")
+    known_activities = {activity.id: activity for activity in activities}
+    for activity in activities:
+        if activity.source_account_id not in known_accounts:
+            raise FinanceError("interpretation references an unknown account", FinanceErrorCode.INVALID)
+    indexed = _index_interpretations(interpretations)
+    _require_unique_ids(
+        [interpretation.journal_entry.id for interpretation in interpretations],
+        "journal entry ids must be unique",
+    )
+    _require_unique_ids(
+        [interpretation.reverses_id for interpretation in interpretations if interpretation.reverses_id is not None],
+        "reversal already exists for interpretation",
+    )
+    _require_unique_ids(
+        [interpretation.supersedes_id for interpretation in interpretations if interpretation.supersedes_id is not None],
+        "supersession already exists for interpretation",
+    )
+    independents: set[str] = set()
+    for interpretation in interpretations:
+        if not _is_independent_posting(interpretation):
+            continue
+        if interpretation.source_activity_id in independents:
+            raise FinanceError("source activity already has an interpretation", FinanceErrorCode.INVALID)
+        independents.add(interpretation.source_activity_id)
+    _require_paired_supersessions(interpretations)
+    for interpretation in interpretations:
+        activity = known_activities.get(interpretation.source_activity_id)
+        if activity is None:
+            raise FinanceError("source activity is unknown", FinanceErrorCode.INVALID)
+        if _referenced_account_ids(interpretation) - known_accounts:
+            raise FinanceError("interpretation references an unknown account", FinanceErrorCode.INVALID)
+        if interpretation.reverses_id is not None:
+            original = _require_correction_target(indexed, interpretation.reverses_id)
+            require_reversal_matches_original(interpretation, original)
+            continue
+        require_journal_represents_splits(interpretation.journal_entry, activity, interpretation.splits)
+        if interpretation.supersedes_id is not None:
+            _require_correction_target(indexed, interpretation.supersedes_id)
+
+
 def require_reversal_matches_original(interpretation: Interpretation, original: Interpretation) -> None:
     if interpretation.source_activity_id != original.source_activity_id:
         raise FinanceError("reversal must keep the source activity", FinanceErrorCode.INVALID)
@@ -343,9 +411,7 @@ def require_open_interpretation(
     interpretation_id: str,
 ) -> Interpretation:
     indexed = _index_interpretations(interpretations)
-    original = indexed.get(interpretation_id)
-    if original is None:
-        raise FinanceError("correction target is unknown", FinanceErrorCode.UNKNOWN_INTERPRETATION)
+    original = _require_correction_target(indexed, interpretation_id)
     if interpretation_id in _closed_interpretation_ids(interpretations):
         raise FinanceError(
             "correction target is already superseded or reversed",
@@ -398,14 +464,7 @@ class FinanceLedger:
     interpretations: tuple[Interpretation, ...] = ()
 
     def __post_init__(self) -> None:
-        account_ids = [account.id for account in self.accounts]
-        if len(account_ids) != len(set(account_ids)):
-            raise FinanceError("account ids must be unique", FinanceErrorCode.INVALID)
-        activity_ids = [activity.id for activity in self.activities]
-        if len(activity_ids) != len(set(activity_ids)):
-            raise FinanceError("source activity ids must be unique", FinanceErrorCode.INVALID)
-        _index_interpretations(self.interpretations)
-        _require_paired_supersessions(self.interpretations)
+        _validate_ledger(self.accounts, self.activities, self.interpretations)
 
     def account_ids(self) -> frozenset[str]:
         return frozenset(account.id for account in self.accounts)
@@ -423,6 +482,11 @@ class FinanceLedger:
             original = require_open_interpretation(self.interpretations, interpretation.reverses_id)
             require_reversal_matches_original(interpretation, original)
         else:
+            if any(
+                item.source_activity_id == interpretation.source_activity_id and _is_independent_posting(item)
+                for item in self.interpretations
+            ):
+                raise FinanceError("source activity already has an interpretation", FinanceErrorCode.INVALID)
             activity = self.activity_by_id(interpretation.source_activity_id)
             require_journal_represents_splits(interpretation.journal_entry, activity, interpretation.splits)
         missing = _referenced_account_ids(interpretation) - self.account_ids()

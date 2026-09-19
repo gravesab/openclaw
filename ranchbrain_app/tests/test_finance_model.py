@@ -366,6 +366,127 @@ class FinanceModelTests(unittest.TestCase):
             self.assertEqual(reversed_line.debit, original_line.credit)
             self.assertEqual(reversed_line.credit, original_line.debit)
 
+    def test_duplicate_ordinary_posting_is_rejected(self):
+        original = posted_interpretation()
+        built = ledger_with(original)
+        duplicate = posted_interpretation("interp-2", journal_id="journal-2")
+        with self.assertRaises(FinanceError) as posted_again:
+            built.with_interpretation(duplicate)
+        self.assertEqual(posted_again.exception.code, FinanceErrorCode.INVALID)
+        with self.assertRaises(FinanceError) as assembled:
+            FinanceLedger(built.accounts, built.activities, (original, duplicate))
+        self.assertEqual(assembled.exception.code, FinanceErrorCode.INVALID)
+
+    def test_direct_ledger_construction_enforces_posting_invariants(self):
+        original = posted_interpretation()
+        empty = empty_ledger()
+        assembled = FinanceLedger(empty.accounts, empty.activities, (original,))
+        self.assertEqual(assembled.interpretations[0].id, "interp-1")
+        with self.assertRaises(FinanceError) as unknown_account:
+            FinanceLedger((checking(),), empty.activities, (original,))
+        self.assertEqual(unknown_account.exception.code, FinanceErrorCode.INVALID)
+        over_total = posted_interpretation("interp-over", (grocery_split("-160.00"),), "journal-over")
+        with self.assertRaises(FinanceError) as split_mismatch:
+            FinanceLedger(empty.accounts, empty.activities, (over_total,))
+        self.assertEqual(split_mismatch.exception.code, FinanceErrorCode.SPLIT_TOTAL_MISMATCH)
+        unrelated = Interpretation(
+            "interp-unrelated",
+            "activity-1",
+            (grocery_split(),),
+            JournalEntry(
+                "journal-unrelated",
+                NOW,
+                (
+                    JournalLine("acct-feed", Decimal("150.00"), ZERO),
+                    JournalLine("acct-checking", ZERO, Decimal("150.00")),
+                ),
+            ),
+        )
+        with self.assertRaises(FinanceError) as noncanonical:
+            FinanceLedger(empty.accounts, empty.activities, (unrelated,))
+        self.assertEqual(noncanonical.exception.code, FinanceErrorCode.INVALID)
+
+    def test_reversal_cannot_be_a_correction_target(self):
+        original = posted_interpretation()
+        built = ledger_with(original)
+        reversal = reverse_interpretation(built.interpretations, "interp-1", "interp-reverse", NOW)
+        closed = built.with_interpretation(reversal)
+        with self.assertRaises(FinanceError) as reverse_reversal:
+            reverse_interpretation(closed.interpretations, "interp-reverse", "interp-rev-rev", NOW)
+        self.assertEqual(reverse_reversal.exception.code, FinanceErrorCode.INVALID)
+        replacement = posted_interpretation(
+            "interp-super",
+            (feed_split("-150.00"),),
+            "journal-super",
+            supersedes_id="interp-reverse",
+        )
+        with self.assertRaises(FinanceError) as supersede_reversal:
+            closed.with_supersession(replacement)
+        self.assertEqual(supersede_reversal.exception.code, FinanceErrorCode.INVALID)
+        reverse_of_reverse = Interpretation(
+            "interp-rev-rev",
+            original.source_activity_id,
+            (),
+            JournalEntry(
+                "journal-rev-rev",
+                NOW,
+                reverse_journal_lines(reversal.journal_entry.lines),
+                reverses_journal_id=reversal.journal_entry.id,
+            ),
+            reverses_id=reversal.id,
+        )
+        with self.assertRaises(FinanceError) as assembled:
+            FinanceLedger(closed.accounts, closed.activities, (original, reversal, reverse_of_reverse))
+        self.assertEqual(assembled.exception.code, FinanceErrorCode.INVALID)
+
+    def test_journal_ids_must_be_unique_across_the_ledger(self):
+        original = posted_interpretation()
+        built = ledger_with(original)
+        inverted = reverse_journal_lines(original.journal_entry.lines)
+        reused = Interpretation(
+            "interp-reverse",
+            original.source_activity_id,
+            (),
+            JournalEntry(original.journal_entry.id, NOW, inverted, reverses_journal_id=original.journal_entry.id),
+            reverses_id="interp-1",
+        )
+        with self.assertRaises(FinanceError) as posted_again:
+            built.with_interpretation(reused)
+        self.assertEqual(posted_again.exception.code, FinanceErrorCode.INVALID)
+        second_activity = SourceActivity("activity-2", "acct-checking", NOW, "Second grocery", Decimal("-150.00"))
+        second = Interpretation(
+            "interp-2",
+            "activity-2",
+            (grocery_split(),),
+            expense_journal_from_splits("journal-1", NOW, "acct-checking", (grocery_split(),)),
+        )
+        with self.assertRaises(FinanceError) as assembled:
+            FinanceLedger(
+                built.accounts,
+                (built.activities[0], second_activity),
+                (original, second),
+            )
+        self.assertEqual(assembled.exception.code, FinanceErrorCode.INVALID)
+
+    def test_valid_original_reversal_replacement_history_succeeds(self):
+        original = posted_interpretation()
+        built = ledger_with(original)
+        replacement = posted_interpretation(
+            "interp-super",
+            (feed_split("-150.00"),),
+            "journal-super",
+            supersedes_id="interp-1",
+        )
+        posted = built.with_supersession(supersede_interpretation(built.interpretations, "interp-1", replacement))
+        assembled = FinanceLedger(posted.accounts, posted.activities, posted.interpretations)
+        self.assertEqual(tuple(item.id for item in assembled.interpretations), ("interp-1", "reverse-interp-super", "interp-super"))
+        self.assertEqual(assembled.interpretations[1].reverses_id, "interp-1")
+        self.assertEqual(assembled.interpretations[2].supersedes_id, "interp-1")
+        self.assertEqual(
+            assembled.interpretations[1].journal_entry.lines,
+            reverse_journal_lines(original.journal_entry.lines),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

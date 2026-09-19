@@ -3,8 +3,9 @@ name: RanchOS
 options:
   bundleIdPrefix: ai.openclaw
   deploymentTarget:
-    tvOS: "18.0"
+    iOS: "18.0"
     macOS: "15.0"
+    tvOS: "18.0"
   xcodeVersion: "16.0"
 
 settings:
@@ -17,55 +18,91 @@ settings:
     CODE_SIGN_STYLE: Manual
 
 schemes:
-  RanchOS:
+  RanchOSiOS:
     shared: true
     build:
       targets:
-        RanchOS: all
-  RanchOSFixtureTests:
+        RanchOSiOS: all
+  RanchOSMac:
     shared: true
     build:
       targets:
-        RanchOSFixtureTests: [test]
+        RanchOSMac: all
+  RanchOSTV:
+    shared: true
+    build:
+      targets:
+        RanchOSTV: all
+  RanchOSHubTests:
+    shared: true
+    build:
+      targets:
+        RanchOSHubTests: [test]
     test:
       targets:
-        - RanchOSFixtureTests
+        - RanchOSHubTests
 
 targets:
-  RanchOS:
+  RanchOSiOS:
+    type: application
+    platform: iOS
+    sources:
+      - path: HubSources
+    info:
+      path: HubSources/RanchOSiOS-Info.plist
+      properties:
+        CFBundleDisplayName: RanchOS DEV
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.dev
+        PRODUCT_NAME: RanchOS
+        GENERATE_INFOPLIST_FILE: NO
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        TARGETED_DEVICE_FAMILY: "1,2"
+        IPHONEOS_DEPLOYMENT_TARGET: "18.0"
+  RanchOSMac:
+    type: application
+    platform: macOS
+    sources:
+      - path: HubSources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.macos.dev
+        PRODUCT_NAME: RanchOS
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+  RanchOSTV:
     type: application
     platform: tvOS
     sources:
-      - path: Sources
+      - path: HubSources
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.tv.dev
         PRODUCT_NAME: RanchOS
-        GENERATE_INFOPLIST_FILE: NO
+        GENERATE_INFOPLIST_FILE: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: TVAppIcon
         TARGETED_DEVICE_FAMILY: "3"
         TVOS_DEPLOYMENT_TARGET: "18.0"
-        CODE_SIGNING_ALLOWED: NO
-        CODE_SIGNING_REQUIRED: NO
-        CODE_SIGN_IDENTITY: ""
-        DEVELOPMENT_TEAM: ""
-    info:
-      path: Sources/Info.plist
-      properties:
-        CFBundleDisplayName: Ranch OS DEV
-        UILaunchScreen: {}
-  RanchOSFixtureTests:
+  RanchOSHubTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - path: Tests
-      - path: Sources/TodayDashboard.swift
+      - path: HubTests
+      - path: HubSources/RanchOSHubModel.swift
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.tv.dev.tests
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests
         GENERATE_INFOPLIST_FILE: YES
         MACOSX_DEPLOYMENT_TARGET: "15.0"
-        CODE_SIGNING_ALLOWED: NO
-        CODE_SIGNING_REQUIRED: NO
-        CODE_SIGN_IDENTITY: ""
-        DEVELOPMENT_TEAM: ""
-        COMBINE_HIDPI_IMAGES: YES

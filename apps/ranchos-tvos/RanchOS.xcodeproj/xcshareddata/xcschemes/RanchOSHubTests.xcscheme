@@ -15,9 +15,9 @@
             buildForAnalyzing = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F981AC258341819075C95327"
-               BuildableName = "RanchOSFixtureTests.xctest"
-               BlueprintName = "RanchOSFixtureTests"
+               BlueprintIdentifier = "2352E454A977876033968307"
+               BuildableName = "RanchOSHubTests.xctest"
+               BlueprintName = "RanchOSHubTests"
                ReferencedContainer = "container:RanchOS.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -32,9 +32,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "F981AC258341819075C95327"
-            BuildableName = "RanchOSFixtureTests.xctest"
-            BlueprintName = "RanchOSFixtureTests"
+            BlueprintIdentifier = "2352E454A977876033968307"
+            BuildableName = "RanchOSHubTests.xctest"
+            BlueprintName = "RanchOSHubTests"
             ReferencedContainer = "container:RanchOS.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -44,9 +44,9 @@
             parallelizable = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "F981AC258341819075C95327"
-               BuildableName = "RanchOSFixtureTests.xctest"
-               BlueprintName = "RanchOSFixtureTests"
+               BlueprintIdentifier = "2352E454A977876033968307"
+               BuildableName = "RanchOSHubTests.xctest"
+               BlueprintName = "RanchOSHubTests"
                ReferencedContainer = "container:RanchOS.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -67,9 +67,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "F981AC258341819075C95327"
-            BuildableName = "RanchOSFixtureTests.xctest"
-            BlueprintName = "RanchOSFixtureTests"
+            BlueprintIdentifier = "2352E454A977876033968307"
+            BuildableName = "RanchOSHubTests.xctest"
+            BlueprintName = "RanchOSHubTests"
             ReferencedContainer = "container:RanchOS.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
@@ -83,9 +83,9 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "F981AC258341819075C95327"
-            BuildableName = "RanchOSFixtureTests.xctest"
-            BlueprintName = "RanchOSFixtureTests"
+            BlueprintIdentifier = "2352E454A977876033968307"
+            BuildableName = "RanchOSHubTests.xctest"
+            BlueprintName = "RanchOSHubTests"
             ReferencedContainer = "container:RanchOS.xcodeproj">
          </BuildableReference>
       </MacroExpansion>

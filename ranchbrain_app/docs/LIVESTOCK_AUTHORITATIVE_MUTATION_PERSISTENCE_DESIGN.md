@@ -1,0 +1,550 @@
+# Ranch OS Livestock authoritative mutation persistence design
+
+Status: DEV SQL `001`–`004` and transport-free coordinator landed unapplied/disposable-only; `005` CONF-021 challenge schema and CF-2 issuance remain design-only
+Scope: Future durable mutation boundary for animal, identifier, and lifecycle contracts, plus future DEV ingress and CF-2 confirmation issuance
+Last updated: 2026-09-16 by A.Graves
+
+This document defines the approval gate for making the local
+`ranchbrain.livestock_write_model` contracts durable. Committed unapplied DEV
+SQL is `001`, `002`, `003`, and `004`. Planned unapplied SQL is
+`005_livestock_confirmation_challenges.sql`. A transport-free DEV coordinator,
+repository, and disposable PostgreSQL session adapter exist for all five
+first-slice matrix operations. They do not authorize `005`, a standing DEV
+database, HTTP or Gateway ingress, deployed runtime, device path, or
+Production.
+
+The repository-wide [atomic transaction design](../../docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md), [confirmation policy](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md), and [identity policy](../../docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md) remain authoritative.
+
+## Authority boundary
+
+Only the Ranch OS authoritative mutation coordinator may persist a
+Livestock command. It must receive an OpenClaw-authoritative
+`VerifiedPrincipal`, derive a current `TenantContext`, authorize the exact
+operation, and call an allowlisted local write contract. Clients, models, AI,
+fixtures, direct database users, and background tools cannot open the
+transaction or claim authority.
+
+The first durable slice is limited to the five CF-2 matrix operations
+`ranchos.livestock.animal-create`, `ranchos.livestock.identifier-assign`,
+`ranchos.livestock.identifier-retire`, `ranchos.livestock.lifecycle-record`,
+and `ranchos.livestock.lifecycle-correct`. SQL confirmation, idempotency, and
+mutation-audit `operation` columns persist those matrix identifiers only. The
+in-memory write-model names remain local to `livestock_write_model`. Each
+operation requires a current CF-2 confirmation registered on the
+[canonical confirmation matrix](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md).
+The coordinator, not the pure write model, consumes that confirmation. Sale, death, transfer, archive,
+care, feed, cost, attachments, exports, notifications, jobs, legal ownership,
+and Finance posting remain unregistered and unavailable. Ranch Health is
+human-only and Ranch Finance owns its ledger.
+
+## Admission requirements
+
+Before starting a transaction, the coordinator must have a versioned immutable
+principal from the ingress layer; a UUID `VerifiedPrincipal.id`; an
+explicit active tenant selection resolved by the injected
+`TenantContextResolver`; current membership and exact capability; a bounded
+typed command; a canonical request digest scoped by tenant and operation;
+tenant-and-operation-scoped idempotency identity; target manifest; provenance
+references; policy and validator versions; and a correlation ID. A
+non-UUID principal id fails closed before any `SET LOCAL ranchos.principal_id`.
+The first non-deployed ingress uses an injected resolver and fixture verifier
+only; deployed membership loading and a real identity adapter remain
+separate.
+
+Every first-slice operation additionally requires a current CF-2 confirmation
+bound to actor, tenant, operation, target, digest, policy, validator, and
+idempotency identity. Identifier-assignment target binding is the planned
+assignment ID. Identifier-retirement target binding is the existing identifier
+ID. Lifecycle-record target binding is the planned lifecycle event ID
+(`command.id`). Lifecycle-correct target binding is the existing
+`supersedes_event_id`. The canonical request digest still binds the complete
+command. The coordinator consumes the single-use confirmation row created
+after a verified CONF-021 challenge; that row is not itself proof of a human
+decision. Freshness expires 2 minutes after issuance and is enforced with
+trusted transaction-time state, not client, confirmation, or wall-clock
+claims. Missing, expired, forged, ambiguous, malformed, reused, or
+unsupported facts fail closed. Admission does not consume confirmation, write
+a success audit, or mutate livestock data.
+
+## One authoritative transaction
+
+Before repository access, the coordinator must set only transaction-local
+PostgreSQL settings:
+
+```sql
+SET LOCAL ranchos.principal_id = '<server-derived principal UUID>';
+SET LOCAL ranchos.environment = '<server-derived environment>';
+SET LOCAL ranchos.tenant_id = '<server-authorized tenant UUID>';
+```
+
+The runtime role must not own tenant tables or have `BYPASSRLS`. Tenant tables
+must enable and force RLS and use `USING` plus `WITH CHECK` policies tied to
+`ranchos.require_uuid_setting('ranchos.tenant_id')`. Missing/malformed settings
+deny access; connection-level state and pool residue are prohibited.
+
+One transaction must obtain database time; lock targets in deterministic order;
+recheck authority and mutable facts; reserve/resolve idempotency; validate
+invariants; apply one immutable record; consume confirmation when required;
+write audit evidence and final idempotency outcome; then commit once. Any
+failure rolls back all of those effects. Network calls, inference, files,
+notifications, caches, and Finance work stay outside the transaction.
+
+## Operation invariants
+
+| Operation                | Transaction-time invariant                                                     | Concurrency rule                                                      |
+| ------------------------ | ------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Animal create            | Controlled classification; tenant from context; unused ID.                     | Tenant-bound create-if-absent identity.                               |
+| Identifier assign        | No active same-tenant `(type, normalized_value)`.                              | Lock/constrain the active identifier key.                             |
+| Identifier retire        | Identifier is tenant-owned and active; retirement follows assignment.          | Lock state; exactly one retirement succeeds.                          |
+| Routine lifecycle record | Closed event type; tenant-owned animal; ordered occurrence time.               | Lock ordering state or use versioned append predicate.                |
+| Lifecycle correction     | Same tenant/animal/type, unsuperseded target, one eligible owner confirmation. | Lock target and confirmation; reject second supersession/consumption. |
+
+Conflicts must not silently merge, reorder, overwrite, or reinterpret commands.
+Retries repeat all checks with the identical immutable input and idempotency
+identity only.
+
+## Idempotency, confirmation, and audit
+
+Durable idempotency is keyed by tenant, matrix-operation scope, and caller
+identity: unique `(tenant_id, scope, identity)` with `scope = operation`.
+`key_digest` is the canonical request digest for that scope and is compared
+for replay versus conflict; it is not the primary key. An identical digest
+replays the committed outcome without another append, confirmation
+consumption, or success audit. The same identity with a different digest is a
+stable conflict. Ambiguous outcomes remain blocked until durable
+transaction/idempotency state proves the result. Replay is read behavior.
+Durable outcomes are `reserved` and `committed` only.
+
+Every committed mutation writes immutable tenant-scoped audit evidence in the
+same transaction: transaction ID, tenant, operation, targets, actor/principal,
+correlation ID, policy/validator versions, idempotency outcome, versions,
+provenance, confirmation reference, and bounded result metadata. Audit records
+must never contain raw tokens, credentials, SQL, reusable confirmations, or
+unsupported client claims.
+
+## Approved DEV persistence decisions
+
+These decisions are recorded for a later unapplied DEV SQL contract. They do
+not apply SQL, open ingress, create a repository, or touch Production.
+
+### Identifier assignment and retirement
+
+Immutable `animal_identifiers` assignment rows are never updated to retire.
+Retirement is a separate `animal_identifier_retirements` row: `id`,
+`tenant_id`, `identifier_id`, closed reason (`replaced`, `lost`, `invalid`,
+`duplicate`), `retired_at`, required `LivestockFactProvenance`, and audit
+facts. Identifier-retirement command and result contracts must carry that
+provenance. Do not weaken the committed `002` retirement provenance columns.
+Active uniqueness is tenant-scoped on `(identifier_type, normalized_value)`
+for assignments that have no matching retirement. Identifier types remain
+`ear_tag`, `rfid`, `brand`, and `registry_number`. In-place `retired_at` on
+the assignment, `tag`, and `vendor_label` are rejected.
+
+### Lifecycle correction and supersession
+
+Routine and correction events share `livestock_lifecycle_events`. A correction
+inserts a new same-type row with `supersedes_event_id` and a closed correction
+reason. Exactly one successor per target is enforced. The original row is never
+updated. Event types remain `intake`, `tagged`, and `weight_recorded`.
+
+### Provenance and audit
+
+Domain livestock rows carry `LivestockFactProvenance` columns (source type, id,
+version, observed_at). Mutation audit is a separate
+`ranchos.livestock_mutation_audit` table written in the same transaction as the
+domain change, idempotency outcome, and confirmation consumption. Audit stores
+transaction ID, tenant, operation, targets, actor/principal, correlation ID,
+policy/validator versions, idempotency outcome, provenance reference,
+confirmation reference, and bounded result metadata. It must not store tokens,
+credentials, SQL, reusable confirmations, or unsupported client claims.
+
+### Idempotency retention and status query
+
+A tenant-scoped idempotency row holds scope, identity, key digest, operation,
+outcome, transaction ID, and exactly one nullable committed outcome reference
+appropriate to the matrix operation. Scope is the matrix operation identifier
+and must equal `operation`. The unique key is `(tenant_id, scope, identity)`.
+The key digest is the canonical request digest compared for replay versus
+conflict. Committed `002` keeps `result_animal_id` for
+`ranchos.livestock.animal-create`, referencing
+`livestock_animals (tenant_id, id)`. Committed unapplied
+`003_livestock_identifier_idempotency_outcomes.sql` adds tenant-safe
+`result_identifier_id` and `result_retirement_id` references. Committed
+unapplied `004_livestock_lifecycle_idempotency_outcomes.sql` adds a
+tenant-safe `result_lifecycle_event_id` reference used by both
+`ranchos.livestock.lifecycle-record` and
+`ranchos.livestock.lifecycle-correct`. A reserved row has no result
+reference. A committed row has exactly one of those references, matching
+its matrix operation. Replay loads that foreign key; it must not scan or
+assume a one-row tenant. Rows are retained indefinitely. A status query is
+allowed only with a current `TenantContext` and the exact key. The same
+identity with a different digest is a stable conflict. Do not rewrite
+committed `002` or `003` for lifecycle replay.
+
+### Confirmation class and expiry
+
+All five first-slice operations are CF-2 on the canonical confirmation matrix.
+The committed `ranchos.livestock_confirmations` row is the single-use
+consumable confirmation record. Do not treat that row as proof of a human
+decision. A future Ranch OS layer must create and verify a server-stored
+[CONF-021 challenge](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md)
+before issuing that row. Confirm flow is `created → presented → confirmed`.
+Only an unexpired `presented` challenge may create the confirmation row.
+That row inherits the original challenge `issued_at` and `expires_at`; the
+TTL is not extended. Confirmations are fresh and single-use. Freshness
+expires 2 minutes after challenge issuance and is enforced with trusted
+transaction-time state. Identifier assignment binds the planned assignment ID
+as the confirmation target. Identifier retirement binds the existing
+identifier ID. Lifecycle record binds the planned lifecycle event ID
+(`command.id`). Lifecycle correction binds the existing
+`supersedes_event_id`. The canonical request digest still binds the complete
+command. The authoritative coordinator consumes that sole confirmation row
+for every first-slice operation. For lifecycle correction only, the
+coordinator synthesizes the in-memory `LifecycleCorrectionConfirmationV1`
+from the server-loaded consumed confirmation data and the resolved
+`TenantContext`. It must not use request-supplied `issued_at`. Do not issue,
+persist, or require a second independent confirmation. The pure write model
+does not consume, issue, or satisfy CF-2.
+Sale, death, transfer, archive, and Production stay out of slice and are not
+lowered to CF-2.
+
+### Audit retention and reader access
+
+Livestock mutation audit is write-only in this slice. There is no livestock
+audit reader, viewer path, or new read capability. Retention is indefinite.
+`ranchos_dev_runtime` receives `INSERT` only on `ranchos.livestock_mutation_audit`
+and must not receive `SELECT`. Least-privilege RLS still applies. A later
+reader needs its own approval.
+
+Unfiltered two-tenant audit proof uses the **migrator-under-FORCE-RLS**
+approach: `ranchos_dev_migrator` owns the table, `FORCE ROW LEVEL SECURITY`
+still applies to that owner, and the proof counts audit rows as the migrator
+after `SET LOCAL ranchos.tenant_id`. Runtime never reads audit.
+
+### RLS naming and ownership
+
+Reuse the committed tenancy foundation: `ranchos.require_uuid_setting`,
+`<table>_tenant_isolation` `USING`/`WITH CHECK` on `ranchos.tenant_id`, ENABLE
+and FORCE RLS, `OWNER TO ranchos_dev_migrator`, and `ranchos_dev_runtime`
+without `BYPASSRLS`. Migrator-only apply and a never-apply-to-Production header
+are required on any later livestock SQL file.
+
+### Adversarial two-tenant SQL proof
+
+The SQL-land gate is a disposable-DEV, rollback-only proof after `001`:
+unfiltered runtime reads on animals, assignments, retirements, lifecycle
+events, idempotency, and confirmations; unfiltered migrator-under-FORCE-RLS
+reads on mutation audit; cross-tenant assign, retire, and correct denied;
+missing or malformed `SET LOCAL` denied; runtime has no `BYPASSRLS`. Fixtures
+use `ear_tag` and may use `pet` / `companion`. Stale `'tag'` fixtures are
+rejected. Coordinator concurrency, confirmation-consumption races, and
+idempotency replay races remain later live proof, not the SQL-land gate.
+
+### Authorization to land unapplied livestock SQL
+
+After this design amendment, a separately authorized change may land only:
+
+- `ranchbrain_app/migrations/002_livestock_read_model_foundation.sql`
+- `ranchbrain_app/tests/rls/two_tenant_livestock_isolation.sql`
+- `ranchbrain_app/tests/test_livestock_migration_contract.py`
+
+Those three paths and later `003`/`004` have landed. Preserve committed
+`001`–`004`. The next separately authorized SQL file is unapplied
+`ranchbrain_app/migrations/005_livestock_confirmation_challenges.sql`.
+This amendment does not add that migration, reopen apply, roles, HTTP, or
+Production.
+
+## Approved final SQL implementation package
+
+These close the rewrite-plan ambiguities. They still do not apply SQL, open
+ingress, add a repository, or touch Production.
+
+### Catalog and animal row
+
+`livestock_animals.species_code` includes `pet`. Production-type CHECK includes
+`pet → companion` only. No pet breed; `breed_code` stays null for `pet`.
+`rabbit` and `other` are rejected. First-slice animals are create-immutable:
+`status` is `active` only, and `updated_at` is omitted. Archive remains
+unavailable.
+
+### Identifier assignment and retirement SQL
+
+`animal_identifiers` stores `normalized_value` only; there is no `value` or
+`retired_at` column. Types are `ear_tag`, `rfid`, `brand`, and
+`registry_number`. `animal_identifier_retirements` is a separate table with a
+unique `(tenant_id, identifier_id)` and closed reasons. Active uniqueness is a
+tenant-scoped unique constraint over assignments that have no retirement row,
+enforced by a constraint trigger. A mutable active flag is rejected.
+Retirement-before-effective and same-type supersession are also constraint
+triggers, not coordinator-only.
+
+### Named support tables
+
+- `ranchos.livestock_idempotency`: tenant, matrix-operation scope, identity,
+  key digest, operation, `reserved`/`committed` outcome, transaction ID, and
+  nullable result references. Committed `002` owns `result_animal_id` as a
+  tenant-safe foreign key to `livestock_animals (tenant_id, id)`. Committed
+  unapplied `003` adds tenant-safe `result_identifier_id` and
+  `result_retirement_id`. Committed unapplied `004` adds a tenant-safe
+  `result_lifecycle_event_id` for both lifecycle matrix operations.
+  Unique `(tenant_id, scope, identity)`; `scope = operation`; committed rows
+  immutable; a reserved row has no result reference; a committed row has
+  exactly one result reference for its matrix operation.
+- `ranchos.livestock_confirmations`: single-use CF-2 confirmation rows for
+  all five first-slice operations identified by matrix id; bind actor,
+  tenant, operation, target, digest, policy/validator, and idempotency
+  identity; `issued_at` and `expires_at` with
+  `expires_at = issued_at + interval '2 minutes'`; single-use `consumed_at`.
+  This table is the consumable confirmation record created after a verified
+  CONF-021 challenge. It is not the challenge and is not proof of a human
+  decision. A confirmed unexpired `presented` challenge creates this row and
+  copies the original challenge `issued_at` and `expires_at`; the TTL is not
+  extended. Identifier-assignment target is the planned assignment ID.
+  Identifier-retirement target is the existing identifier ID.
+  Lifecycle-record target is the planned lifecycle event ID (`command.id`).
+  Lifecycle-correct target is the existing `supersedes_event_id`. The digest
+  still binds the complete command. Expiry and consumption compare against
+  trusted transaction time (`CURRENT_TIMESTAMP`), not client clocks.
+- `ranchos.livestock_confirmation_challenges`: later unapplied `005` adds this
+  separate tenant-scoped CONF-021 challenge table. It is not the consumable
+  confirmation row. See Approved DEV CONF-021 challenge schema decisions.
+- `ranchos.livestock_mutation_audit`: as specified above; runtime `INSERT`
+  only. Do not grant runtime `SELECT` on mutation audit for challenge
+  issuance, verification, or denial handling.
+
+Domain animals, assignments, retirements, and lifecycle events carry
+provenance columns: `provenance_source_type`, `provenance_source_id`,
+`provenance_source_version`, `provenance_observed_at`.
+
+Lifecycle events add nullable `supersedes_event_id` and `correction_reason`
+(`incorrect_time`, `incorrect_value`, `duplicate_entry`). Routine rows leave
+both null; correction rows set both. Unique `(tenant_id, supersedes_event_id)`
+where the target is present.
+
+Every new table uses the `001` header, migrator-only preflight, runtime
+`NOBYPASSRLS`, ENABLE/FORCE RLS, `<table>_tenant_isolation`, and
+`OWNER TO ranchos_dev_migrator` plus catalog asserts.
+
+### Proof and tests
+
+Isolation SQL remains rollback-only. Tenant A runtime unfiltered counts cover
+every livestock table except mutation audit. Mutation audit unfiltered counts
+run as `ranchos_dev_migrator` under FORCE RLS. Cross-tenant assign, retire, and
+correct are denied. Missing or malformed `SET LOCAL` is denied. Fixtures use
+`ear_tag`; a `pet` / `companion` row with null breed is permitted. Contract
+tests pin this package, including the migrator-under-FORCE-RLS audit proof
+and the absence of assignment `retired_at` / `'tag'`.
+
+## Required proof before implementation
+
+Against a disposable isolated DEV database, adversarial tests must prove:
+
+1. Tenant A cannot create, retire, reuse, correct, or discover Tenant B data,
+   including through an intentionally unfiltered query.
+2. Invalid principal/context facts never start a durable transaction.
+3. `SET LOCAL` context and forced RLS block missing, malformed, and
+   cross-tenant access.
+4. Identifier reuse and concurrent assignment preserve immutable history.
+5. Lifecycle ordering, supersession, confirmation consumption, idempotency, and
+   audit rollback each have exactly one authoritative outcome.
+6. No UI, AI, fixture, client, direct database role, or service identity bypasses
+   the future trusted ingress and mutation coordinator.
+
+Items 1 and 3 are the SQL-land gate and have been proven on a destroyed
+disposable cluster. Items 2, 4, 5, and 6 stay closed until a separately
+authorized disposable live proof. That proof still requires a PostgreSQL
+adapter and an explicit apply; it is not authorized or proven here. A
+standing DEV database is not authorized.
+
+## Approved DEV coordinator decisions
+
+These decisions describe the transport-free DEV coordinator and repository
+that exist in source for all five first-slice operations. They do not
+authorize standing DEV database, ingress implementation, deployed runtime,
+device path, or Production.
+
+- All five first-slice operations are registered on the canonical confirmation
+  matrix before coordinator implementation: `ranchos.livestock.animal-create`,
+  `ranchos.livestock.identifier-assign`, `ranchos.livestock.identifier-retire`,
+  `ranchos.livestock.lifecycle-record`, and `ranchos.livestock.lifecycle-correct`.
+- The authoritative coordinator, not `ranchbrain.livestock_write_model`,
+  enforces fresh, single-use CF-2 confirmation consumption for all five
+  operations. The write model remains a pure invariant handler.
+- The first coordinator slice keeps `TenantContextResolver` injected. It does
+  not read `001` memberships as its authority source.
+- `VerifiedPrincipal.id` must be a UUID at the coordinator boundary before
+  `SET LOCAL ranchos.principal_id`. A non-UUID id fails closed and does not
+  open a durable transaction.
+- Durable idempotency uses tenant, matrix-operation scope, and caller
+  identity as the unique key. The canonical request digest is compared for
+  replay versus conflict and still binds the complete command. Committed
+  `animal_create` replay returns the animal referenced by `result_animal_id`.
+  After committed unapplied `003`, committed identifier-assignment replay
+  returns the identifier referenced by `result_identifier_id`, and committed
+  identifier-retirement replay returns the retirement referenced by
+  `result_retirement_id`. After committed unapplied `004`, committed
+  lifecycle-record and lifecycle-correct replay return the event referenced
+  by `result_lifecycle_event_id`.
+- For lifecycle correction, synthesize `LifecycleCorrectionConfirmationV1`
+  from the server-loaded consumed confirmation data and the resolved
+  `TenantContext`. Never use request-supplied `issued_at`.
+- Write-model operation names stay in-memory only. Persisted confirmation,
+  idempotency, and audit `operation` values remain the canonical CF-2 matrix
+  IDs.
+- Database use remains disposable-only. Do not create a standing DEV database.
+
+## Approved DEV identifier persistence decisions
+
+These decisions record the identifier-assign and identifier-retire durable
+contract. They do not add `003`, edit Python, apply SQL, open ingress, or
+touch Production.
+
+- Preserve committed `002`. Identifier and retirement replay outcomes land in
+  a new unapplied `003_livestock_identifier_idempotency_outcomes.sql`.
+- Extend durable idempotency with tenant-safe identifier and retirement
+  result references. A reserved row has no result reference. A committed row
+  has exactly one result reference appropriate to its matrix operation.
+- Identifier-retirement command and result contracts require
+  `LivestockFactProvenance`. Do not weaken committed `002` retirement
+  provenance columns.
+- CF-2 target binding uses the planned assignment ID for
+  `ranchos.livestock.identifier-assign` and the existing identifier ID for
+  `ranchos.livestock.identifier-retire`.
+- In-memory write-model names remain `identifier_assign` and
+  `identifier_retire`. Persisted operation IDs remain
+  `ranchos.livestock.identifier-assign` and
+  `ranchos.livestock.identifier-retire`.
+
+## Approved DEV lifecycle persistence decisions
+
+These decisions record the lifecycle-record and lifecycle-correct durable
+contract. They do not add `004`, edit Python, apply SQL, open ingress, or
+touch Production.
+
+- Preserve committed `002` and `003`. Lifecycle replay outcomes land later
+  only in a new unapplied
+  `004_livestock_lifecycle_idempotency_outcomes.sql`.
+- Extend durable idempotency with a tenant-safe lifecycle-event result
+  reference. A reserved row has no result reference. A committed
+  `ranchos.livestock.lifecycle-record` or
+  `ranchos.livestock.lifecycle-correct` row has exactly that event
+  reference and no other result reference.
+- CF-2 target binding uses the planned lifecycle event ID (`command.id`) for
+  `ranchos.livestock.lifecycle-record` and the existing
+  `supersedes_event_id` for `ranchos.livestock.lifecycle-correct`.
+- The coordinator consumes the sole CF-2 confirmation for both operations.
+  For correction only, it synthesizes the in-memory
+  `LifecycleCorrectionConfirmationV1` from the server-loaded consumed
+  confirmation data and the resolved `TenantContext`. It must not use
+  request-supplied `issued_at`. Do not issue, persist, or require a second
+  independent confirmation. Do not add confirmation columns to
+  `livestock_lifecycle_events`.
+- In-memory write-model names remain `lifecycle_record` and
+  `lifecycle_correct`. Persisted operation IDs remain
+  `ranchos.livestock.lifecycle-record` and
+  `ranchos.livestock.lifecycle-correct`.
+
+## Approved DEV ingress and CF-2 issuance decisions
+
+These decisions record the future DEV ingress and CF-2 confirmation-issuance
+boundary. They do not add a schema migration, Python, tests, HTTP, services,
+or database connections, and they do not authorize implementation, devices,
+or Production.
+
+- Do not treat the existing `ranchos.livestock_confirmations` consumable row
+  as proof of a human decision.
+- Before CF-2 issuance, a future Ranch OS layer must create and verify a
+  server-stored [CONF-021 challenge](../../docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md)
+  bound to the server-derived principal, session reference, explicit tenant,
+  matrix operation, target manifest, canonical digest, policy and validator
+  versions, and expiry.
+- A confirmed challenge creates the single-use confirmation row. Only an
+  unexpired `presented` challenge may create that row. The coordinator
+  consumes that row. No second confirmation is issued or consumed.
+- First DEV ingress remains transport-free: no HTTP or Gateway route, plugin
+  channel, device cryptography, or OIDC runtime adapter.
+- Session binding is required. `session_reference` is opaque non-bearer
+  server metadata or a server-generated fingerprint, never a raw credential.
+  Device binding and cryptographic key custody remain separately unapproved.
+- The first non-deployed ingress uses an injected
+  `TenantContextResolver` and a fixture `VerifiedPrincipalVerifier` only.
+  Deployed membership loading and a real identity adapter remain separate.
+- The issuer owns canonical digest and policy/validator version calculation.
+  Caller idempotency identity is opaque input, not authority.
+- Coordinator correction synthesis must use the server-loaded consumed
+  confirmation data. It must never use request-supplied `issued_at`.
+- Failed issuance or admission needs a future sanitized durable denial-audit
+  design. Do not repurpose the runtime write-only mutation audit.
+- Challenge issuance implementation requires later unapplied
+  `005_livestock_confirmation_challenges.sql`. This amendment does not add
+  that file.
+
+## Approved DEV CONF-021 challenge schema decisions
+
+These decisions record the planned unapplied `005` contract. They do not add
+that migration, edit Python or tests, apply SQL, open ingress, or touch
+Production.
+
+- Preserve committed `001`–`004`. Challenge storage lands later only in a new
+  unapplied `005_livestock_confirmation_challenges.sql`.
+- Add a separate tenant-scoped table
+  `ranchos.livestock_confirmation_challenges`. Do not treat
+  `ranchos.livestock_confirmations` as the CONF-021 challenge. Challenge `id`
+  is the server-generated CONF-021 UUID and is not the confirmation id.
+- Bind the five first-slice matrix operation IDs only:
+  `ranchos.livestock.animal-create`, `ranchos.livestock.identifier-assign`,
+  `ranchos.livestock.identifier-retire`, `ranchos.livestock.lifecycle-record`,
+  and `ranchos.livestock.lifecycle-correct`.
+- Persist closed `challenge_format_version`
+  `ranchos.livestock.challenge.v1` and membership-safe `actor_user_id`
+  (`(tenant_id, actor_user_id) → ranchos.tenant_memberships`).
+- Persist server-derived `principal_id` (UUID) and required
+  `session_reference`. `session_reference` is opaque non-bearer server
+  metadata or a server-generated fingerprint, never a raw credential. Store
+  `device_binding = 'none'`. Do not add device id, key, or custody columns.
+- Persist non-empty `target_manifest`, issuer-calculated `command_digest`,
+  issuer-calculated `policy_version` and `validator_version`, unique
+  tenant-scoped `nonce_ref`, non-empty `material_effects`, and closed
+  `consequence_class = 'none'`. Caller `idempotency_identity` is opaque
+  input, not authority.
+- Persist closed `state`: `created`, `presented`, `confirmed`, `rejected`,
+  `cancelled`, `expired`, `superseded`. Confirm flow is
+  `created → presented → confirmed`. Only an unexpired `presented` challenge
+  may create the single confirmation record. All terminal states
+  (`confirmed`, `rejected`, `cancelled`, `expired`, `superseded`) are
+  immutable.
+- Persist trusted `issued_at` and `expires_at` with
+  `expires_at = issued_at + interval '2 minutes'`. The confirmation row
+  inherits those original challenge timestamps. Do not extend the TTL.
+- Persist nullable `supersedes_challenge_id` as a same-tenant challenge
+  reference. Persist nullable `confirmation_id` as a tenant-safe foreign key
+  to `livestock_confirmations (tenant_id, id)`, set only when
+  `state = 'confirmed'`.
+- ENABLE and FORCE RLS. Use `<table>_tenant_isolation` `USING`/`WITH CHECK`
+  on `ranchos.tenant_id`. `OWNER TO ranchos_dev_migrator`. Runtime has no
+  `BYPASSRLS`. `ranchos_dev_runtime` receives `SELECT`, `INSERT`, and
+  `UPDATE` only; no `DELETE`. Do not grant runtime `SELECT` on
+  `ranchos.livestock_mutation_audit` and do not reuse mutation audit for
+  challenge reads, verification, or denials.
+- Migrator-only apply and a never-apply-to-Production header are required on
+  that later SQL file.
+
+## Remaining before apply
+
+- The deployed OpenClaw-authoritative ingress remains a separate prerequisite.
+- The transport-free DEV coordinator, repository, and disposable PostgreSQL
+  session adapter exist in source for all five first-slice operations.
+  Standing DEV database, HTTP or Gateway ingress, deployed runtime, device
+  path, and Production implementation are not authorized.
+- CONF-021 challenge storage, issuance, and verification remain unbuilt.
+  Planned unapplied `005_livestock_confirmation_challenges.sql` is required
+  before that implementation. This amendment does not add that file.
+- Any later apply or live coordinator proof uses a disposable DEV database
+  only, under a later explicit apply approval. A standing DEV database is
+  not authorized.
+
+## Related architecture
+
+- [Livestock Management design](LIVESTOCK_MANAGEMENT_DESIGN.md)
+- [Livestock Management application blueprint](LIVESTOCK_MANAGEMENT_APPLICATION_BLUEPRINT.md)
+- [Ranch OS multi-tenancy design](MULTI_TENANCY_DESIGN.md)

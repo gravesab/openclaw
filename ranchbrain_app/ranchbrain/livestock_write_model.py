@@ -237,6 +237,8 @@ def assign_identifier(
         _require_tenant(context, identifier.tenant_id)
     for retirement in retirements:
         _require_tenant(context, retirement.tenant_id)
+    if any(identifier.id == command.id for identifier in existing):
+        raise LivestockWriteError("identifier assignment id is already recorded", LivestockWriteErrorCode.INVALID)
     retired_ids = _active_identifier_ids(retirements)
     collision = any(
         identifier.id not in retired_ids
@@ -347,6 +349,8 @@ def record_routine_lifecycle_event(
         _require_tenant(context, event.tenant_id)
         if event.animal_id != command.animal_id:
             raise LivestockWriteError("lifecycle history is not for the requested animal", LivestockWriteErrorCode.CONTEXT_MISMATCH)
+    if any(event.id == command.id for event in existing):
+        raise LivestockWriteError("lifecycle event id is already recorded", LivestockWriteErrorCode.INVALID)
 
     if command.supersedes_event_id is None:
         # Superseded events are historical facts, not part of effective ordering.

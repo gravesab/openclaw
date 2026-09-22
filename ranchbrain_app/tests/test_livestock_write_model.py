@@ -193,6 +193,53 @@ class LivestockWriteModelTests(unittest.TestCase):
         with self.assertRaises(LivestockWriteError):
             record_routine_lifecycle_event(context(Role.OWNER), correction, (intake, corrected), NOW + timedelta(minutes=3))
 
+    def test_identifier_assignment_id_cannot_be_reused_even_after_retirement(self):
+        assigned = assign_identifier(context(), identifier_command(), (), (), NOW)
+        retirement = retire_identifier(context(), retire_command(), assigned, (), NOW + timedelta(minutes=1))
+        for retirements in ((), (retirement,)):
+            with self.subTest(retired=bool(retirements)):
+                with self.assertRaises(LivestockWriteError) as raised:
+                    assign_identifier(
+                        context(),
+                        identifier_command("identifier-1", "RB-999"),
+                        (assigned,),
+                        retirements,
+                        NOW + timedelta(minutes=2),
+                    )
+                self.assertEqual(raised.exception.code, LivestockWriteErrorCode.INVALID)
+
+    def test_duplicate_lifecycle_event_id_is_rejected_for_append(self):
+        intake = record_routine_lifecycle_event(context(), lifecycle_command(), (), NOW)
+        with self.assertRaises(LivestockWriteError) as raised:
+            record_routine_lifecycle_event(
+                context(),
+                lifecycle_command("event-1", NOW + timedelta(minutes=1), event_type=RoutineLifecycleEventType.TAGGED),
+                (intake,),
+                NOW + timedelta(minutes=1),
+            )
+        self.assertEqual(raised.exception.code, LivestockWriteErrorCode.INVALID)
+
+    def test_duplicate_lifecycle_event_id_is_rejected_for_correction(self):
+        intake = record_routine_lifecycle_event(context(), lifecycle_command(), (), NOW)
+        tagged = record_routine_lifecycle_event(
+            context(),
+            lifecycle_command("event-2", NOW + timedelta(minutes=1), event_type=RoutineLifecycleEventType.TAGGED),
+            (intake,),
+            NOW + timedelta(minutes=1),
+        )
+        confirmation = LifecycleCorrectionConfirmationV1("confirmation-1", "user-a", "request-a", NOW + timedelta(minutes=2))
+        correction = lifecycle_command(
+            "event-1",
+            NOW + timedelta(minutes=3),
+            event_type=RoutineLifecycleEventType.TAGGED,
+            supersedes_event_id="event-2",
+            correction_reason=LifecycleCorrectionReason.INCORRECT_TIME,
+            confirmation=confirmation,
+        )
+        with self.assertRaises(LivestockWriteError) as raised:
+            record_routine_lifecycle_event(context(Role.OWNER), correction, (intake, tagged), NOW + timedelta(minutes=3))
+        self.assertEqual(raised.exception.code, LivestockWriteErrorCode.INVALID)
+
     def test_lifecycle_append_order_uses_effective_correction_times(self):
         intake = record_routine_lifecycle_event(context(), lifecycle_command(), (), NOW)
         confirmation = LifecycleCorrectionConfirmationV1("confirmation-1", "user-a", "request-a", NOW + timedelta(minutes=1))

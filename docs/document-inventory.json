@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-08-23T22:38:45.740494+00:00",
-  "source_fingerprint": "0f3dcf4180aaf138205f38af8ef4a2d2f229b474b9b241df6e69f5232e177caf",
+  "generated_at": "2026-09-24T23:04:03.012910+00:00",
+  "source_fingerprint": "8d109e417e27b6f0eabbed5947cad7bd85cf8af3c15e1015fa2c6e0b81a452a7",
   "document_count": 680,
   "documents": [
     {
@@ -206,10 +206,10 @@
       "version": "1.0",
       "status": "Architecture Baseline",
       "owner": "OpenClaw Architecture",
-      "last_reviewed": "2026-08-04",
+      "last_reviewed": "2026-09-13",
       "category": "Architecture",
       "metadata_present": true,
-      "size_bytes": 38546,
+      "size_bytes": 42340,
       "modified_epoch": 1786740126
     },
     {
@@ -274,7 +274,7 @@
       "last_reviewed": "2026-07-30",
       "category": "Architecture",
       "metadata_present": true,
-      "size_bytes": 30303,
+      "size_bytes": 33434,
       "modified_epoch": 1786740126
     },
     {
@@ -2549,7 +2549,7 @@
       "last_reviewed": "2026-07-19",
       "category": "Index",
       "metadata_present": true,
-      "size_bytes": 9021,
+      "size_bytes": 9504,
       "modified_epoch": 1786740126
     },
     {
@@ -2572,10 +2572,10 @@
       "version": "1.0",
       "status": "Foundational",
       "owner": "OpenClaw Operator",
-      "last_reviewed": "2026-07-26",
+      "last_reviewed": "2026-09-24",
       "category": "Governance",
       "metadata_present": true,
-      "size_bytes": 4143,
+      "size_bytes": 8012,
       "modified_epoch": 1786740126
     },
     {
@@ -2601,7 +2601,7 @@
       "last_reviewed": "2026-07-25",
       "category": "Mission",
       "metadata_present": true,
-      "size_bytes": 43896,
+      "size_bytes": 44630,
       "modified_epoch": 1786740126
     },
     {
@@ -2627,7 +2627,7 @@
       "last_reviewed": "2026-07-30",
       "category": "Governance",
       "metadata_present": true,
-      "size_bytes": 34561,
+      "size_bytes": 39552,
       "modified_epoch": 1786740126
     },
     {
@@ -2665,8 +2665,8 @@
       "owner": "Unknown",
       "last_reviewed": "Unknown",
       "category": "Foundational",
-      "metadata_present": false,
-      "size_bytes": 4520,
+      "metadata_present": true,
+      "size_bytes": 5823,
       "modified_epoch": 1786740126
     },
     {

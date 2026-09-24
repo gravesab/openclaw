@@ -1,5 +1,8 @@
 ---
 title: "OpenClaw Foundational Documentation"
+summary: "Index of governing product, architecture, and development documents."
+read_when:
+  - Finding the Apple-first product direction and governing contracts
 version: "1.0"
 status: "Foundational"
 owner: "OpenClaw Architecture"
@@ -29,6 +32,8 @@ This document serves as the starting point for developers, operators, and AI age
 
 # Guiding Principles
 
+- Native Apple applications and Apple Intelligence first for the RanchOS product experience.
+- OpenClaw orchestrates supporting AI behind that experience.
 - Local-first whenever practical.
 - Safety before automation.
 - Verify before trusting.
@@ -151,9 +156,10 @@ Defines the long-term philosophy, values, and operating principles of OpenClaw.
 
 ## Development Governance
 
-OPENCLAW_DEVELOPMENT_DIRECTIVE.md
+[OpenClaw Development Directive](/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE#apple-first-application-and-intelligence-direction)
 
 Defines the mandatory development-only workflow, operator acceptance gate,
+Apple-first product and intelligence direction, feature-design evidence,
 product reliability requirements, mobile asset-management vision, evidence
 standards, and production authorization boundary.
 

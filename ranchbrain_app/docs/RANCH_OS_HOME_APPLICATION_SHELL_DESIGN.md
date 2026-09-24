@@ -26,6 +26,21 @@ static-shell code, local fixtures, target restructuring, compilation,
 simulator or device work, repackaging an existing app, deployment, Production
 configuration, or changes to an existing domain system of record.
 
+## Apple-first intelligence experience
+
+Follow the [Apple-first application and intelligence direction](https://docs.openclaw.ai/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE#apple-first-application-and-intelligence-direction)
+in the development directive. The shell and its domain modules provide native
+Apple interactions; OpenClaw coordinates supporting AI behind those workflows.
+Evaluate Apple Intelligence and public framework opportunities per feature and
+platform, including availability and graceful manual behavior when unavailable.
+Do not infer tvOS capability from iOS or macOS support.
+
+Native model execution and system actions must preserve the same domain,
+tenancy, confirmation, and privacy boundaries as interactive app actions.
+Provider selection belongs behind the workflow unless the user needs it for a
+meaningful choice. This direction does not alter the module-host implementation
+gates or prove an Apple Intelligence integration exists.
+
 ## Required foundation
 
 The shell consumes the shared OpenClaw-authoritative `VerifiedPrincipal` and

@@ -374,15 +374,15 @@ The app must preserve entered text and selected photos while it reports a valida
 
 ### Required DEV proof before enablement
 
-| Scenario | Expected result |
-| --- | --- |
-| Submit from iPhone and iPad with description, photo, and draft materials | One idempotent `submitted` request; photo and draft lines linked to it |
-| Retry after a network interruption | Original request is returned; no duplicate request, attachment, or material line |
-| Missing authentication or forged submitter | Denied; no request or attachment persisted |
-| Photo with location metadata | Stored/displayed copy contains no location metadata; response exposes only an authorized attachment reference |
-| Untriaged request | Excluded from due/overdue, Calendar, completion, meter, inventory, and Finance paths |
-| Triage and conversion | Authorized server operation preserves original report, submitter, photos, and draft-line provenance |
-| Unauthorized request/photo read | Denied without disclosing request text, filenames, or attachment storage information |
+| Scenario                                                                 | Expected result                                                                                               |
+| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| Submit from iPhone and iPad with description, photo, and draft materials | One idempotent `submitted` request; photo and draft lines linked to it                                        |
+| Retry after a network interruption                                       | Original request is returned; no duplicate request, attachment, or material line                              |
+| Missing authentication or forged submitter                               | Denied; no request or attachment persisted                                                                    |
+| Photo with location metadata                                             | Stored/displayed copy contains no location metadata; response exposes only an authorized attachment reference |
+| Untriaged request                                                        | Excluded from due/overdue, Calendar, completion, meter, inventory, and Finance paths                          |
+| Triage and conversion                                                    | Authorized server operation preserves original report, submitter, photos, and draft-line provenance           |
+| Unauthorized request/photo read                                          | Denied without disclosing request text, filenames, or attachment storage information                          |
 
 ---
 

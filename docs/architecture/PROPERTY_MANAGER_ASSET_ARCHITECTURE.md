@@ -195,14 +195,14 @@ Append-only history. Corrections and rejections are new rows; accepted rows are 
 
 `maintenance_tasks.kind = 'Work Request'` is an intake record, not a scheduled-maintenance variant. It has a separate, server-enforced intake state (`submitted`, `triaged`, `converted`, or `closed`) and never enters due, overdue, recurrence, completion, meter, or Calendar calculations while it remains an intake record.
 
-| Field / relation | Contract |
-| --- | --- |
-| `task_description` | Required large multiline report. Preserve the submitter's words; later triage notes are separate rather than overwriting the report. |
-| `asset_id` / `area` | `asset_id` is optional at intake; require an area/location when no asset is known. Triage resolves the relationship before conversion to maintenance work. |
-| intake audit | Server-derived submitter identity, submitted/updated timestamps, idempotency key, and state-transition actor/reason. |
-| `maintenance_task_photos` | One or more optional request attachments. Store an opaque attachment ID and controlled metadata; do not return `storage_path` or host filesystem details to clients. |
-| `maintenance_task_parts` | Optional requested parts/materials planning lines: name, quantity, unit, note, and optional vendor/part reference. They carry no inventory or financial posting authority. |
-| conversion | An authorized, atomic server operation creates or activates the normal maintenance task after category, priority, scheduling, and asset rules have been satisfied. It retains a link to the original request and its audit history. |
+| Field / relation          | Contract                                                                                                                                                                                                                            |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `task_description`        | Required large multiline report. Preserve the submitter's words; later triage notes are separate rather than overwriting the report.                                                                                                |
+| `asset_id` / `area`       | `asset_id` is optional at intake; require an area/location when no asset is known. Triage resolves the relationship before conversion to maintenance work.                                                                          |
+| intake audit              | Server-derived submitter identity, submitted/updated timestamps, idempotency key, and state-transition actor/reason.                                                                                                                |
+| `maintenance_task_photos` | One or more optional request attachments. Store an opaque attachment ID and controlled metadata; do not return `storage_path` or host filesystem details to clients.                                                                |
+| `maintenance_task_parts`  | Optional requested parts/materials planning lines: name, quantity, unit, note, and optional vendor/part reference. They carry no inventory or financial posting authority.                                                          |
+| conversion                | An authorized, atomic server operation creates or activates the normal maintenance task after category, priority, scheduling, and asset rules have been satisfied. It retains a link to the original request and its audit history. |
 
 The mobile flow is: **Describe work → optional photos → optional draft parts/materials → review → submit → triage**. It must use an authenticated `POST` endpoint with an idempotency key. Attachment bytes upload through a server-issued operation; the final submit payload uses opaque attachment IDs, never client filesystem paths or storage paths.
 

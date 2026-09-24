@@ -14,6 +14,7 @@ class OllamaConfigurationError(ValueError):
 MODEL_NAME_MAP: dict[str, str] = {
     "ollama-hermes3-8b": "hermes3:8b",
     "ollama-gemma3-12b": "gemma3:12b",
+    "ollama-gemma4-12b-mlx": "gemma4:12b-mlx",
     "ollama-llama3.2-3b": "llama3.2:3b",
     "ollama-llama3.3": "llama3.3:latest",
     "ollama-glm-4.7-flash": "glm-4.7-flash",

@@ -364,6 +364,36 @@ class AIIntelligenceDatabase:
 
         return tuple(dict(row) for row in rows)
 
+    def list_current_model_deployments(self) -> Sequence[Mapping[str, Any]]:
+        """Return every active primary and fallback model assignment."""
+
+        query = """
+            SELECT
+                component_id,
+                component_name,
+                model_id,
+                assignment_type
+            FROM ai_intelligence.current_model_deployment
+            ORDER BY
+                component_id,
+                CASE assignment_type
+                    WHEN 'primary' THEN 0
+                    WHEN 'fallback' THEN 1
+                    ELSE 2
+                END,
+                priority,
+                model_id
+        """
+
+        with self.connection() as connection:
+            with connection.cursor(
+                cursor_factory=RealDictCursor
+            ) as cursor:
+                cursor.execute(query)
+                rows = cursor.fetchall()
+
+        return tuple(dict(row) for row in rows)
+
     def list_recent_observed_usage(
         self,
         *,

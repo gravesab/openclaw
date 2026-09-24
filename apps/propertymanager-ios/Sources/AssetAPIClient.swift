@@ -38,6 +38,30 @@ extension PropertyAPIClient {
         return try decoder.decode(RanchAsset.self, from: data)
     }
 
+    func updatePlacedInServiceDate(id: UUID, date: Date?) async throws -> RanchAsset {
+        let url = try makeURL("/assets/\(id.uuidString)", versioned: true)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.dateFormat = "yyyy-MM-dd"
+        let serializedDate: Any
+        if let date {
+            serializedDate = formatter.string(from: date)
+        } else {
+            serializedDate = NSNull()
+        }
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "placed_in_service_date": serializedDate,
+        ])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(RanchAsset.self, from: data)
+    }
+
     func fetchMeterReadings(assetId: UUID, limit: Int = 50) async throws -> [MeterReading] {
         let url = try makeURL("/assets/\(assetId.uuidString)/meter-readings?limit=\(limit)", versioned: true)
         let request = authorizedRequest(url: url)

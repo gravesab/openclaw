@@ -134,6 +134,8 @@ def summarize_failover_status(
     *,
     drift_rows: Sequence[Mapping[str, Any]],
     recent_rows: Sequence[Mapping[str, Any]],
+    configured_assignment_rows: Sequence[Mapping[str, Any]] = (),
+    recent_usage_limit: int | None = None,
 ) -> dict[str, Any]:
     """Build a briefing/dashboard summary from stored telemetry."""
 
@@ -157,6 +159,91 @@ def summarize_failover_status(
     recent_failures = [
         row for row in recent_rows if row.get("success") is False
     ]
+
+    model_usage: dict[str, dict[str, Any]] = {}
+
+    def usage_entry(model_id: str) -> dict[str, Any]:
+        return model_usage.setdefault(
+            model_id,
+            {
+                "model_id": model_id,
+                "configured_assignments": {},
+                "observed_attempt_count": 0,
+                "successful_attempt_count": 0,
+                "failed_attempt_count": 0,
+                "latest_observed_at": None,
+            },
+        )
+
+    for row in configured_assignment_rows:
+        model_id = str(row.get("model_id") or "").strip()
+        if not model_id:
+            continue
+        entry = usage_entry(model_id)
+        component_id = str(row.get("component_id") or "").strip()
+        assignment_type = str(row.get("assignment_type") or "").strip()
+        if component_id and assignment_type:
+            entry["configured_assignments"].setdefault(
+                component_id, set()
+            ).add(assignment_type)
+
+    for row in recent_rows:
+        observed_at = _stringify(row.get("observed_at"))
+        metadata = row.get("usage_metadata") or {}
+        attempts = metadata.get("attempts", []) if isinstance(metadata, Mapping) else []
+        observed_attempts = [
+            attempt for attempt in attempts if isinstance(attempt, Mapping)
+        ]
+        if not observed_attempts:
+            observed_attempts = [
+                {
+                    "model_id": row.get("model_id"),
+                    "succeeded": row.get("success"),
+                }
+            ]
+        for attempt in observed_attempts:
+            model_id = str(attempt.get("model_id") or "").strip()
+            if not model_id:
+                continue
+            entry = usage_entry(model_id)
+            entry["observed_attempt_count"] += 1
+            if attempt.get("succeeded") is True:
+                entry["successful_attempt_count"] += 1
+            elif attempt.get("succeeded") is False:
+                entry["failed_attempt_count"] += 1
+            if observed_at and (
+                entry["latest_observed_at"] is None
+                or observed_at > entry["latest_observed_at"]
+            ):
+                entry["latest_observed_at"] = observed_at
+
+    model_usage_rows = [
+        {
+            "model_id": entry["model_id"],
+            "usage_status": (
+                "used"
+                if entry["observed_attempt_count"]
+                else "not-observed"
+            ),
+            "observed_attempt_count": entry["observed_attempt_count"],
+            "successful_attempt_count": entry["successful_attempt_count"],
+            "failed_attempt_count": entry["failed_attempt_count"],
+            "latest_observed_at": entry["latest_observed_at"],
+            "configured_assignments": [
+                {
+                    "component_id": component_id,
+                    "assignment_types": sorted(assignment_types),
+                }
+                for component_id, assignment_types in sorted(
+                    entry["configured_assignments"].items()
+                )
+            ],
+        }
+        for entry in model_usage.values()
+    ]
+    model_usage_rows.sort(
+        key=lambda entry: (entry["usage_status"] != "used", entry["model_id"])
+    )
 
     if drift > 0 or recent_failures:
         overall = "attention"
@@ -190,6 +277,17 @@ def summarize_failover_status(
         },
         "recent_failover_count": len(recent_failovers),
         "recent_failure_count": len(recent_failures),
+        "model_usage": {
+            "observation_limit": recent_usage_limit or len(recent_rows),
+            "used": sum(
+                row["usage_status"] == "used" for row in model_usage_rows
+            ),
+            "not_observed": sum(
+                row["usage_status"] == "not-observed"
+                for row in model_usage_rows
+            ),
+            "rows": model_usage_rows,
+        },
         "recent_observations": [
             {
                 "component_id": row.get("component_id"),
@@ -231,6 +329,13 @@ def format_failover_status_text(summary: Mapping[str, Any]) -> str:
             f"{summary.get('recent_failure_count', 0)}"
         ),
     ]
+
+    model_usage = summary.get("model_usage", {})
+    lines.append(
+        "Model usage in this telemetry window: "
+        f"used={model_usage.get('used', 0)} "
+        f"not_observed={model_usage.get('not_observed', 0)}"
+    )
 
     drift_rows = [
         row

@@ -28,13 +28,13 @@ class ConfigurationLoaderTests(unittest.TestCase):
         cls.plan = MODULE.build_plan()
 
     def test_expected_model_count(self) -> None:
-        self.assertEqual(len(self.plan.models), 11)
+        self.assertEqual(len(self.plan.models), 12)
 
     def test_expected_benchmark_count(self) -> None:
         self.assertEqual(len(self.plan.benchmarks), 10)
 
     def test_expected_component_count(self) -> None:
-        self.assertEqual(len(self.plan.components), 11)
+        self.assertEqual(len(self.plan.components), 12)
 
     def test_apple_foundation_models_dev_inventory_is_configured(self) -> None:
         models = {
@@ -75,6 +75,30 @@ class ConfigurationLoaderTests(unittest.TestCase):
         )
         self.assertEqual(len(fallbacks), 2)
         self.assertEqual(fallbacks[0]["model_id"], "omlx-qwen3.5-9b-4bit")
+
+    def test_property_manager_handbook_evaluation_dev_inventory_is_unverified(self) -> None:
+        models = {
+            item["model_id"]: item
+            for item in self.plan.models
+        }
+        components = {
+            item["component_id"]: item
+            for item in self.plan.components
+        }
+
+        gemma4 = models["ollama-gemma4-12b-mlx"]
+        self.assertEqual(gemma4["deployment"], "local")
+        self.assertEqual(gemma4["status"], "evaluation")
+
+        handbook_eval = components["property_manager_handbook_evaluation"]
+        self.assertEqual(
+            handbook_eval["metadata"]["verification_status"],
+            "development-live-verification-required",
+        )
+        self.assertIn(
+            "cannot create or update PropertyManager records",
+            handbook_eval["description"],
+        )
 
     def test_model_ids_are_unique(self) -> None:
         model_ids = [item["model_id"] for item in self.plan.models]

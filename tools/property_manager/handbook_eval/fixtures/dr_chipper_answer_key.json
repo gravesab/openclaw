@@ -1,0 +1,19 @@
+{
+  "fixture_id": "dr-chipper-manual-v1",
+  "source_file": "DR_Chipper_Manual.pdf",
+  "expected_facts": [
+    {"id": "manufacturer", "value": "DR Power Equipment", "pages": [1]},
+    {"id": "product_name", "value": "DR Chipper Attachment", "acceptable_values": ["DR® Chipper Attachment"], "pages": [1]},
+    {"id": "model_number", "value": null, "pages": [1]},
+    {"id": "chipping_capacity", "value": "3-1/2 inch diameter", "acceptable_values": ["3-1/2\" diameter"], "pages": [7]},
+    {"id": "inspection_interval", "value": "every 8-10 operating hours", "acceptable_values": ["every 8-10 hours"], "pages": [15, 17]},
+    {"id": "drive_belt_replacement_interval", "value": "every 40 operating hours", "acceptable_values": ["every 40 hours"], "pages": [15]},
+    {"id": "knife_wear_plate_gap", "value": "1/16 inch", "acceptable_values": ["1/16\""], "required_terms": ["1/16"], "citation_terms": ["1/16"], "pages": [19]},
+    {"id": "knife_kit_part_number", "value": "200481", "pages": [26]},
+    {"id": "wear_plate_part_number", "value": "186041", "pages": [26]},
+    {"id": "gap_gauge_part_number", "value": "197091", "pages": [26]},
+    {"id": "drive_belt_part_number", "value": "366301", "pages": [24]},
+    {"id": "bearing_grease_limit", "value": "no more than three pumps per fitting", "acceptable_values": ["no more than three pumps", "apply no more than three pumps of quality general-purpose lithium grease"], "required_terms": ["no more than three pumps"], "pages": [16]},
+    {"id": "service_safety_prerequisite", "value": "disengage PTO, shut down engine, wait for motion to stop, remove spark plug wire, then wait five minutes", "required_terms": ["PTO", "shut down", "moving parts", "spark plug wire", "5 minutes"], "citation_terms": ["PTO"], "pages": [15]}
+  ]
+}

@@ -73,6 +73,16 @@
       "notes": "Local candidate for reasoning and multimodal-adjacent workflows."
     },
     {
+      "id": "ollama-gemma4-12b-mlx",
+      "display_name": "Gemma 4 12B MLX",
+      "provider": "Local Ollama",
+      "deployment": "local",
+      "status": "evaluation",
+      "privacy_tier": "local",
+      "cost_tier": "owned-hardware",
+      "notes": "DEV-only handbook-extraction candidate installed on the M4. It has no PropertyManager mutation capability and must pass source-cited evaluation before promotion."
+    },
+    {
       "id": "ollama-hermes3-8b",
       "display_name": "Hermes 3 8B",
       "provider": "Local Ollama",

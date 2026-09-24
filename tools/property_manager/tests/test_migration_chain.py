@@ -27,13 +27,16 @@ MIGRATIONS = (
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
     "010_handbook_ingestion_v1.sql",
+    "011_work_request_intake.sql",
+    "012_asset_manual_parts.sql",
+    "013_asset_placed_in_service_date.sql",
 )
 REAPPLICABLE_MIGRATIONS = (
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "010"
+EXPECTED_VERSION = "013"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -232,14 +235,36 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         manifest = load_manifest()
         for filename in MIGRATIONS:
             self._prove_container_identity()
+            if filename == "011_work_request_intake.sql":
+                # 002 allowed these legacy rows.  011 must retain them rather
+                # than rejecting an otherwise valid pre-intake DEV database.
+                self._psql(
+                    """INSERT INTO propertymanager.maintenance_tasks
+                        (id, area, item, warning_days, critical_days, last_done, next_due, kind)
+                       VALUES ('00000000-0000-0000-0000-000000000099', 'Legacy', 'Work request', 0, 0, now(), now(), 'Work Request')"""
+                )
             migration = (MIGRATION_DIR / filename).read_bytes()
             self._psql(migration.decode())
             applied.append(filename[:3])
             if filename == "009_maintenance_proposals.sql":
                 self.assertEqual(self._extract_contract(), manifest.snapshots["009"].schema_contract)
-        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010"])
+            if filename == "011_work_request_intake.sql":
+                self.assertEqual(
+                    self._psql(
+                        "SELECT intake_state IS NULL FROM propertymanager.maintenance_tasks "
+                        "WHERE id='00000000-0000-0000-0000-000000000099';"
+                    ),
+                    "t",
+                )
+                with self.assertRaises(AssertionError):
+                    self._psql(
+                        """INSERT INTO propertymanager.maintenance_tasks
+                            (id, area, item, warning_days, critical_days, last_done, next_due, kind)
+                           VALUES ('00000000-0000-0000-0000-000000000098', 'New', 'Work request', 0, 0, now(), now(), 'Work Request')"""
+                    )
+        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013"])
         self.assertEqual(applied[-1], EXPECTED_VERSION)
-        self.assertEqual(self._extract_contract(), manifest.snapshots["010"].schema_contract)
+        self.assertEqual(self._extract_contract(), manifest.snapshots["013"].schema_contract)
 
         # The 005/006/009 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.
@@ -259,13 +284,16 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "asset_meter_reading",
                 "asset_manual",
                 "asset_manual_chunk",
+                "asset_manual_part",
                 "asset_manual_state_event",
                 "asset_manual_version",
                 "asset_task_mapping_proposals",
                 "assets",
                 "maintenance_categories",
+                "maintenance_attachment_operations",
                 "maintenance_completions",
                 "maintenance_proposals",
+                "maintenance_task_intake_events",
                 "maintenance_task_parts",
                 "maintenance_task_photos",
                 "maintenance_tasks",
@@ -273,7 +301,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         )
 
         expected_columns = {
-            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at"},
+            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at", "placed_in_service_date"},
             "asset_meter": {"meter_epoch", "row_version"},
             "asset_meter_reading": {
                 "previous_reading_id",
@@ -301,6 +329,14 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "meter_interval_unit",
                 "last_done_meter_value",
                 "next_due_meter_value",
+                "intake_state",
+                "submitted_by",
+                "submitted_at",
+                "triaged_by",
+                "triaged_at",
+                "triage_reason",
+                "converted_task_id",
+                "intake_idempotency_key",
             },
         }
         for table, columns in expected_columns.items():
@@ -344,6 +380,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             },
             "asset_manual_chunk": {"manual_version_id", "chunk_ordinal", "content", "content_sha256", "search_vector"},
             "asset_manual_state_event": {"manual_version_id", "event_type", "from_state", "to_state", "actor_id"},
+            "asset_manual_part": {
+                "manual_version_id", "reference_number", "oem_part_number", "name", "quantity",
+                "source_page_number", "source_excerpt", "provenance",
+            },
         }
         for table, columns in handbook_columns.items():
             actual = set(

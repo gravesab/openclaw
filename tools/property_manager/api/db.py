@@ -403,6 +403,25 @@ def execute_one_json(query: str, params: Any = None) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def execute_top_level_one_json(query: str, params: Any = None) -> dict[str, Any] | None:
+    """Run a top-level statement that returns one row as JSON.
+
+    PostgreSQL requires data-modifying CTEs to be attached to the top-level
+    statement, so callers must make their final SELECT emit ``row_to_json``.
+    """
+    sql = _mogrify(query, params)
+    result = _docker_psql(sql)
+    if result.returncode != 0:
+        _raise_psql_failure(result)
+    text = (result.stdout or "").strip()
+    if not text:
+        return None
+    payload = json.loads(text)
+    if not isinstance(payload, dict):
+        return None
+    return {key: _jsonable(value) for key, value in payload.items()}
+
+
 def execute(query: str, params: Any = None) -> int:
     sql = _mogrify(query, params)
     result = _docker_psql(sql)

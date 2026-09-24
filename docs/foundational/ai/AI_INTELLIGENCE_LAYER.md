@@ -1,8 +1,31 @@
+---
+title: "RanchBrain AI Intelligence Layer"
+summary: "Model evaluation and routing behind the native Apple application experience."
+read_when:
+  - Designing AI routing or Apple Intelligence integration
+  - Evaluating supporting local and open-source models
+---
+
 # RanchBrain AI Intelligence Layer
 
 ## Purpose
 
 The AI Intelligence Layer selects the most appropriate model for each OpenClaw task while protecting private ranch data, controlling cost, and requiring benchmark evidence before model promotion.
+
+## Native Apple product boundary
+
+The [development directive](/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE#apple-first-application-and-intelligence-direction)
+is the governing source for Apple-first product design and feature evidence.
+The AI Intelligence Layer supports the native RanchOS experience by evaluating
+and coordinating appropriate models behind the scenes. Evaluate Apple
+Intelligence opportunities first, then justify supporting open-source/local or
+other approved models with workload evidence and privacy constraints.
+
+An on-device Apple capability may execute inside the native application; do not
+assume it is exposed as a server provider or already connected to `ai.execute`.
+Any bridge or adapter needs a separately verified public API and bounded DEV
+implementation. All execution paths preserve domain authorization and review
+requirements. The runtime status below does not prove native Apple integration.
 
 ## Components
 
@@ -22,7 +45,8 @@ The AI Intelligence Layer selects the most appropriate model for each OpenClaw t
 - Scores remain provisional until supported by benchmark evidence.
 - No model is promoted solely from marketing claims or public hype.
 - A human reviews production-routing changes.
-- The router must always provide a fallback.
+- Routing designs must define approved, privacy-compatible fallback behavior;
+  when no eligible model is available, return an explicit unavailable result.
 - Runtime entry points must validate requests and responses at trust boundaries.
 - Runtime AI execution must fail closed and remain disabled until explicitly enabled for an approved environment.
 - Detailed provider and database errors belong in protected operational logs, not client responses.

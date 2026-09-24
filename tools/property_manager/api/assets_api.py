@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
 from uuid import uuid4
@@ -21,6 +21,7 @@ import meter_schedule as ms
 ASSET_COLUMNS = """
     a.id, a.external_id, a.ranchbrain_guid, a.name, a.manufacturer, a.model,
     a.category, a.location, a.aliases, a.qr_token, a.is_active,
+    a.placed_in_service_date,
     a.meter_proposed_type, a.meter_proposed_unit, a.meter_activated_at,
     a.created_at, a.updated_at
 """
@@ -110,6 +111,21 @@ def _serialize_reading(row: dict) -> dict:
     return item
 
 
+def parse_placed_in_service_date(value: Any) -> date | None:
+    """Accept an ISO civil date or null; never infer a date from a timestamp."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("placed_in_service_date must be an ISO date (YYYY-MM-DD) or null")
+    normalized = value.strip()
+    if re.fullmatch(r"\d{4}-\d{2}-\d{2}", normalized) is None:
+        raise ValueError("placed_in_service_date must be an ISO date (YYYY-MM-DD) or null")
+    try:
+        return date.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ValueError("placed_in_service_date must be an ISO date (YYYY-MM-DD) or null") from exc
+
+
 def fetch_asset_or_404(asset_id: str) -> dict | None:
     row = pm_db.execute_one_json(
         f"""
@@ -158,6 +174,13 @@ def duplicate_asset_name_response():
 
 def enrich_asset(row: dict) -> dict:
     item = dict(row)
+    placed_in_service_date = item.get("placed_in_service_date")
+    if isinstance(placed_in_service_date, (date, datetime)):
+        item["placed_in_service_date"] = (
+            placed_in_service_date.date().isoformat()
+            if isinstance(placed_in_service_date, datetime)
+            else placed_in_service_date.isoformat()
+        )
     asset_id = str(item["id"])
     current = ms._as_decimal(item.get("current_value"))
     tasks = pm_db.execute_json(
@@ -165,7 +188,7 @@ def enrich_asset(row: dict) -> dict:
         SELECT id, item, schedule_kind, meter_interval_value, meter_interval_unit,
                last_done_meter_value, next_due_meter_value, next_due, warning_days
         FROM propertymanager.maintenance_tasks
-        WHERE is_active = true AND asset_id = %s
+        WHERE is_active = true AND asset_id = %s AND kind <> 'Work Request'
         ORDER BY item
         """,
         (asset_id,),
@@ -279,14 +302,18 @@ def create_asset():
     aliases = payload.get("aliases") or []
     if not isinstance(aliases, list):
         aliases = []
+    try:
+        placed_in_service_date = parse_placed_in_service_date(payload.get("placed_in_service_date"))
+    except ValueError as exc:
+        return validation_error(str(exc), field="placed_in_service_date")
 
     pm_db.execute(
         """
         INSERT INTO propertymanager.assets
             (id, external_id, ranchbrain_guid, name, manufacturer, model, category,
              location, aliases, qr_token, is_active, meter_proposed_type, meter_proposed_unit,
-             created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, true, %s, %s, now(), now())
+             placed_in_service_date, created_at, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, true, %s, %s, %s, now(), now())
         """,
         (
             asset_id,
@@ -301,6 +328,7 @@ def create_asset():
             qr_token,
             proposed_type,
             proposed_unit,
+            placed_in_service_date,
         ),
     )
     pm_db.execute(
@@ -322,7 +350,7 @@ def patch_asset(asset_id: str):
     if not isinstance(payload, dict) or not payload:
         return validation_error("JSON object body required")
 
-    allowed = {"name", "manufacturer", "model", "category", "location", "aliases", "is_active"}
+    allowed = {"name", "manufacturer", "model", "category", "location", "aliases", "is_active", "placed_in_service_date"}
     unknown = sorted(set(payload) - allowed)
     if unknown:
         return validation_error(f"Unsupported fields: {', '.join(unknown)}")
@@ -341,6 +369,12 @@ def patch_asset(asset_id: str):
         if asset_name_conflicts(name, excluding_asset_id=asset_id):
             return duplicate_asset_name_response()
         payload["name"] = name
+
+    if "placed_in_service_date" in payload:
+        try:
+            payload["placed_in_service_date"] = parse_placed_in_service_date(payload["placed_in_service_date"])
+        except ValueError as exc:
+            return validation_error(str(exc), field="placed_in_service_date")
 
     updates = []
     values = []

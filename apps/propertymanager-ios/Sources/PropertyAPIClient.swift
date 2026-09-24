@@ -177,12 +177,49 @@ final class PropertyAPIClient {
         try validate(response, data: data)
         return try decoder.decode(MaintenanceTask.self, from: data)
     }
+
+    func uploadWorkRequestPhoto(_ jpeg: Data, idempotencyKey: String) async throws -> String {
+        let issueURL = try makeURL("/v1/work-requests/attachments")
+        var issue = authorizedRequest(url: issueURL, method: "POST")
+        issue.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        issue.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        issue.httpBody = try JSONSerialization.data(withJSONObject: ["content_type": "image/jpeg", "byte_size": jpeg.count])
+        let (issueData, issueResponse) = try await URLSession.shared.data(for: issue)
+        try validate(issueResponse, data: issueData)
+        let operation = try decoder.decode(WorkRequestAttachmentIssue.self, from: issueData)
+
+        let uploadURL = try makeURL("/v1/work-requests/attachments/\(operation.attachmentID)/content")
+        var upload = authorizedRequest(url: uploadURL, method: "PUT")
+        upload.setValue("image/jpeg", forHTTPHeaderField: "Content-Type")
+        upload.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        upload.httpBody = jpeg
+        let (uploadData, uploadResponse) = try await URLSession.shared.data(for: upload)
+        try validate(uploadResponse, data: uploadData)
+        return operation.attachmentID
+    }
+
+    func submitWorkRequest(_ payload: WorkRequestSubmission, idempotencyKey: String) async throws -> SubmittedWorkRequest {
+        let url = try makeURL("/v1/work-requests")
+        var request = authorizedRequest(url: url, method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        request.httpBody = try JSONEncoder().encode(payload)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(SubmittedWorkRequest.self, from: data)
+    }
 }
 
 struct APIErrorBody: Codable {
     var code: String?
     var message: String?
     var field: String?
+}
+
+private struct WorkRequestAttachmentIssue: Codable {
+    let attachmentID: String
+
+    enum CodingKeys: String, CodingKey { case attachmentID = "attachment_id" }
 }
 
 struct APIHealth: Codable {

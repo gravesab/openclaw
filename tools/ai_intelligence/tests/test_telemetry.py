@@ -233,6 +233,81 @@ class TelemetryModelTests(unittest.TestCase):
         self.assertIn("AI Routing Telemetry", text)
         self.assertIn("drift=1", text)
 
+    def test_summary_distinguishes_used_models_from_not_observed_assignments(
+        self,
+    ) -> None:
+        summary = summarize_failover_status(
+            drift_rows=[],
+            configured_assignment_rows=[
+                {
+                    "component_id": "telegram_ranch_bot",
+                    "model_id": "ollama-hermes3-8b",
+                    "assignment_type": "primary",
+                },
+                {
+                    "component_id": "telegram_ranch_bot",
+                    "model_id": "ollama-llama3.2-3b",
+                    "assignment_type": "fallback",
+                },
+            ],
+            recent_rows=[
+                {
+                    "model_id": "ollama-hermes3-8b",
+                    "success": True,
+                    "observed_at": "2026-09-11T00:00:00+00:00",
+                    "usage_metadata": {},
+                }
+            ],
+            recent_usage_limit=20,
+        )
+
+        usage = summary["model_usage"]
+        self.assertEqual(usage["observation_limit"], 20)
+        self.assertEqual(usage["used"], 1)
+        self.assertEqual(usage["not_observed"], 1)
+        self.assertEqual(
+            usage["rows"][0]["usage_status"],
+            "used",
+        )
+        self.assertEqual(
+            usage["rows"][1]["configured_assignments"],
+            [
+                {
+                    "component_id": "telegram_ranch_bot",
+                    "assignment_types": ["fallback"],
+                }
+            ],
+        )
+
+    def test_summary_counts_failed_attempt_before_successful_fallback(self) -> None:
+        summary = summarize_failover_status(
+            drift_rows=[],
+            recent_rows=[
+                {
+                    "model_id": "ollama-llama3.2-3b",
+                    "success": True,
+                    "observed_at": "2026-09-11T00:00:00+00:00",
+                    "usage_metadata": {
+                        "attempts": [
+                            {
+                                "model_id": "ollama-hermes3-8b",
+                                "succeeded": False,
+                            },
+                            {
+                                "model_id": "ollama-llama3.2-3b",
+                                "succeeded": True,
+                            },
+                        ]
+                    },
+                }
+            ],
+        )
+
+        rows = {row["model_id"]: row for row in summary["model_usage"]["rows"]}
+        self.assertEqual(rows["ollama-hermes3-8b"]["usage_status"], "used")
+        self.assertEqual(rows["ollama-hermes3-8b"]["failed_attempt_count"], 1)
+        self.assertEqual(rows["ollama-llama3.2-3b"]["successful_attempt_count"], 1)
+
 
 class ExecutionTelemetryIntegrationTests(unittest.TestCase):
     def test_records_successful_execution(self) -> None:

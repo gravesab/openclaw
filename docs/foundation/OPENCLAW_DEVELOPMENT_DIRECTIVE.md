@@ -1,9 +1,13 @@
 ---
 title: "OpenClaw Development Directive"
+summary: "Development governance and Apple-first application and intelligence direction."
+read_when:
+  - Planning native Apple features or AI model integration
+  - Preparing Codex or Cursor implementation handoffs
 version: "1.0"
 status: "Foundational"
 owner: "OpenClaw Operator"
-last_reviewed: "2026-07-26"
+last_reviewed: "2026-09-24"
 category: "Governance"
 source_document: "OPENCLAW_DEVELOPMENT_DIRECTIVE.md"
 ---
@@ -19,6 +23,67 @@ been fully implemented, tested, reviewed, and proven reliable. Production
 deployment requires my explicit approval after I have personally tested and
 accepted the developed application. Approval to develop, test, commit, or push
 to `development` is not approval to deploy to production.
+
+## Apple-first application and intelligence direction
+
+The standing product direction is to maximize Apple Intelligence and the Apple
+ecosystem. RanchOS presents a native Swift/SwiftUI application on iOS/iPadOS and
+macOS, with one RanchOS application per platform and compiled domain modules.
+Preserve the existing tvOS scope with platform-appropriate interactions. Design
+navigation, accessibility, voice input, review flows, and system integration for
+each Apple platform rather than making a browser dashboard the default product
+experience. Operational dashboards remain supporting tools.
+
+Evaluate public Apple frameworks first for each relevant feature. The
+[Foundation Models framework](https://developer.apple.com/documentation/FoundationModels)
+provides model capabilities, while
+[App Intents](https://developer.apple.com/documentation/appintents) exposes app
+actions and content to supported system experiences. These are integration
+opportunities, not a claim that every Apple Intelligence feature has a public
+API or is available on every target device.
+
+OpenClaw coordinates supporting models and tools behind the native experience.
+RanchBrain supplies authorized knowledge and reasoning support; domain services
+retain their record ownership, authorization, validation, and confirmation
+contracts. An on-device model or App Intent must use those same domain contracts
+and must not become a second authority for identity, tenancy, or writes.
+
+Evaluate capable open-source and local models, including Apple Silicon execution,
+alongside suitable Apple capabilities. Select by measured task quality, privacy,
+latency, reliability, memory use, and cost. Prefer on-device processing when it
+meets the task requirements. Distinguish processing on the user's device from
+processing on a separate local server and from cloud processing. A local model
+running on Apple hardware is not, by that fact alone, an Apple Intelligence
+integration. Keep provider-specific behavior in the owning plugin or adapter.
+
+When a capability is unavailable, retain useful manual workflows and explain
+the limitation. Use only approved, privacy-compatible model fallbacks; when none
+is suitable, return an explicit unavailable result. Never silently move private
+data to a remote provider. Ordinary workflows should not require users to choose
+models unless the choice helps them make a meaningful decision.
+
+### Required feature-design evidence
+
+Each relevant design and Codex or Cursor implementation handoff must record:
+
+1. The native Apple user journey and affected platforms.
+2. The Apple Intelligence or framework opportunity, with current official Apple
+   API documentation and SDK, OS, device, language, entitlement, and runtime
+   availability checks. Explain a decision not to use an applicable capability.
+3. What runs on-device, on an approved local server, or remotely; the supporting
+   model choice and task-specific comparative evidence.
+4. Data-access and confirmation boundaries, plus behavior when intelligence is
+   disabled, unsupported, unavailable, offline, or fails during execution.
+5. Validation on representative supported devices, including fallback behavior,
+   accessibility, latency, and resource use. Build and simulator results must be
+   distinguished from signed physical-device proof.
+
+This section records product direction approved on September 24, 2026. It does
+not assert that Apple Intelligence integration is implemented or activate model
+routing. DEV implementation, device installation, runtime activation, and
+Production deployment retain their existing separate authorization gates.
+
+## Property-management requirements
 
 The application must eventually provide a dependable, unified system for asset
 and property management. This includes integration with a Swift application

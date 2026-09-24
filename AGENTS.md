@@ -23,6 +23,15 @@ Skills own workflows; root owns hard policy and routing.
 - Installers: sibling `../openclaw.ai`.
 - Scoped guides: `extensions/`, `src/{plugin-sdk,channels,plugins,gateway,gateway/protocol,agents}/`, `test/helpers*/`, `docs/`, `ui/`, `scripts/`.
 
+## Apple-first product and AI development
+
+- Andrew's standing direction: maximize the Apple Intelligence platform and Apple ecosystem when developing his applications. Design the user-facing product as a native iOS/iPadOS and macOS application, using Swift/SwiftUI and platform-appropriate Apple conventions, accessibility, navigation, privacy, and system integrations. Preserve the shared RanchOS single-app/module architecture and its existing tvOS scope.
+- Evaluate Apple Intelligence and public Apple developer frameworks first for each relevant capability. Consider Foundation Models, App Intents/Shortcuts, and other native integrations where applicable; verify current official Apple documentation, API availability, supported OS/device/language, entitlements, and runtime availability before promising or implementing a feature. Do not assume every Apple Intelligence feature exposes a third-party API.
+- OpenClaw is the supporting orchestration layer: select and coordinate suitable AI models and tools behind the native application experience. Include capable open-source/local models and Apple Silicon execution in evaluations; use other providers when justified by measured task quality, privacy, latency, reliability, hardware limits, and cost. Keep provider-specific behavior within existing plugin/adapter boundaries.
+- Prefer on-device processing when it meets the task's quality and capability needs. Define graceful behavior when Apple Intelligence or a model is unavailable; do not silently send private data to a remote provider. Keep model/provider selection out of ordinary user flows unless it helps the user make a meaningful choice.
+- For relevant feature designs and implementation handoffs, state the native Apple experience, the Apple Intelligence/framework opportunity, the reason for any supporting model choice, and the availability/fallback and device-validation plan. Explain departures from the Apple-first direction. This product preference does not require rewriting unrelated backend/core code into Swift.
+- This is a standing design preference, not authorization to enable live routing, deploy, change Production, or expand the current task's scope. Follow existing DEV and approval boundaries.
+
 ## Architecture
 
 - Core stays plugin-agnostic. No bundled ids/defaults/policy in core when manifest/registry/capability contracts work.

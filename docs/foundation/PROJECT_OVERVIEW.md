@@ -1,5 +1,8 @@
 ---
 title: "OpenClaw Project Overview"
+summary: "OpenClaw platform overview and RanchOS Apple-first product direction."
+read_when:
+  - Understanding native Apple clients and supporting OpenClaw services
 version: "1.0"
 status: "Foundational"
 owner: "OpenClaw Architecture"
@@ -16,6 +19,16 @@ source_document: "PROJECT_OVERVIEW.md"
 OpenClaw is a **local-first, multi-channel personal AI assistant**. A long-lived **Gateway daemon** is the control plane: it owns messaging provider connections, exposes a typed WebSocket API, serves the browser Control UI, and orchestrates an embedded **Pi agent runtime**. Almost all channel and model-provider behavior is delivered through a **plugin system** (~134 extensions under `extensions/`).
 
 ---
+
+## RanchOS product direction
+
+RanchOS development follows the
+[Apple-first application and intelligence direction](/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE#apple-first-application-and-intelligence-direction):
+native iOS/iPadOS and macOS experiences, appropriate Apple Intelligence
+integration, and OpenClaw orchestration of supporting models behind the scenes.
+This is product direction, not a claim of completed integration. The platform
+inventory below describes the broader OpenClaw system and does not require
+rewriting its backend or removing its other clients.
 
 ## System Architecture
 

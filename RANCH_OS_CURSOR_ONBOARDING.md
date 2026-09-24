@@ -21,6 +21,16 @@ work. It prevents a generic OpenClaw document, a fixture implementation, or an
 uncommitted proposal from being mistaken for authorization to change tenant
 data, deploy a service, run a migration, or release to Production.
 
+## Apple-first development direction
+
+Read the [Apple-first application and intelligence direction](https://docs.openclaw.ai/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE#apple-first-application-and-intelligence-direction)
+in `docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md` before planning Apple or AI
+features. It governs the native experience, Apple Intelligence evaluation,
+supporting-model evidence, privacy-compatible fallbacks, and device validation.
+Carry its required feature-design evidence into each relevant implementation
+handoff. This standing direction does not change the authorization precedence
+below or establish that an integration has shipped.
+
 ## Checkout authority
 
 | Checkout | Intended use | Not authority for |

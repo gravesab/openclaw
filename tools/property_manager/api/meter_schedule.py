@@ -241,6 +241,24 @@ def fetch_meter_row(asset_id: str, *, for_update: bool = False) -> dict[str, Any
     )
 
 
+def fetch_meter_rows(asset_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Meter rows for many assets in one query, keyed by asset id string."""
+    unique_ids = sorted({str(asset_id) for asset_id in asset_ids if asset_id})
+    if not unique_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    rows = pm_db.execute_json(
+        f"""
+        SELECT asset_id, meter_type, current_value, unit, latest_reading_at,
+               meter_epoch, row_version, updated_at
+        FROM propertymanager.asset_meter
+        WHERE asset_id IN ({placeholders})
+        """,
+        unique_ids,
+    )
+    return {str(row["asset_id"]): row for row in rows}
+
+
 def fetch_asset_proposed_meter(asset_id: str) -> dict[str, Any] | None:
     return pm_db.execute_one_json(
         """

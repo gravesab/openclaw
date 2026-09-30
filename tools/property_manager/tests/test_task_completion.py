@@ -347,6 +347,23 @@ class TaskCompletionTests(unittest.TestCase):
                 self.assertEqual(response.get_json()["field"], "meter_value_at_completion")
                 complete_meter.assert_not_called()
 
+    def test_task_list_enrichment_reads_all_meters_in_one_query(self):
+        tasks = [
+            {"id": f"task-{index}", "asset_id": asset, "completion_history": [], "tools_required": []}
+            for index, asset in enumerate(["asset-a", "asset-b", "asset-a", None])
+        ]
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_json",
+            side_effect=[[], [], [{"asset_id": "asset-a", "current_value": "12"}]],
+        ) as execute_json, mock.patch.object(self.api.ms, "fetch_meter_row") as per_asset:
+            enriched = self.api.enrich_tasks(tasks)
+
+        self.assertEqual(execute_json.call_count, 3)
+        self.assertEqual(execute_json.call_args_list[2].args[1], ["asset-a", "asset-b"])
+        per_asset.assert_not_called()
+        self.assertEqual(len(enriched), 4)
+
 
 if __name__ == "__main__":
     unittest.main()

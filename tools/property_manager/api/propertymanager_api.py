@@ -401,6 +401,9 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     for photo in photos_rows:
         photos_by_task.setdefault(str(photo["task_id"]), []).append(photo)
 
+    # One query for all meters: a per-task lookup made GET /tasks exceed client timeouts.
+    meters_by_asset = ms.fetch_meter_rows([str(row["asset_id"]) for row in rows if row.get("asset_id")])
+
     enriched = []
     for row in rows:
         item = dict(row)
@@ -414,7 +417,7 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
         current_meter = None
         asset_id = item.get("asset_id")
         if asset_id:
-            meter_row = ms.fetch_meter_row(str(asset_id))
+            meter_row = meters_by_asset.get(str(asset_id))
             if meter_row:
                 current_meter = ms._as_decimal(meter_row.get("current_value"))
             item = ms.enrich_task_meter_fields(item, current_meter)

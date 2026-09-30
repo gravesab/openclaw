@@ -73,6 +73,54 @@ final class WorkRequestPayloadTests: XCTestCase {
         XCTAssertNotEqual(draft.idempotencyKey, originalKey)
     }
 
+    func testNamedMaterialWithoutQuantityIsRejected() {
+        var material = WorkRequestMaterial()
+        material.name = "replacement valve"
+        XCTAssertThrowsError(try WorkRequestPayload.make(
+            description: "The north barn trough is leaking.",
+            area: "North barn",
+            assetID: nil,
+            materials: [material],
+            attachmentIDs: []
+        ))
+    }
+
+    func testRetryAfterEditsResendsTheOriginalPayloadAndKey() async throws {
+        var draft = WorkRequestIntakeDraft()
+        draft.description = "The north barn trough is leaking."
+        draft.area = "North barn"
+        draft.attachmentIDs = ["opaque-photo-one"]
+        let originalKey = draft.idempotencyKey
+        var attempts: [(WorkRequestSubmission, String)] = []
+
+        do {
+            _ = try await draft.submit { payload, key in
+                attempts.append((payload, key))
+                throw PropertyAPIError.serverMessage("Temporary network failure")
+            }
+            XCTFail("The simulated first submission must fail")
+        } catch {}
+
+        draft.description = "Changed after the first attempt."
+        draft.area = "South barn"
+        _ = try await draft.submit { payload, key in
+            attempts.append((payload, key))
+            return SubmittedWorkRequest(
+                id: UUID(), requestNumber: "WR-2", intakeState: "submitted", idempotentReplay: true
+            )
+        }
+
+        XCTAssertEqual(attempts.map(\.1), [originalKey, originalKey])
+        XCTAssertEqual(attempts.map(\.0.description), [
+            "The north barn trough is leaking.",
+            "The north barn trough is leaking.",
+        ])
+        XCTAssertEqual(attempts.map(\.0.area), ["North barn", "North barn"])
+        XCTAssertFalse(draft.replacePhotoSelection())
+        XCTAssertEqual(draft.idempotencyKey, originalKey)
+        XCTAssertEqual(draft.attachmentIDs, ["opaque-photo-one"])
+    }
+
     func testSuccessfulSubmissionResetStartsWithNoPriorAttachments() {
         var draft = WorkRequestIntakeDraft()
         draft.description = "Leaking wash-rack water line"

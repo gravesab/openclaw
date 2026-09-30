@@ -342,6 +342,12 @@ class DockerConnection:
         return None
 
 
+def _sql_text_literal(text: str) -> str:
+    # Rendered SQL goes to psql with standard_conforming_strings on, where a
+    # backslash is literal. psycopg2 quoting without a connection doubles it.
+    return "'" + text.replace("'", "''") + "'"
+
+
 def _mogrify(query: str, params: Any) -> str:
     if params is None:
         return query
@@ -355,17 +361,13 @@ def _mogrify(query: str, params: Any) -> str:
         if isinstance(value, (int, float, Decimal)):
             return str(value)
         if isinstance(value, (datetime, date)):
-            adapted = psycopg2.extensions.adapt(value.isoformat())
-            adapted.encoding = "utf8"
-            return adapted.getquoted().decode("utf8")
+            return _sql_text_literal(value.isoformat())
         if isinstance(value, uuid.UUID):
-            adapted = psycopg2.extensions.adapt(str(value))
-            adapted.encoding = "utf8"
-            return adapted.getquoted().decode("utf8")
+            return _sql_text_literal(str(value))
         if isinstance(value, (dict, list)):
-            adapted = psycopg2.extensions.adapt(json.dumps(value))
-            adapted.encoding = "utf8"
-            return adapted.getquoted().decode("utf8")
+            return _sql_text_literal(json.dumps(value))
+        if isinstance(value, str):
+            return _sql_text_literal(value)
         if isinstance(value, (bytes, bytearray, memoryview)):
             # docker-exec feeds rendered SQL to psql.  psycopg's byte adapter
             # emits backslash-octal quoting for its native protocol, which

@@ -93,6 +93,16 @@ class DockerExecDrainTests(unittest.TestCase):
         self.assertIn("'\\x00ff70686f746f'::bytea", sql)
         self.assertNotIn("\\377", sql)
 
+    def test_mogrify_keeps_backslashes_literal_for_psql(self) -> None:
+        sql = self.db._mogrify(
+            "SELECT %s, %s::jsonb",
+            ["a\\b it's", [{"size": "1/16\""}]],
+        )
+        self.assertEqual(
+            sql,
+            "SELECT 'a\\b it''s', '[{\"size\": \"1/16\\\"\"}]'::jsonb",
+        )
+
     def test_wait_inflight_terminates_on_timeout(self) -> None:
         class HangProc:
             def __init__(self) -> None:

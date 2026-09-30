@@ -72,7 +72,7 @@ final class PropertyAPIClient {
         guard let http = response as? HTTPURLResponse else { return }
         guard (200 ... 299).contains(http.statusCode) else {
             if let err = try? JSONDecoder().decode(APIErrorBody.self, from: data) {
-                throw PropertyAPIError.serverMessage(err.message ?? err.code ?? "HTTP \(http.statusCode)")
+                throw PropertyAPIError.serverMessage(err.message ?? err.error ?? err.code ?? "HTTP \(http.statusCode)")
             }
             throw PropertyAPIError.serverMessage("HTTP \(http.statusCode)")
         }
@@ -213,6 +213,7 @@ final class PropertyAPIClient {
 struct APIErrorBody: Codable {
     var code: String?
     var message: String?
+    var error: String?
     var field: String?
 }
 

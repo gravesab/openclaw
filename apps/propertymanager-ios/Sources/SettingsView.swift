@@ -33,6 +33,19 @@ struct SettingsView: View {
                 Text("PropertyManager API")
             }
 
+            Section {
+                TextField("Dashboard URL", text: $store.manualLibraryBaseURL)
+                    .textInputAutocapitalization(.never)
+                    .keyboardType(.URL)
+                    .autocorrectionDisabled()
+                    .textContentType(.URL)
+                Text("Stores uploaded manuals and serves them for Extract, for example http://100.85.188.74:5051")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } header: {
+                Text("Manual Library")
+            }
+
             Section("Authentication") {
                 SecureField("API Key", text: $store.apiKey)
                     .textInputAutocapitalization(.never)

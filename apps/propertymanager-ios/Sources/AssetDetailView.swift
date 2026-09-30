@@ -27,6 +27,7 @@ struct AssetDetailView: View {
                     meterCard(asset)
                     assetDetailsCard(asset)
                     serviceCard(asset)
+                    manualsCard
                     historyCard
                     deactivateCard
                 } else {
@@ -271,6 +272,28 @@ struct AssetDetailView: View {
                 Task { await loadAsset() }
             }
         }
+    }
+
+    private var manualsCard: some View {
+        NavigationLink {
+            ManualLibraryView(initialAssetID: assetId)
+        } label: {
+            HStack {
+                Label("Manuals", systemImage: "books.vertical")
+                    .font(.headline)
+                Spacer()
+                Text("Upload, connect, extract")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .padding()
+            .background(Color(.secondarySystemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder

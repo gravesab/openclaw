@@ -7,6 +7,7 @@ struct TaskListView: View {
     @State private var meterConfirmValue = ""
     @State private var confirmCurrentMeter = false
     @State private var linkedAsset: RanchAsset?
+    @State private var showManualLibrary = false
 
     var body: some View {
         List {
@@ -51,7 +52,11 @@ struct TaskListView: View {
             TaskDetailView(taskID: taskID)
         }
         .navigationTitle("Tasks")
-        .searchable(text: $store.searchText)
+        .searchable(
+            text: $store.searchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Filter assets or tasks (any word)"
+        )
         .refreshable { await store.refresh() }
         .safeAreaInset(edge: .top) {
             Picker("Origin", selection: $store.originFilter) {
@@ -65,6 +70,13 @@ struct TaskListView: View {
             .background(.bar)
         }
         .toolbar {
+            ToolbarItem(placement: .topBarLeading) {
+                Button {
+                    showManualLibrary = true
+                } label: {
+                    Label("Manual Library", systemImage: "books.vertical")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Picker("Filter", selection: $store.filter) {
                     ForEach(TaskFilter.allCases) { filter in
@@ -76,6 +88,17 @@ struct TaskListView: View {
         }
         .sheet(item: $completingTask) { task in
             completionSheet(task)
+        }
+        .sheet(isPresented: $showManualLibrary) {
+            NavigationStack {
+                ManualLibraryView(initialAssetID: store.selectedTaskAssetId)
+                    .toolbar {
+                        ToolbarItem(placement: .cancellationAction) {
+                            Button("Done") { showManualLibrary = false }
+                        }
+                    }
+            }
+            .environmentObject(store)
         }
     }
 

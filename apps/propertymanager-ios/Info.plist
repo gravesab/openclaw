@@ -39,6 +39,15 @@
 		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
+			<key>100.85.188.74</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSExceptionRequiresForwardSecrecy</key>
+				<false/>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+			</dict>
 			<key>100.85.36.72</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
@@ -65,9 +74,9 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PropertyManager connects to your ranch PropertyManager API on the local network or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>PropertyManager uses the microphone for voice meter entry.</string>
+	<string>PropertyManager uses the microphone for on-device work-request dictation and voice meter entry.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>PropertyManager converts speech to meter readings.</string>
+	<string>PropertyManager converts speech to text on this device for work requests and meter readings.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

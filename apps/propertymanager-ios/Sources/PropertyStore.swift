@@ -4,8 +4,10 @@ import SwiftUI
 enum PropertyManagerBuildEnvironment {
 #if DEBUG
     static let isDevelopment = true
-    static let apiBaseURLKey = "propertyManager.dev.v2.apiBaseURL"
-    static let apiBaseURL = "http://192.168.50.117:15062"
+    static let apiBaseURLKey = "propertyManager.dev.v3.apiBaseURL"
+    static let apiBaseURL = "http://100.85.188.74:5062"
+    static let manualLibraryBaseURLKey = "propertyManager.dev.manualLibraryBaseURL"
+    static let manualLibraryBaseURL = "http://100.85.188.74:5051"
     static let apiKeyKey = "propertyManager.dev.apiKey"
     static let operatorPINKey = "propertyManager.dev.operatorPIN"
     static let operatorIdentityKey = "propertyManager.dev.operatorIdentity"
@@ -15,6 +17,8 @@ enum PropertyManagerBuildEnvironment {
     static let isDevelopment = false
     static let apiBaseURLKey = "propertyManager.apiBaseURL"
     static let apiBaseURL = "http://100.85.36.72:5062"
+    static let manualLibraryBaseURLKey = "propertyManager.manualLibraryBaseURL"
+    static let manualLibraryBaseURL = ""
     static let apiKeyKey = "propertyManager.apiKey"
     static let operatorPINKey = "propertyManager.operatorPIN"
     static let operatorIdentityKey = "propertyManager.operatorIdentity"
@@ -27,6 +31,8 @@ enum PropertyManagerBuildEnvironment {
 final class PropertyStore: ObservableObject {
     @AppStorage(PropertyManagerBuildEnvironment.apiBaseURLKey)
     var apiBaseURL: String = PropertyManagerBuildEnvironment.apiBaseURL
+    @AppStorage(PropertyManagerBuildEnvironment.manualLibraryBaseURLKey)
+    var manualLibraryBaseURL: String = PropertyManagerBuildEnvironment.manualLibraryBaseURL
     @AppStorage(PropertyManagerBuildEnvironment.apiKeyKey)
     var apiKey: String = ""
     @AppStorage(PropertyManagerBuildEnvironment.operatorPINKey)
@@ -69,7 +75,8 @@ final class PropertyStore: ObservableObject {
     }
 
     var filteredTasks: [MaintenanceTask] {
-        tasks
+        let searchWords = TaskSearch.words(in: searchText)
+        return tasks
             .filter { task in
                 if !TaskAssetContext.includes(
                     taskAssetId: task.assetId,
@@ -101,33 +108,44 @@ final class PropertyStore: ObservableObject {
                         return false
                     }
                 }
-                if !searchText.isEmpty {
-                    let needle = searchText.lowercased()
-                    let group = TaskTitle.displayAssetName(task: task, assets: assets)
-                    let display = TaskTitle.displayItemTitle(item: task.item, group: group)
-                    let haystack = [
-                        task.area,
-                        task.item,
-                        group,
-                        display,
-                        task.categoryName,
-                        task.priority,
-                        task.notes ?? "",
-                        task.taskDescription ?? "",
-                        task.partNumber ?? "",
-                        task.vendor ?? "",
-                        task.suppliesNeeded ?? "",
-                        task.primaryPartNumber ?? "",
-                        task.origin.label,
-                        task.manufacturer ?? "",
-                        task.sourceManualName ?? "",
-                    ].joined(separator: " ").lowercased()
-                    if !haystack.contains(needle) {
-                        return false
-                    }
+                if !searchWords.isEmpty, !TaskSearch.matches(fields: searchFields(for: task), words: searchWords) {
+                    return false
                 }
                 return true
             }
+    }
+
+    func searchFields(for task: MaintenanceTask) -> [String] {
+        let group = TaskTitle.displayAssetName(task: task, assets: assets)
+        return [
+            task.area,
+            task.item,
+            group,
+            TaskTitle.displayItemTitle(item: task.item, group: group),
+            task.categoryName,
+            task.priority,
+            task.notes ?? "",
+            task.taskDescription ?? "",
+            task.partNumber ?? "",
+            task.vendor ?? "",
+            task.suppliesNeeded ?? "",
+            task.primaryPartNumber ?? "",
+            task.origin.label,
+            task.manufacturer ?? "",
+            task.sourceManualName ?? "",
+        ]
+    }
+
+    func assetMatches(for query: String) -> [AssetSearchMatch] {
+        TaskSearch.assetMatches(
+            assets: assets,
+            tasks: tasks,
+            words: TaskSearch.words(in: query),
+            taskFields: searchFields(for:),
+            taskTitle: { task in
+                TaskTitle.displayItemTitle(item: task.item, group: TaskTitle.displayAssetName(task: task, assets: self.assets))
+            }
+        )
     }
 
     /// Sections by asset name (or area), A–Z; within section display title A–Z.

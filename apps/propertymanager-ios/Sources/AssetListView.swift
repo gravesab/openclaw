@@ -5,21 +5,17 @@ struct AssetListView: View {
     @State private var selectedAsset: RanchAsset?
     @State private var assetPendingDeactivate: RanchAsset?
     @State private var showDeactivateConfirm = false
-
-    var visibleAssets: [RanchAsset] {
-        store.assets.sorted {
-            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
-        }
-    }
+    @State private var searchText = ""
 
     var body: some View {
         List {
             if store.isLoadingAssets {
                 ProgressView("Loading assets…")
             }
-            ForEach(visibleAssets) { asset in
+            ForEach(store.assetMatches(for: searchText)) { match in
+                let asset = match.asset
                 NavigationLink(value: asset.id) {
-                    AssetRowView(asset: asset)
+                    AssetRowView(asset: asset, matchingTaskTitles: match.matchingTaskTitles)
                 }
                 .simultaneousGesture(TapGesture().onEnded {
                     store.selectedTaskAssetId = asset.id
@@ -33,6 +29,11 @@ struct AssetListView: View {
             }
         }
         .navigationTitle("Assets")
+        .searchable(
+            text: $searchText,
+            placement: .navigationBarDrawer(displayMode: .always),
+            prompt: "Filter assets or tasks (any word)"
+        )
         .navigationDestination(for: UUID.self) { assetId in
             AssetDetailView(assetId: assetId)
         }
@@ -66,11 +67,23 @@ struct AssetListView: View {
 
 struct AssetRowView: View {
     let asset: RanchAsset
+    var matchingTaskTitles: [String] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(asset.name)
                 .font(.headline)
+            ForEach(matchingTaskTitles.prefix(3), id: \.self) { title in
+                Label(title, systemImage: "magnifyingglass")
+                    .font(.caption)
+                    .foregroundStyle(.blue)
+                    .lineLimit(2)
+            }
+            if matchingTaskTitles.count > 3 {
+                Text("+\(matchingTaskTitles.count - 3) more matching tasks")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             if let meter = asset.meter, meter.hasMeter {
                 Text("\(formatValue(meter.currentValue)) \(meter.unit)")
                     .font(.subheadline)

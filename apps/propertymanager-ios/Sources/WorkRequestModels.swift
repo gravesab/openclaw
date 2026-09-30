@@ -3,14 +3,14 @@ import Foundation
 struct WorkRequestMaterial: Identifiable, Codable, Hashable {
     let id = UUID()
     var name = ""
-    var quantity = "1"
+    var quantity = ""
     var unit = ""
     var note = ""
 
-    func payload() -> [String: Any]? {
-        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedName.isEmpty else { return nil }
-        return ["name": trimmedName, "quantity": quantity, "unit": unit, "note": note]
+    static func manualEntry() -> WorkRequestMaterial {
+        var material = WorkRequestMaterial()
+        material.quantity = "1"
+        return material
     }
 }
 
@@ -35,6 +35,10 @@ struct WorkRequestIntakeDraft {
     var materials: [WorkRequestMaterial] = []
     var attachmentIDs: [String] = []
     var idempotencyKey = UUID().uuidString
+    private(set) var frozenSubmission: WorkRequestSubmission?
+    private(set) var frozenIdempotencyKey: String?
+
+    var hasFrozenSubmission: Bool { frozenSubmission != nil }
 
     func payload() throws -> WorkRequestSubmission {
         try WorkRequestPayload.make(
@@ -46,15 +50,37 @@ struct WorkRequestIntakeDraft {
         )
     }
 
-    func submit(
-        using sender: (WorkRequestSubmission, String) async throws -> SubmittedWorkRequest
-    ) async throws -> SubmittedWorkRequest {
-        try await sender(try payload(), idempotencyKey)
+    mutating func beginSubmissionAttempt() throws -> (WorkRequestSubmission, String) {
+        if let frozenSubmission, let frozenIdempotencyKey {
+            return (frozenSubmission, frozenIdempotencyKey)
+        }
+        let payload = try self.payload()
+        let key = idempotencyKey
+        frozenSubmission = payload
+        frozenIdempotencyKey = key
+        return (payload, key)
     }
 
-    mutating func replacePhotoSelection() {
+    mutating func submit(
+        using sender: (WorkRequestSubmission, String) async throws -> SubmittedWorkRequest
+    ) async throws -> SubmittedWorkRequest {
+        let (payload, key) = try beginSubmissionAttempt()
+        return try await sender(payload, key)
+    }
+
+    /// Clears the frozen retry and rotates the key. The edited draft can then be submitted as a new request.
+    mutating func releaseFrozenSubmission() {
+        frozenSubmission = nil
+        frozenIdempotencyKey = nil
+        idempotencyKey = UUID().uuidString
+    }
+
+    @discardableResult
+    mutating func replacePhotoSelection() -> Bool {
+        guard frozenSubmission == nil else { return false }
         attachmentIDs = []
         idempotencyKey = UUID().uuidString
+        return true
     }
 
     mutating func resetAfterSuccessfulSubmission() {
@@ -97,19 +123,29 @@ enum WorkRequestPayload {
         guard assetID != nil || !location.isEmpty else {
             throw PropertyAPIError.serverMessage("Choose an asset or enter an area/location.")
         }
+        var materialPayloads: [WorkRequestMaterialPayload] = []
+        for material in materials {
+            let trimmedName = material.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedName.isEmpty else { continue }
+            guard let quantity = WorkRequestQuantities.accepted(material.quantity) else {
+                throw PropertyAPIError.serverMessage(
+                    "Enter a positive quantity for \(trimmedName), or remove that material."
+                )
+            }
+            materialPayloads.append(
+                WorkRequestMaterialPayload(
+                    name: trimmedName,
+                    quantity: quantity,
+                    unit: material.unit.trimmingCharacters(in: .whitespacesAndNewlines),
+                    note: material.note.trimmingCharacters(in: .whitespacesAndNewlines)
+                )
+            )
+        }
         return WorkRequestSubmission(
             description: report,
             area: location.isEmpty ? nil : location,
             assetID: assetID,
-            materials: materials.compactMap { material in
-                guard let value = material.payload() else { return nil }
-                return WorkRequestMaterialPayload(
-                    name: value["name"] as? String ?? "",
-                    quantity: value["quantity"] as? String ?? "1",
-                    unit: value["unit"] as? String ?? "",
-                    note: value["note"] as? String ?? ""
-                )
-            },
+            materials: materialPayloads,
             attachmentIDs: attachmentIDs
         )
     }

@@ -1,6 +1,7 @@
 import Foundation
 
 enum TaskFilter: String, CaseIterable, Identifiable {
+    case toDo = "To Do"
     case all = "All"
     case due = "Due"
     case overdue = "Overdue"
@@ -207,6 +208,16 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         let daysUntil = Calendar.current.dateComponents([.day], from: now, to: nextDue).day ?? 999
         if daysUntil <= warningDays { return .dueSoon }
         return .ok
+    }
+
+    /// Due today or past due. Uses the due date, not `warningDays`: most tasks carry warning
+    /// windows as long as their interval, so a just-completed task would never leave the list.
+    func isToDo(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        if dueMeter == true || overdueMeter == true { return true }
+        guard let endOfToday = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now)) else {
+            return true
+        }
+        return nextDue < endOfToday
     }
 
     var requiresMeterOnComplete: Bool {

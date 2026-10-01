@@ -45,7 +45,7 @@ final class PropertyStore: ObservableObject {
     @Published var assets: [RanchAsset] = []
     @Published var selectedTaskAssetId: UUID?
     @Published var deepLinkAssetId: UUID?
-    @Published var filter: TaskFilter = .all
+    @Published var filter: TaskFilter = .toDo
     @Published var originFilter: OriginFilter = .all
     @Published var selectedCategory: String = "All"
     @Published var searchText: String = ""
@@ -91,6 +91,8 @@ final class PropertyStore: ObservableObject {
                     return false
                 }
                 switch filter {
+                case .toDo:
+                    if !task.isToDo() { return false }
                 case .all:
                     break
                 case .due:
@@ -197,6 +199,7 @@ final class PropertyStore: ObservableObject {
         errorMessage = nil
         statusMessage = "Testing connection…"
         do {
+            try await client.authCheck()
             let health = try await client.health()
             // Refresh without wiping the connection probe message until the end.
             await refresh(clearStatus: false)

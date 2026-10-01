@@ -72,5 +72,18 @@ struct RootView: View {
         .onOpenURL { url in
             store.handleDeepLink(url)
         }
+        .alert(
+            "Property Manager Error",
+            isPresented: Binding(
+                get: { store.errorMessage != nil },
+                set: { if !$0 { store.errorMessage = nil } }
+            )
+        ) {
+            Button("OK", role: .cancel) {
+                store.errorMessage = nil
+            }
+        } message: {
+            Text(store.errorMessage ?? "Unknown error.")
+        }
     }
 }

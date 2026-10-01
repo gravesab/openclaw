@@ -3,10 +3,6 @@ import SwiftUI
 struct TaskListView: View {
     @EnvironmentObject private var store: PropertyStore
     @State private var completingTask: MaintenanceTask?
-    @State private var completionNote = ""
-    @State private var meterConfirmValue = ""
-    @State private var confirmCurrentMeter = false
-    @State private var linkedAsset: RanchAsset?
     @State private var showManualLibrary = false
 
     var body: some View {
@@ -37,12 +33,6 @@ struct TaskListView: View {
                             groupName: section.name
                         ) {
                             completingTask = task
-                            completionNote = ""
-                            meterConfirmValue = ""
-                            confirmCurrentMeter = false
-                            if task.requiresMeterOnComplete, let assetId = task.assetId {
-                                Task { await loadAssetForCompletion(assetId) }
-                            }
                         }
                     }
                 }
@@ -87,7 +77,10 @@ struct TaskListView: View {
             }
         }
         .sheet(item: $completingTask) { task in
-            completionSheet(task)
+            TaskCompletionSheet(task: task) {
+                completingTask = nil
+            }
+            .environmentObject(store)
         }
         .sheet(isPresented: $showManualLibrary) {
             NavigationStack {
@@ -100,90 +93,6 @@ struct TaskListView: View {
             }
             .environmentObject(store)
         }
-    }
-
-    @ViewBuilder
-    private func completionSheet(_ task: MaintenanceTask) -> some View {
-        let group = TaskTitle.displayAssetName(task: task, assets: store.assets)
-        let title = TaskTitle.displayItemTitle(item: task.item, group: group)
-        NavigationStack {
-            Form {
-                Section("Task") {
-                    Text("\(group) / \(title)")
-                    if let eta = TaskTitle.estimatedTimeLabel(minutes: task.estimatedMinutes) {
-                        Text(eta)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                Section("Note") {
-                    TextField("Completion note", text: $completionNote)
-                }
-                if task.requiresMeterOnComplete {
-                    Section("Meter at completion") {
-                        if let asset = linkedAsset, let meter = asset.meter {
-                            Text("Current: \(formatValue(meter.currentValue)) \(meter.unit)")
-                                .foregroundStyle(.secondary)
-                        }
-                        Toggle("Confirm current meter reading", isOn: $confirmCurrentMeter)
-                            .onChange(of: confirmCurrentMeter) { _, on in
-                                if on { meterConfirmValue = "" }
-                            }
-                        if !confirmCurrentMeter {
-                            TextField("Enter new meter value", text: $meterConfirmValue)
-                                .keyboardType(.decimalPad)
-                        }
-                    }
-                }
-            }
-            .navigationTitle("Complete task")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { completingTask = nil }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        Task { await complete(task) }
-                    }
-                    .disabled(store.isCompleting || !meterInputValid(task))
-                }
-            }
-        }
-    }
-
-    private func meterInputValid(_ task: MaintenanceTask) -> Bool {
-        guard task.requiresMeterOnComplete else { return true }
-        if confirmCurrentMeter { return true }
-        return Double(meterConfirmValue.replacingOccurrences(of: ",", with: ".")) != nil
-    }
-
-    private func complete(_ task: MaintenanceTask) async {
-        var meterValue: Double?
-        if task.requiresMeterOnComplete, !confirmCurrentMeter {
-            meterValue = Double(meterConfirmValue.replacingOccurrences(of: ",", with: "."))
-        }
-        let ok = await store.complete(
-            task: task,
-            note: completionNote.isEmpty ? nil : completionNote,
-            meterValue: meterValue,
-            confirmCurrentMeter: confirmCurrentMeter
-        )
-        if ok { completingTask = nil }
-    }
-
-    private func loadAssetForCompletion(_ assetId: UUID) async {
-        do {
-            linkedAsset = try await store.client.fetchAsset(id: assetId)
-            if let current = linkedAsset?.meter?.currentValue {
-                meterConfirmValue = formatValue(current)
-            }
-        } catch {
-            store.errorMessage = error.localizedDescription
-        }
-    }
-
-    private func formatValue(_ value: Double?) -> String {
-        guard let value else { return "" }
-        return value.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
     }
 }
 

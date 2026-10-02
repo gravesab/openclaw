@@ -2,6 +2,7 @@ from ranchbrain.memory_store import remember, link_memories, find_backlinks
 
 def test_find_backlinks():
     source = remember(
+        tenant_id="test-tenant",
         module="property",
         category="test",
         title="Backlink source test",
@@ -11,6 +12,7 @@ def test_find_backlinks():
     )
 
     target = remember(
+        tenant_id="test-tenant",
         module="property",
         category="test",
         title="Backlink target test",
@@ -24,8 +26,9 @@ def test_find_backlinks():
         target.memory_id,
         relationship_type="related",
         note="Backlink test",
+        tenant_id="test-tenant",
     )
 
-    backlinks = find_backlinks(target.memory_id)
+    backlinks = find_backlinks(target.memory_id, tenant_id="test-tenant")
 
     assert any(memory.id == source.memory_id for _, memory, _ in backlinks)

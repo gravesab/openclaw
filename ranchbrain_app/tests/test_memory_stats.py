@@ -2,6 +2,7 @@ from ranchbrain.memory_store import remember, memory_stats
 
 def test_memory_stats():
     remember(
+    tenant_id="test-tenant",
         module="property",
         category="test",
         title="Memory stats test",
@@ -10,7 +11,7 @@ def test_memory_stats():
         tags=["stats-test"],
     )
 
-    stats = memory_stats()
+    stats = memory_stats(tenant_id="test-tenant")
     assert stats["total"] >= 1
     assert "property" in stats["modules"]
     assert "event" in stats["types"]

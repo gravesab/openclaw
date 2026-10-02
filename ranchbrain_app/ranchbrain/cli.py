@@ -1,14 +1,16 @@
+import os
 import sys
 import argparse
 from pathlib import Path
 from .config import RANCHBRAIN_DATA, MODULES_DIR
-from .indexer import build_index, load_index, index_status
+from .indexer import build_index, load_index, index_status, stamp_legacy_index_tenant
 from .search_engine import search as index_search
 from .graph_search import graph_search
 from .relationship_suggestions import suggest_relationships
 from .doctor import run_doctor
 from .profile_manager import PROFILES
-from .memory_store import remember as remember_memory, find_memory_by_id, list_memories, memory_stats, link_memories, find_backlinks
+from .memory_store import remember as remember_memory, find_memory_by_id, list_memories, memory_stats, link_memories, find_backlinks, stamp_legacy_memories_tenant
+from .tenancy import TenancyError
 
 MODULES = ["system", "budget", "health", "property", "projects", "homeassistant"]
 
@@ -28,15 +30,15 @@ def status(profile: str = "knowledge"):
         count = len([x for x in module_path.rglob("*") if x.is_file()]) if module_path.exists() else 0
         print(f"{name}: {count} files")
 
-def search(query: str, profile: str = "knowledge") -> None:
-    hits, total = index_search(query, profile=profile)
+def search(query: str, profile: str = "knowledge", tenant_id: str | None = None) -> None:
+    hits, total = index_search(query, profile=profile, tenant_id=tenant_id)
 
     if not hits:
         print("No matches found.")
         return
 
-    for path, line_no, line in hits:
-        print(f"{path}:{line_no}: {line}")
+    for hit in hits:
+        print(f"{hit['path']}:{hit['line']}: {hit['text']}")
 
     print(f"\nShowing {len(hits)} of {total} indexed line matches for profile: {profile}.")
 
@@ -62,6 +64,16 @@ def profiles_cmd() -> None:
         print(f"Exclude top: {sorted(profile.exclude_top) if profile.exclude_top else 'none'}")
         print(f"Exclude any: {sorted(profile.exclude_any) if profile.exclude_any else 'none'}")
 
+def cli_tenant_id(flag_value: str = "") -> str:
+    """Explicit tenant from --tenant flag or RANCHBRAIN_TENANT env. Exits 2 if missing."""
+    if flag_value.strip():
+        return flag_value.strip()
+    env_tenant = os.environ.get("RANCHBRAIN_TENANT", "").strip()
+    if env_tenant:
+        return env_tenant
+    print("❌ --tenant is required (or set RANCHBRAIN_TENANT)")
+    raise SystemExit(2)
+
 def memory_cmd(argv: list[str]) -> None:
     if len(argv) >= 1 and argv[0] == "suggest":
         parser = argparse.ArgumentParser(
@@ -70,6 +82,7 @@ def memory_cmd(argv: list[str]) -> None:
         parser.add_argument("memory_id")
         parser.add_argument("--limit", type=int, default=10)
         parser.add_argument("--min-score", type=int, default=20)
+        parser.add_argument("--tenant", default="")
         parser.add_argument(
             "--include-tests",
             action="store_true",
@@ -91,8 +104,9 @@ def memory_cmd(argv: list[str]) -> None:
                 limit=args.limit,
                 min_score=args.min_score,
                 include_tests=args.include_tests,
+                tenant_id=cli_tenant_id(args.tenant),
             )
-        except ValueError as exc:
+        except (ValueError, TenancyError) as exc:
             print(f"❌ {exc}")
             raise SystemExit(1)
 
@@ -117,13 +131,14 @@ def memory_cmd(argv: list[str]) -> None:
         return
 
     if len(argv) >= 1 and argv[0] == "backlinks":
-        if len(argv) < 2:
-            print("Usage: ranchbrain memory backlinks <memory_id>")
-            raise SystemExit(1)
+        parser = argparse.ArgumentParser(prog="ranchbrain memory backlinks")
+        parser.add_argument("memory_id")
+        parser.add_argument("--tenant", default="")
+        args = parser.parse_args(argv[1:])
 
         try:
-            backlinks = find_backlinks(argv[1])
-        except ValueError as e:
+            backlinks = find_backlinks(args.memory_id, tenant_id=cli_tenant_id(args.tenant))
+        except (ValueError, TenancyError) as e:
             print(f"❌ {e}")
             raise SystemExit(1)
 
@@ -142,13 +157,18 @@ def memory_cmd(argv: list[str]) -> None:
         return
 
     if len(argv) >= 1 and argv[0] == "relationships":
-        if len(argv) < 2:
-            print("Usage: ranchbrain memory relationships <memory_id>")
-            raise SystemExit(1)
+        parser = argparse.ArgumentParser(prog="ranchbrain memory relationships")
+        parser.add_argument("memory_id")
+        parser.add_argument("--tenant", default="")
+        args = parser.parse_args(argv[1:])
 
-        result = find_memory_by_id(argv[1])
+        try:
+            result = find_memory_by_id(args.memory_id, tenant_id=cli_tenant_id(args.tenant))
+        except TenancyError as e:
+            print(f"❌ {e}")
+            raise SystemExit(1)
         if result is None:
-            print(f"Memory not found: {argv[1]}")
+            print(f"Memory not found: {args.memory_id}")
             raise SystemExit(1)
 
         _, memory = result
@@ -166,10 +186,19 @@ def memory_cmd(argv: list[str]) -> None:
                 print(f"    Note: {rel.note}")
         return
 
-    if len(argv) >= 2 and argv[0] == "show":
-        result = find_memory_by_id(argv[1])
+    if len(argv) >= 1 and argv[0] == "show":
+        parser = argparse.ArgumentParser(prog="ranchbrain memory show")
+        parser.add_argument("memory_id")
+        parser.add_argument("--tenant", default="")
+        args = parser.parse_args(argv[1:])
+
+        try:
+            result = find_memory_by_id(args.memory_id, tenant_id=cli_tenant_id(args.tenant))
+        except TenancyError as e:
+            print(f"❌ {e}")
+            raise SystemExit(1)
         if not result:
-            print(f"Memory not found: {argv[1]}")
+            print(f"Memory not found: {args.memory_id}")
             raise SystemExit(1)
 
         path, memory = result
@@ -184,6 +213,7 @@ def memory_cmd(argv: list[str]) -> None:
         parser.add_argument("--category", default="")
         parser.add_argument("--tag", default="")
         parser.add_argument("--limit", type=int, default=25)
+        parser.add_argument("--tenant", default="")
         args = parser.parse_args(argv[1:])
 
         items = list_memories(
@@ -192,6 +222,7 @@ def memory_cmd(argv: list[str]) -> None:
             memory_type=args.memory_type or None,
             category=args.category or None,
             tag=args.tag or None,
+            tenant_id=cli_tenant_id(args.tenant),
         )
 
         if not items:
@@ -213,6 +244,7 @@ def memory_cmd(argv: list[str]) -> None:
         parser.add_argument("target_id")
         parser.add_argument("--type", default="related", dest="relationship_type")
         parser.add_argument("--note", default="")
+        parser.add_argument("--tenant", default="")
         args = parser.parse_args(argv[1:])
 
         try:
@@ -221,6 +253,7 @@ def memory_cmd(argv: list[str]) -> None:
                 args.target_id,
                 relationship_type=args.relationship_type,
                 note=args.note,
+                tenant_id=cli_tenant_id(args.tenant),
             )
         except ValueError as e:
             print(f"❌ {e}")
@@ -233,7 +266,10 @@ def memory_cmd(argv: list[str]) -> None:
         return
 
     if len(argv) >= 1 and argv[0] == "stats":
-        stats = memory_stats()
+        parser = argparse.ArgumentParser(prog="ranchbrain memory stats")
+        parser.add_argument("--tenant", default="")
+        args = parser.parse_args(argv[1:])
+        stats = memory_stats(tenant_id=cli_tenant_id(args.tenant))
         print("RanchBrain Memory Stats")
         print("=======================")
         print(f"Total memories: {stats['total']}")
@@ -244,6 +280,7 @@ def memory_cmd(argv: list[str]) -> None:
         return
 
     print("Usage:")
+    print("  All memory commands take [--tenant ID] (or set RANCHBRAIN_TENANT).")
     print("  ranchbrain memory show <id>")
     print("  ranchbrain memory relationships <id>")
     print("  ranchbrain memory backlinks <id>")
@@ -262,6 +299,7 @@ def remember_cmd(argv: list[str]) -> None:
     parser.add_argument("--body", required=True)
     parser.add_argument("--tags", default="")
     parser.add_argument("--url", default="")
+    parser.add_argument("--tenant", default="")
 
     args = parser.parse_args(argv)
 
@@ -275,6 +313,7 @@ def remember_cmd(argv: list[str]) -> None:
         memory_type=args.memory_type,
         tags=tags,
         url=args.url or None,
+        tenant_id=cli_tenant_id(args.tenant),
     )
 
     if result.status == "created":
@@ -331,14 +370,18 @@ def main() -> None:
             default=1,
             help="Relationship traversal depth from 0 to 5. Default: 1.",
         )
+        parser.add_argument("--tenant", default="")
         args = parser.parse_args(sys.argv[2:])
         query = " ".join(args.query)
 
-        search(query, profile=args.profile)
+        search(query, profile=args.profile, tenant_id=cli_tenant_id(args.tenant))
 
         if args.related:
             try:
-                nodes = graph_search(query, max_depth=args.depth)
+                nodes = graph_search(
+                    query, max_depth=args.depth,
+                    tenant_id=cli_tenant_id(args.tenant),
+                )
             except ValueError as exc:
                 print(f"❌ {exc}")
                 raise SystemExit(2)
@@ -423,7 +466,7 @@ def main() -> None:
             action="store_true",
             help="Force incremental indexing."
         )
-
+        parser.add_argument("--tenant", default="")
         args = parser.parse_args(sys.argv[2:])
 
         incremental = True
@@ -435,6 +478,7 @@ def main() -> None:
         records = build_index(
             profile_name=args.profile,
             incremental=incremental,
+            tenant_id=cli_tenant_id(args.tenant),
         )
 
         mode = "full" if not incremental else "incremental"
@@ -446,5 +490,5 @@ def main() -> None:
     else:
         print("Usage:")
         print("  ranchbrain status")
-        print('  ranchbrain search "query"')
+        print('  ranchbrain search "query" [--tenant ID]')
         raise SystemExit(1)

@@ -2,6 +2,7 @@ from ranchbrain.memory_store import remember
 
 def test_duplicate_returns_existing_memory_id():
     first = remember(
+        tenant_id="test-tenant",
         module="property",
         category="test",
         title="Duplicate ID accuracy test",
@@ -11,6 +12,7 @@ def test_duplicate_returns_existing_memory_id():
     )
 
     second = remember(
+        tenant_id="test-tenant",
         module="property",
         category="test",
         title="Duplicate ID accuracy test",

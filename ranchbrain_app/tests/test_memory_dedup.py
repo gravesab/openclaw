@@ -2,6 +2,7 @@ from ranchbrain.memory_store import remember
 
 def test_remember_deduplicates_identical_memory():
     first = remember(
+        tenant_id="test-tenant",
         module="property",
         category="test",
         title="Dedup test memory",
@@ -11,6 +12,7 @@ def test_remember_deduplicates_identical_memory():
     )
 
     second = remember(
+        tenant_id="test-tenant",
         module="property",
         category="test",
         title="Dedup test memory",

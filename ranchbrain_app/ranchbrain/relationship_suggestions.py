@@ -70,8 +70,9 @@ def suggest_relationships(
     limit: int = 10,
     min_score: int = 20,
     include_tests: bool = False,
+    tenant_id: str | None = None,
 ) -> list[RelationshipSuggestion]:
-    found = find_memory_by_id(memory_id)
+    found = find_memory_by_id(memory_id, tenant_id=tenant_id)
 
     if not found:
         raise ValueError(f"Memory not found: {memory_id}")
@@ -92,7 +93,7 @@ def suggest_relationships(
 
     suggestions: list[RelationshipSuggestion] = []
 
-    for path, candidate in list_memories(limit=100000):
+    for path, candidate in list_memories(limit=100000, tenant_id=found[1].tenant_id):
         if candidate.id == source.id:
             continue
 

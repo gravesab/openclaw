@@ -18,6 +18,7 @@ class Memory:
     category: str
     title: str
     body: str
+    tenant_id: str = ""
     memory_type: MemoryType = "document"
     tags: List[str] = field(default_factory=list)
     references: List[Reference] = field(default_factory=list)

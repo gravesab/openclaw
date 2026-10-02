@@ -6,6 +6,7 @@ from .models import Memory, Reference, MemoryResult
 from .logging_config import get_logger
 from .indexer import build_index
 from .renderers import render_memory_markdown
+from .tenancy import TenancyError, require_tenant_id
 
 logger = get_logger(__name__)
 
@@ -13,6 +14,7 @@ MEMORIES_DIR = RANCHBRAIN_DATA / "memories"
 
 def memory_fingerprint(memory: Memory) -> str:
     seed = "|".join([
+        memory.tenant_id.strip().lower(),
         memory.module.strip().lower(),
         memory.category.strip().lower(),
         memory.memory_type.strip().lower(),
@@ -37,12 +39,15 @@ def find_duplicate(memory: Memory) -> Path | None:
             continue
 
         existing = Memory.from_dict(data)
+        if existing.tenant_id != memory.tenant_id:
+            continue
         if memory_fingerprint(existing) == fingerprint:
             return path
 
     return None
 
 def save_memory(memory: Memory) -> MemoryResult:
+    require_tenant_id(memory.tenant_id or None)
     duplicate = find_duplicate(memory)
     if duplicate:
         existing_id = memory.id
@@ -75,7 +80,7 @@ def save_memory(memory: Memory) -> MemoryResult:
     md_path = render_memory_markdown(memory, path)
 
     logger.info(f"Saved memory id={memory.id} path={path} markdown={md_path}")
-    build_index()
+    build_index(tenant_id=memory.tenant_id)
     return MemoryResult(
         status="created",
         path=str(path),
@@ -91,6 +96,7 @@ def remember(
     memory_type: str = "event",
     tags: list[str] | None = None,
     url: str | None = None,
+    tenant_id: str | None = None,
 ) -> MemoryResult:
     refs = []
     if url:
@@ -101,6 +107,7 @@ def remember(
         category=category,
         title=title,
         body=body,
+        tenant_id=require_tenant_id(tenant_id),
         memory_type=memory_type,
         tags=tags or [],
         references=refs,
@@ -108,7 +115,8 @@ def remember(
 
     return save_memory(memory)
 
-def find_memory_by_id(memory_id: str):
+def find_memory_by_id(memory_id: str, tenant_id: str | None = None):
+    tenant = require_tenant_id(tenant_id)
     if not MEMORIES_DIR.exists():
         return None
 
@@ -120,6 +128,8 @@ def find_memory_by_id(memory_id: str):
         except Exception:
             continue
 
+        if data.get("tenant_id", "") != tenant:
+            continue
         if data.get("id", "").startswith(memory_id):
             return path, Memory.from_dict(data)
 
@@ -131,7 +141,9 @@ def list_memories(
     memory_type: str | None = None,
     category: str | None = None,
     tag: str | None = None,
+    tenant_id: str | None = None,
 ):
+    tenant = require_tenant_id(tenant_id)
     base = MEMORIES_DIR / module if module else MEMORIES_DIR
     results = []
 
@@ -143,6 +155,9 @@ def list_memories(
             data = json.loads(path.read_text())
             memory = Memory.from_dict(data)
         except Exception:
+            continue
+
+        if memory.tenant_id != tenant:
             continue
 
         if memory_type and memory.memory_type != memory_type:
@@ -161,7 +176,8 @@ def list_memories(
 
     return results
 
-def memory_stats():
+def memory_stats(tenant_id: str | None = None):
+    tenant = require_tenant_id(tenant_id)
     stats = {
         "total": 0,
         "modules": {},
@@ -182,6 +198,9 @@ def memory_stats():
         except Exception:
             continue
 
+        if memory.tenant_id != tenant:
+            continue
+
         stats["total"] += 1
         stats["modules"][memory.module] = stats["modules"].get(memory.module, 0) + 1
         stats["types"][memory.memory_type] = stats["types"].get(memory.memory_type, 0) + 1
@@ -196,11 +215,13 @@ def memory_stats():
 def link_memories(source_id: str,
                   target_id: str,
                   relationship_type: str = "related",
-                  note: str = ""):
-    """Create a relationship from one memory to another."""
+                  note: str = "",
+                  tenant_id: str | None = None):
+    """Create a relationship from one memory to another within one tenant."""
 
-    source = find_memory_by_id(source_id)
-    target = find_memory_by_id(target_id)
+    tenant = require_tenant_id(tenant_id)
+    source = find_memory_by_id(source_id, tenant_id=tenant)
+    target = find_memory_by_id(target_id, tenant_id=tenant)
 
     if not source:
         raise ValueError(f"Memory not found: {source_id}")
@@ -228,7 +249,7 @@ def link_memories(source_id: str,
     )
 
     source_path.write_text(memory.to_json())
-    build_index()
+    build_index(tenant_id=tenant)
 
     logger.info(
         "Linked memory %s -> %s (%s)",
@@ -240,9 +261,39 @@ def link_memories(source_id: str,
     return True
 
 
-def find_backlinks(target_id: str):
-    """Return memories that point to the target memory."""
-    target = find_memory_by_id(target_id)
+def stamp_legacy_memories_tenant(tenant_id: str) -> int:
+    """Stamp tenant-less memory files with the bootstrap tenant id.
+
+    Idempotent: files already stamped with this tenant are untouched.
+    Files stamped with a different tenant are refused, never reassigned.
+    Returns the number of files stamped.
+    """
+    tenant = require_tenant_id(tenant_id)
+    stamped = 0
+    if not MEMORIES_DIR.exists():
+        return stamped
+    for path in sorted(MEMORIES_DIR.rglob("*.json")):
+        if "_archive" in path.parts:
+            continue
+        try:
+            data = json.loads(path.read_text())
+        except Exception:
+            continue
+        existing = data.get("tenant_id", "")
+        if existing == tenant:
+            continue
+        if existing:
+            raise TenancyError(f"memory file already belongs to another tenant: {path}")
+        data["tenant_id"] = tenant
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False))
+        stamped += 1
+    return stamped
+
+
+def find_backlinks(target_id: str, tenant_id: str | None = None):
+    """Return memories that point to the target memory, within one tenant."""
+    tenant = require_tenant_id(tenant_id)
+    target = find_memory_by_id(target_id, tenant_id=tenant)
 
     if not target:
         raise ValueError(f"Memory not found: {target_id}")
@@ -261,6 +312,9 @@ def find_backlinks(target_id: str):
             data = json.loads(path.read_text())
             memory = Memory.from_dict(data)
         except Exception:
+            continue
+
+        if memory.tenant_id != tenant:
             continue
 
         for rel in memory.relationships:

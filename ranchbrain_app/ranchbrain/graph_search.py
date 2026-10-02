@@ -5,6 +5,7 @@ from pathlib import Path
 
 from .memory_store import MEMORIES_DIR
 from .models import Memory
+from .tenancy import require_tenant_id
 
 
 @dataclass
@@ -18,7 +19,7 @@ class GraphNode:
     note: str = ""
 
 
-def _active_memories() -> dict[str, tuple[Path, Memory]]:
+def _active_memories(tenant_id: str) -> dict[str, tuple[Path, Memory]]:
     items: dict[str, tuple[Path, Memory]] = {}
 
     if not MEMORIES_DIR.exists():
@@ -32,6 +33,9 @@ def _active_memories() -> dict[str, tuple[Path, Memory]]:
             data = json.loads(path.read_text())
             memory = Memory.from_dict(data)
         except Exception:
+            continue
+
+        if memory.tenant_id != tenant_id:
             continue
 
         items[memory.id] = (path, memory)
@@ -58,7 +62,7 @@ def _memory_matches(memory: Memory, query: str) -> bool:
     return any(q in str(value).casefold() for value in values)
 
 
-def graph_search(query: str, max_depth: int = 1) -> list[GraphNode]:
+def graph_search(query: str, max_depth: int = 1, tenant_id: str | None = None) -> list[GraphNode]:
     """Search structured memories, then traverse relationships using BFS."""
     if max_depth < 0:
         raise ValueError("Depth must be zero or greater.")
@@ -66,7 +70,7 @@ def graph_search(query: str, max_depth: int = 1) -> list[GraphNode]:
     if max_depth > 5:
         raise ValueError("Maximum graph-search depth is 5.")
 
-    memories = _active_memories()
+    memories = _active_memories(require_tenant_id(tenant_id))
     nodes: list[GraphNode] = []
     queue: deque[tuple[str, int]] = deque()
     visited: set[str] = set()

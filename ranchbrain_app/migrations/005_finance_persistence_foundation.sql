@@ -189,6 +189,10 @@ CREATE UNIQUE INDEX finance_interpretations_reverses_unique
 CREATE UNIQUE INDEX finance_interpretations_supersedes_unique
     ON ranchos.finance_interpretations (tenant_id, supersedes_id)
     WHERE supersedes_id IS NOT NULL;
+-- One independent posting per activity; reversals and replacements stay insertable.
+CREATE UNIQUE INDEX finance_interpretations_independent_activity_unique
+    ON ranchos.finance_interpretations (tenant_id, source_activity_id)
+    WHERE reverses_id IS NULL AND supersedes_id IS NULL;
 
 CREATE TABLE ranchos.finance_splits (
     tenant_id uuid NOT NULL,

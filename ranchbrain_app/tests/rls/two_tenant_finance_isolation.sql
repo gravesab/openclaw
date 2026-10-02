@@ -297,6 +297,14 @@ $$;
 RESET ROLE;
 SET LOCAL ranchos.principal_id = '00000000-0000-0000-0000-000000000001';
 SET LOCAL ranchos.tenant_id = '00000000-0000-0000-0000-0000000000a1';
+INSERT INTO ranchos.finance_source_activities (
+    tenant_id, id, source_account_id, source_artifact_id, posted_at, description, amount,
+    provenance_source_type, provenance_source_id, provenance_source_version, provenance_observed_at,
+    created_by_user_id
+) VALUES (
+    '00000000-0000-0000-0000-0000000000a1', 'activity-a-probe', 'acct-checking-a', 'artifact-a', CURRENT_TIMESTAMP, 'Groceries', -42.00,
+    'fixture', 'activity-a-probe', 'fixture-v1', CURRENT_TIMESTAMP, '00000000-0000-0000-0000-000000000011'
+);
 DO $$
 BEGIN
     INSERT INTO ranchos.finance_journal_entries (
@@ -307,7 +315,7 @@ BEGIN
     INSERT INTO ranchos.finance_interpretations (
         tenant_id, id, source_activity_id, journal_entry_id, created_by_user_id
     ) VALUES (
-        '00000000-0000-0000-0000-0000000000a1', 'interp-zero', 'activity-a', 'journal-zero',
+        '00000000-0000-0000-0000-0000000000a1', 'interp-zero', 'activity-a-probe', 'journal-zero',
         '00000000-0000-0000-0000-000000000011'
     );
     INSERT INTO ranchos.finance_splits (
@@ -341,7 +349,7 @@ BEGIN
     INSERT INTO ranchos.finance_interpretations (
         tenant_id, id, source_activity_id, journal_entry_id, created_by_user_id
     ) VALUES (
-        '00000000-0000-0000-0000-0000000000a1', 'interp-one', 'activity-a', 'journal-one',
+        '00000000-0000-0000-0000-0000000000a1', 'interp-one', 'activity-a-probe', 'journal-one',
         '00000000-0000-0000-0000-000000000011'
     );
     INSERT INTO ranchos.finance_splits (
@@ -360,29 +368,6 @@ END;
 $$;
 SET CONSTRAINTS ALL DEFERRED;
 
-INSERT INTO ranchos.finance_journal_entries (
-    tenant_id, id, recorded_at, created_by_user_id
-) VALUES (
-    '00000000-0000-0000-0000-0000000000a1', 'journal-ok', CURRENT_TIMESTAMP, '00000000-0000-0000-0000-000000000011'
-);
-INSERT INTO ranchos.finance_journal_lines (
-    tenant_id, journal_entry_id, line_no, account_id, debit, credit
-) VALUES
-    ('00000000-0000-0000-0000-0000000000a1', 'journal-ok', 0, 'acct-groceries-a', 42.00, 0.00),
-    ('00000000-0000-0000-0000-0000000000a1', 'journal-ok', 1, 'acct-checking-a', 0.00, 42.00);
-INSERT INTO ranchos.finance_interpretations (
-    tenant_id, id, source_activity_id, journal_entry_id, created_by_user_id
-) VALUES (
-    '00000000-0000-0000-0000-0000000000a1', 'interp-ok', 'activity-a', 'journal-ok',
-    '00000000-0000-0000-0000-000000000011'
-);
-INSERT INTO ranchos.finance_splits (
-    tenant_id, interpretation_id, split_no, amount, destination_account_id,
-    allocation_domain, allocation_target_type, allocation_target_id
-) VALUES (
-    '00000000-0000-0000-0000-0000000000a1', 'interp-ok', 0, -42.00, 'acct-groceries-a',
-    'household', 'none', NULL
-);
 SET CONSTRAINTS ranchos.finance_interpretations_journal_complete,
                 ranchos.finance_interpretations_split_presence,
                 ranchos.finance_interpretations_split_derived,
@@ -404,7 +389,7 @@ BEGIN
     INSERT INTO ranchos.finance_interpretations (
         tenant_id, id, source_activity_id, journal_entry_id, created_by_user_id
     ) VALUES (
-        '00000000-0000-0000-0000-0000000000a1', 'interp-unrep', 'activity-a', 'journal-unrep',
+        '00000000-0000-0000-0000-0000000000a1', 'interp-unrep', 'activity-a-probe', 'journal-unrep',
         '00000000-0000-0000-0000-000000000011'
     );
     INSERT INTO ranchos.finance_splits (
@@ -439,7 +424,7 @@ BEGIN
         tenant_id, id, source_activity_id, journal_entry_id, reverses_id, created_by_user_id
     ) VALUES (
         '00000000-0000-0000-0000-0000000000a1', 'interp-unbound', 'activity-a', 'journal-unbound',
-        'interp-ok', '00000000-0000-0000-0000-000000000011'
+        'interp-a', '00000000-0000-0000-0000-000000000011'
     );
     SET CONSTRAINTS ranchos.finance_interpretations_reversal_bound IMMEDIATE;
     RAISE EXCEPTION 'unbound reversal journal was accepted';
@@ -455,7 +440,7 @@ BEGIN
     INSERT INTO ranchos.finance_journal_entries (
         tenant_id, id, recorded_at, reverses_journal_id, created_by_user_id
     ) VALUES (
-        '00000000-0000-0000-0000-0000000000a1', 'journal-noninvert', CURRENT_TIMESTAMP, 'journal-ok',
+        '00000000-0000-0000-0000-0000000000a1', 'journal-noninvert', CURRENT_TIMESTAMP, 'journal-a',
         '00000000-0000-0000-0000-000000000011'
     );
     INSERT INTO ranchos.finance_journal_lines (
@@ -467,7 +452,7 @@ BEGIN
         tenant_id, id, source_activity_id, journal_entry_id, reverses_id, created_by_user_id
     ) VALUES (
         '00000000-0000-0000-0000-0000000000a1', 'interp-noninvert', 'activity-a', 'journal-noninvert',
-        'interp-ok', '00000000-0000-0000-0000-000000000011'
+        'interp-a', '00000000-0000-0000-0000-000000000011'
     );
     SET CONSTRAINTS ranchos.finance_interpretations_reversal_bound IMMEDIATE;
     RAISE EXCEPTION 'non-inverted reversal journal was accepted';
@@ -494,7 +479,7 @@ BEGIN
         tenant_id, id, source_activity_id, journal_entry_id, supersedes_id, created_by_user_id
     ) VALUES (
         '00000000-0000-0000-0000-0000000000a1', 'interp-unpaired', 'activity-a', 'journal-unpaired',
-        'interp-ok', '00000000-0000-0000-0000-000000000011'
+        'interp-a', '00000000-0000-0000-0000-000000000011'
     );
     INSERT INTO ranchos.finance_splits (
         tenant_id, interpretation_id, split_no, amount, destination_account_id,
@@ -515,7 +500,7 @@ SET CONSTRAINTS ALL DEFERRED;
 INSERT INTO ranchos.finance_journal_entries (
     tenant_id, id, recorded_at, reverses_journal_id, created_by_user_id
 ) VALUES (
-    '00000000-0000-0000-0000-0000000000a1', 'journal-rev-ok', CURRENT_TIMESTAMP, 'journal-ok',
+    '00000000-0000-0000-0000-0000000000a1', 'journal-rev-ok', CURRENT_TIMESTAMP, 'journal-a',
     '00000000-0000-0000-0000-000000000011'
 );
 INSERT INTO ranchos.finance_journal_lines (
@@ -527,7 +512,7 @@ INSERT INTO ranchos.finance_interpretations (
     tenant_id, id, source_activity_id, journal_entry_id, reverses_id, created_by_user_id
 ) VALUES (
     '00000000-0000-0000-0000-0000000000a1', 'interp-rev-ok', 'activity-a', 'journal-rev-ok',
-    'interp-ok', '00000000-0000-0000-0000-000000000011'
+    'interp-a', '00000000-0000-0000-0000-000000000011'
 );
 INSERT INTO ranchos.finance_journal_entries (
     tenant_id, id, recorded_at, created_by_user_id
@@ -543,7 +528,7 @@ INSERT INTO ranchos.finance_interpretations (
     tenant_id, id, source_activity_id, journal_entry_id, supersedes_id, created_by_user_id
 ) VALUES (
     '00000000-0000-0000-0000-0000000000a1', 'interp-rep-ok', 'activity-a', 'journal-rep-ok',
-    'interp-ok', '00000000-0000-0000-0000-000000000011'
+    'interp-a', '00000000-0000-0000-0000-000000000011'
 );
 INSERT INTO ranchos.finance_splits (
     tenant_id, interpretation_id, split_no, amount, destination_account_id,

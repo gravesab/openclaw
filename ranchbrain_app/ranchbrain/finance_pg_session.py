@@ -34,6 +34,7 @@ from ranchbrain.finance_write_repository import (
     FinancePersistenceErrorCode,
     SourceArtifactRecord,
 )
+from ranchbrain.tenancy import require_tenant_id
 
 _RUNTIME_ROLE = "ranchos_dev_runtime"
 
@@ -108,6 +109,7 @@ class FinancePgSession:
         self._execute("SELECT set_config(%s, %s, true)", ("role", _RUNTIME_ROLE))
 
     def set_local(self, *, principal_id: str, environment: str, tenant_id: str) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         self._principal_id = principal_id
         self._execute("SELECT set_config(%s, %s, true)", ("ranchos.principal_id", principal_id))
         self._execute("SELECT set_config(%s, %s, true)", ("ranchos.environment", environment))
@@ -120,6 +122,7 @@ class FinancePgSession:
         return value
 
     def load_idempotency(self, tenant_id: str, scope: str, identity: str) -> FinanceIdempotencyRecord | None:
+        tenant_id = require_tenant_id(tenant_id)
         row = self._fetchone(
             """
             SELECT i.tenant_id, i.scope, i.identity, i.key_digest, i.operation, i.outcome,
@@ -156,6 +159,7 @@ class FinancePgSession:
         )
 
     def insert_idempotency_reservation(self, record: FinanceIdempotencyRecord) -> None:
+        require_tenant_id(record.tenant_id)
         self._execute_one(
             """
             INSERT INTO ranchos.finance_idempotency (
@@ -180,6 +184,7 @@ class FinancePgSession:
         )
 
     def finalize_idempotency(self, record: FinanceIdempotencyRecord) -> None:
+        require_tenant_id(record.tenant_id)
         self._execute_one(
             """
             UPDATE ranchos.finance_idempotency
@@ -209,6 +214,7 @@ class FinancePgSession:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         try:
             self._execute_one(
                 """
@@ -237,12 +243,17 @@ class FinancePgSession:
             _reraise_missing(error)
 
     def lock_account(self, tenant_id: str, account_id: str) -> Account | None:
+        tenant_id = require_tenant_id(tenant_id)
+        # Runtime holds SELECT/INSERT only, so take a transaction-scoped advisory lock instead of a row lock.
+        self._execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"{tenant_id}:finance:account:{account_id}",),
+        )
         row = self._fetchone(
             """
             SELECT id, name, account_type, institution
             FROM ranchos.finance_accounts
             WHERE tenant_id = %s AND id = %s
-            FOR UPDATE
             """,
             (tenant_id, account_id),
         )
@@ -259,6 +270,7 @@ class FinancePgSession:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         try:
             self._execute_one(
                 """
@@ -294,13 +306,18 @@ class FinancePgSession:
             _reraise_missing(error)
 
     def lock_artifact(self, tenant_id: str, artifact_id: str) -> SourceArtifactRecord | None:
+        tenant_id = require_tenant_id(tenant_id)
+        # Runtime holds SELECT/INSERT only, so take a transaction-scoped advisory lock instead of a row lock.
+        self._execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"{tenant_id}:finance:artifact:{artifact_id}",),
+        )
         row = self._fetchone(
             """
             SELECT id, kind, original_filename, content_digest, media_type, byte_size, parser_version,
                    period_start, period_end, account_id
             FROM ranchos.finance_source_artifacts
             WHERE tenant_id = %s AND id = %s
-            FOR UPDATE
             """,
             (tenant_id, artifact_id),
         )
@@ -329,6 +346,7 @@ class FinancePgSession:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         try:
             self._execute_one(
                 """
@@ -359,12 +377,17 @@ class FinancePgSession:
             _reraise_missing(error)
 
     def lock_activity(self, tenant_id: str, activity_id: str) -> SourceActivity | None:
+        tenant_id = require_tenant_id(tenant_id)
+        # Runtime holds SELECT/INSERT only, so take a transaction-scoped advisory lock instead of a row lock.
+        self._execute(
+            "SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))",
+            (f"{tenant_id}:finance:activity:{activity_id}",),
+        )
         row = self._fetchone(
             """
             SELECT id, source_account_id, posted_at, description, amount
             FROM ranchos.finance_source_activities
             WHERE tenant_id = %s AND id = %s
-            FOR UPDATE
             """,
             (tenant_id, activity_id),
         )
@@ -373,6 +396,7 @@ class FinancePgSession:
         return SourceActivity(_text(row[0]), _text(row[1]), row[2], _text(row[3]), _money(row[4]))
 
     def load_ledger(self, tenant_id: str) -> FinanceLedger:
+        tenant_id = require_tenant_id(tenant_id)
         account_rows = self._fetchall(
             """
             SELECT id, name, account_type, institution
@@ -421,6 +445,7 @@ class FinancePgSession:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         try:
             self._execute_one(
                 """
@@ -444,6 +469,7 @@ class FinancePgSession:
         debit: object,
         credit: object,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         try:
             self._execute_one(
                 """
@@ -465,6 +491,7 @@ class FinancePgSession:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         try:
             self._execute_one(
                 """
@@ -500,6 +527,7 @@ class FinancePgSession:
         allocation_target_type: str | None,
         allocation_target_id: str | None,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         try:
             self._execute_one(
                 """
@@ -524,6 +552,7 @@ class FinancePgSession:
             _reraise_missing(error)
 
     def insert_audit(self, record: FinanceAuditRecord) -> None:
+        require_tenant_id(record.tenant_id)
         self._execute_one(
             """
             INSERT INTO ranchos.finance_mutation_audit (
@@ -560,6 +589,7 @@ class FinancePgSession:
         self._connection.rollback()
 
     def _load_interpretation(self, tenant_id: str, interpretation_id: str) -> Interpretation:
+        tenant_id = require_tenant_id(tenant_id)
         row = self._fetchone(
             """
             SELECT i.id, i.source_activity_id, i.journal_entry_id, i.reverses_id, i.supersedes_id,

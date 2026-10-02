@@ -13,7 +13,7 @@ from enum import Enum
 from typing import Protocol
 
 from ranchbrain.finance_model import Account, FinanceLedger, Interpretation, SourceActivity
-from ranchbrain.tenancy import TenantContext
+from ranchbrain.tenancy import TenantContext, require_tenant_id
 
 
 ACCOUNT_CREATE_OPERATION = "ranchos.finance.account-create"
@@ -294,6 +294,7 @@ class FinanceWriteRepository:
         transaction_id: str,
         operation: str,
     ) -> IdempotencyReservation:
+        require_tenant_id(context.tenant_id)
         existing = session.load_idempotency(context.tenant_id, operation, identity)
         if existing is None:
             reserved = FinanceIdempotencyRecord(
@@ -343,6 +344,7 @@ class FinanceWriteRepository:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         session.insert_account(
             tenant_id=tenant_id,
             account=account,
@@ -361,6 +363,7 @@ class FinanceWriteRepository:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         session.insert_artifact(
             tenant_id=tenant_id,
             artifact=artifact,
@@ -380,6 +383,7 @@ class FinanceWriteRepository:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         session.insert_activity(
             tenant_id=tenant_id,
             activity=activity,
@@ -398,6 +402,7 @@ class FinanceWriteRepository:
         created_by_user_id: str,
         created_at: datetime,
     ) -> None:
+        tenant_id = require_tenant_id(tenant_id)
         journal = interpretation.journal_entry
         try:
             session.insert_journal_entry(
@@ -446,9 +451,11 @@ class FinanceWriteRepository:
             raise
 
     def insert_audit(self, session: FinanceMutationSession, record: FinanceAuditRecord) -> None:
+        require_tenant_id(record.tenant_id)
         session.insert_audit(record)
 
     def finalize_idempotency(self, session: FinanceMutationSession, record: FinanceIdempotencyRecord) -> None:
+        require_tenant_id(record.tenant_id)
         if record.outcome != "committed" or record.scope != record.operation or not _committed_result_is_exact(record):
             raise FinancePersistenceError("idempotency outcome is ambiguous", FinancePersistenceErrorCode.IDEMPOTENCY_AMBIGUOUS)
         session.finalize_idempotency(record)

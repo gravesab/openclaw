@@ -16,6 +16,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import unittest
 from uuid import uuid4
 
@@ -761,12 +762,22 @@ class FinanceMutationsDisposablePgTests(unittest.TestCase):
 
     def test_interpretation_journal_must_be_complete_at_commit(self) -> None:
         interpretation = self._post_grocery()
-        activity_id = interpretation.source_activity_id
         groceries_id = interpretation.splits[0].destination_account_id
         checking_id = interpretation.journal_entry.lines[1].account_id
-        self._assert_commit_check_violation(lambda cursor: self._insert_posting(cursor, activity_id, groceries_id, checking_id, line_count=0))
-        self._assert_commit_check_violation(lambda cursor: self._insert_posting(cursor, activity_id, groceries_id, checking_id, line_count=1))
-        control_id = self._insert_and_commit_posting(activity_id, groceries_id, checking_id, line_count=2)
+        control_activity_id = self._record_uninterpreted_activity(checking_id)
+        self._assert_commit_check_violation(
+            lambda cursor: self._insert_posting(
+                cursor, control_activity_id, groceries_id, checking_id, line_count=0
+            )
+        )
+        self._assert_commit_check_violation(
+            lambda cursor: self._insert_posting(
+                cursor, control_activity_id, groceries_id, checking_id, line_count=1
+            )
+        )
+        control_id = self._insert_and_commit_posting(
+            control_activity_id, groceries_id, checking_id, line_count=2
+        )
         loaded = self._load_interpretation(control_id)
         self.assertEqual(len(loaded.journal_entry.lines), 2)
         self.assertEqual(loaded.journal_entry.lines[0].debit, loaded.journal_entry.lines[1].credit)
@@ -818,6 +829,56 @@ class FinanceMutationsDisposablePgTests(unittest.TestCase):
         self.assertEqual(loaded.supersedes_id, original.id)
         reversal = next(item for item in self._load_ledger().interpretations if item.reverses_id == original.id)
         self.assertEqual(reversal.journal_entry.lines, reverse_journal_lines(original.journal_entry.lines))
+
+    def test_second_independent_posting_raises_unique_violation(self) -> None:
+        interpretation = self._post_grocery()
+        groceries_id = interpretation.splits[0].destination_account_id
+        checking_id = interpretation.journal_entry.lines[1].account_id
+        cursor = self._inspect_conn.cursor()
+        try:
+            self._begin_runtime(cursor)
+            with self.assertRaises(Exception) as raised:
+                self._insert_posting(cursor, interpretation.source_activity_id, groceries_id, checking_id, line_count=2)
+            self.assertEqual(getattr(raised.exception, "pgcode", None), "23505")
+            self._inspect_conn.rollback()
+        finally:
+            cursor.close()
+
+    def test_advisory_lock_serializes_second_session_until_commit(self) -> None:
+        interpretation = self._post_grocery()
+        account_id = interpretation.journal_entry.lines[1].account_id
+        first_conn = self._connect()
+        second_conn = self._connect()
+        try:
+            first = FinancePgSession(first_conn)
+            first.begin()
+            first.set_local(principal_id=PRINCIPAL_A, environment="development", tenant_id=TENANT_A)
+            locked = first.lock_account(TENANT_A, account_id)
+            self.assertIsNotNone(locked)
+            outcome: dict[str, object] = {}
+
+            def take_lock() -> None:
+                try:
+                    second = FinancePgSession(second_conn)
+                    second.begin()
+                    second.set_local(principal_id=PRINCIPAL_A, environment="development", tenant_id=TENANT_A)
+                    outcome["account"] = second.lock_account(TENANT_A, account_id)
+                    second.commit()
+                    outcome["done"] = True
+                except Exception as error:
+                    outcome["error"] = error
+
+            worker = threading.Thread(target=take_lock, daemon=True)
+            worker.start()
+            worker.join(timeout=3)
+            self.assertFalse(outcome.get("done", False), "second session must block while the first session holds the lock")
+            first_conn.commit()
+            worker.join(timeout=15)
+            self.assertTrue(outcome.get("done", False), f"second session did not proceed after commit: {outcome.get('error')}")
+            self.assertEqual(outcome["account"].id, account_id)
+        finally:
+            first_conn.close()
+            second_conn.close()
 
     def _post_grocery(self):
         now = datetime.now(timezone.utc)
@@ -879,6 +940,24 @@ class FinanceMutationsDisposablePgTests(unittest.TestCase):
             now=now,
         )
         return interpretation
+
+    def _record_uninterpreted_activity(self, checking_id: str) -> str:
+        now = datetime.now(timezone.utc)
+        activity = SourceActivity(f"act-{uuid4()}", checking_id, now, "Store", Decimal("-12.00"))
+        self._coordinator().record_source_activity(
+            principal=_principal(PRINCIPAL_A, f"corr-{activity.id}", now),
+            requested_tenant_id=TENANT_A,
+            request=FinanceSourceActivityRequest(
+                activity,
+                FinanceFactProvenance("fixture", activity.id, "fixture-v1", now),
+                f"idem-{activity.id}",
+                POLICY_VERSION,
+                VALIDATOR_VERSION,
+            ),
+            session=self._session(),
+            now=now,
+        )
+        return activity.id
 
     def _begin_runtime(self, cursor) -> None:
         cursor.execute("SELECT set_config(%s, %s, true)", ("role", "ranchos_dev_runtime"))

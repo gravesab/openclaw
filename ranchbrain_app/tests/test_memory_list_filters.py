@@ -2,6 +2,7 @@ from ranchbrain.memory_store import remember, list_memories
 
 def test_list_memories_filters():
     remember(
+        tenant_id="test-tenant",
         module="property",
         category="maintenance",
         title="Filter test memory",
@@ -11,6 +12,7 @@ def test_list_memories_filters():
     )
 
     items = list_memories(
+        tenant_id="test-tenant",
         module="property",
         memory_type="event",
         category="maintenance",

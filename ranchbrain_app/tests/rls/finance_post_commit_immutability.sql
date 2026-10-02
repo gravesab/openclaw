@@ -131,6 +131,33 @@ BEGIN
     RAISE NOTICE 'finance post-commit immutability: original posting unchanged';
 END;
 $$;
+DO $$
+BEGIN
+    BEGIN
+        UPDATE ranchos.finance_accounts SET name = 'mutated' WHERE id = 'acct-immut-checking';
+        RAISE EXCEPTION 'runtime updated a finance domain row';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+    BEGIN
+        DELETE FROM ranchos.finance_accounts WHERE id = 'acct-immut-checking';
+        RAISE EXCEPTION 'runtime deleted a finance domain row';
+    EXCEPTION WHEN insufficient_privilege THEN
+        NULL;
+    END;
+    INSERT INTO ranchos.finance_mutation_audit (
+        tenant_id, id, transaction_id, operation, targets, actor_user_id, principal_id, correlation_id,
+        policy_version, validator_version, idempotency_outcome, provenance_source_type, provenance_source_id,
+        provenance_source_version, result_metadata
+    ) VALUES (
+        '00000000-0000-0000-0000-0000000000a1', '00000000-0000-0000-0000-000000000901',
+        '00000000-0000-0000-0000-00000000000b', 'ranchos.finance.account-create', 'acct-immut-checking',
+        '00000000-0000-0000-0000-000000000011', '00000000-0000-0000-0000-000000000001', 'corr-immut',
+        'policy-v1', 'validator-v1', 'committed', 'fixture', 'acct-immut-checking', 'fixture-v1', 'created'
+    );
+    RAISE NOTICE 'finance post-commit immutability: domain writes denied, audit insert allowed';
+END;
+$$;
 SELECT 'finance post-commit immutability: extra journal lines denied' AS marker
 UNION ALL
 SELECT 'finance post-commit immutability: extra split denied'

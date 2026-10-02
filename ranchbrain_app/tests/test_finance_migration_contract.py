@@ -162,3 +162,11 @@ class FinanceMigrationContractTests(unittest.TestCase):
         self.assertIn("finance_interpretations_reversal_bound", sql)
         self.assertIn("USING ERRCODE = '23514'", sql)
         self.assertIn("DEFERRABLE INITIALLY DEFERRED", sql)
+        self.assertIn("CREATE UNIQUE INDEX finance_interpretations_independent_activity_unique", sql)
+        self.assertIn(
+            "ON ranchos.finance_interpretations (tenant_id, source_activity_id)\n"
+            "    WHERE reverses_id IS NULL AND supersedes_id IS NULL",
+            sql,
+        )
+        self.assertIn("CREATE UNIQUE INDEX finance_interpretations_reverses_unique", sql)
+        self.assertIn("CREATE UNIQUE INDEX finance_interpretations_supersedes_unique", sql)

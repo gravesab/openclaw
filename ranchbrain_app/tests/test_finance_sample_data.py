@@ -1,3 +1,10 @@
+"""Sample-data coherence checks (in-memory model only).
+
+Passing only proves in-memory model coherence, not live PG correctness;
+live correctness requires disposable PG tests
+test_finance_mutations_disposable_pg.py and RLS proofs.
+"""
+
 from decimal import Decimal
 import unittest
 

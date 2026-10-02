@@ -3,6 +3,7 @@ from ranchbrain.memory_store import remember
 
 def test_remember_creates_memory_file():
     result = remember(
+        tenant_id="test-tenant",
         module="system",
         category="test",
         title="Test memory",

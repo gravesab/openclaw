@@ -28,6 +28,14 @@ class TenancyError(PermissionError):
         self.code = code
 
 
+def require_tenant_id(tenant_id: str | None) -> str:
+    """Fail closed unless the caller names an explicit tenant."""
+
+    if tenant_id is None or not tenant_id.strip():
+        raise TenancyError("an explicit tenant selection is required")
+    return tenant_id.strip()
+
+
 class Role(str, Enum):
     OWNER = "owner"
     MANAGER = "manager"

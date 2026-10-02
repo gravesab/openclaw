@@ -1,6 +1,7 @@
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+from types import SimpleNamespace
 import unittest
 
 from ranchbrain.finance_model import (
@@ -31,6 +32,7 @@ from ranchbrain.finance_mutation_coordinator import (
     FinanceSourceArtifactRequest,
     canonical_account_create_digest,
 )
+from ranchbrain.finance_pg_session import FinancePgSession
 from ranchbrain.finance_write_repository import (
     ACCOUNT_CREATE_OPERATION,
     INTERPRETATION_POST_OPERATION,
@@ -47,6 +49,7 @@ from ranchbrain.tenancy import (
     Tenant,
     TenantContextResolver,
     TenantMembership,
+    TenancyError,
     User,
     VerifiedPrincipal,
 )
@@ -698,6 +701,23 @@ class FinanceMutationCoordinatorTests(unittest.TestCase):
             )
         self.assertEqual(raised.exception.code, FinanceMutationErrorCode.INVALID_CORRECTION)
         self.assertTrue(correction_session.rolled_back)
+
+    def test_repository_and_session_reject_missing_tenant_before_any_write(self):
+        repository = FinanceWriteRepository()
+        session = FakeSession()
+        with self.assertRaises(TenancyError):
+            repository.persist_account(
+                session,
+                tenant_id="  ",
+                account=checking(),
+                provenance=provenance(),
+                created_by_user_id=USER_A,
+                created_at=NOW,
+            )
+        self.assertEqual(session.events, [])
+        pg_session = FinancePgSession(SimpleNamespace(autocommit=False))
+        with self.assertRaises(TenancyError):
+            pg_session.load_ledger("")
 
 
 class _ConcurrentIdempotencySession(FakeSession):

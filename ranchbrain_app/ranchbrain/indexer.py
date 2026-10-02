@@ -1,14 +1,49 @@
 import json
 import hashlib
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 from .config import RANCHBRAIN_DATA
 from .logging_config import get_logger
 from .profile_manager import get_profile, should_index_path
+from .tenancy import TenancyError, require_tenant_id
 
 logger = get_logger(__name__)
 
 INDEX_PATH = RANCHBRAIN_DATA / "index" / "index.json"
+
+BOOTSTRAP_TENANT_ENV_VAR = "RANCHBRAIN_BOOTSTRAP_TENANT"
+
+def get_bootstrap_tenant_id() -> str:
+    """Read the bootstrap tenant id from DEV configuration (environment)."""
+    return require_tenant_id(os.environ.get(BOOTSTRAP_TENANT_ENV_VAR))
+
+def stamp_legacy_index_tenant(profile_name: str, tenant_id: str) -> int:
+    """Stamp tenant-less index records with the bootstrap tenant id.
+
+    Idempotent: records already stamped with this tenant are untouched.
+    Records stamped with a different tenant are refused, never reassigned.
+    Returns the number of records stamped.
+    """
+    tenant = require_tenant_id(tenant_id)
+    path = index_path_for_profile(profile_name)
+    if not path.exists():
+        return 0
+    records = json.loads(path.read_text())
+    stamped = 0
+    for record in records:
+        existing = record.get("tenant_id", "")
+        if existing == tenant:
+            continue
+        if existing:
+            raise TenancyError(
+                f"index record already belongs to another tenant: {record.get('path', '?')}"
+            )
+        record["tenant_id"] = tenant
+        stamped += 1
+    if stamped:
+        path.write_text(json.dumps(records, indent=2, ensure_ascii=False))
+    return stamped
 
 def index_path_for_profile(profile_name: str) -> Path:
     return RANCHBRAIN_DATA / "index" / f"{profile_name}.json"
@@ -20,7 +55,8 @@ def file_sha256(path: Path) -> str:
             h.update(chunk)
     return h.hexdigest()
 
-def build_index(profile_name: str = "knowledge", incremental: bool = True) -> list[dict]:
+def build_index(profile_name: str = "knowledge", incremental: bool = True, tenant_id: str | None = None) -> list[dict]:
+    tenant = require_tenant_id(tenant_id)
     profile = get_profile(profile_name)
     records = []
     old_records = {}
@@ -77,6 +113,7 @@ def build_index(profile_name: str = "knowledge", incremental: bool = True) -> li
                 "relative_path": rel,
                 "module": rel.split("/", 1)[0] if "/" in rel else "root",
                 "profile": profile.name,
+                "tenant_id": tenant,
                 "title": path.name,
                 "size_bytes": stat.st_size,
                 "mtime": stat.st_mtime,

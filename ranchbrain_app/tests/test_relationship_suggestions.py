@@ -4,6 +4,7 @@ from ranchbrain.relationship_suggestions import suggest_relationships
 
 def test_suggest_relationships_uses_shared_tags():
     source = remember(
+        tenant_id="test-tenant",
         module="property",
         category="maintenance",
         title="Suggestion source",
@@ -13,6 +14,7 @@ def test_suggest_relationships_uses_shared_tags():
     )
 
     target = remember(
+        tenant_id="test-tenant",
         module="property",
         category="maintenance",
         title="Suggestion target",
@@ -24,6 +26,7 @@ def test_suggest_relationships_uses_shared_tags():
     suggestions = suggest_relationships(
         source.memory_id,
         min_score=20,
+        tenant_id="test-tenant",
     )
 
     assert any(
@@ -34,6 +37,7 @@ def test_suggest_relationships_uses_shared_tags():
 
 def test_suggestions_exclude_existing_relationships():
     source = remember(
+        tenant_id="test-tenant",
         module="property",
         category="test",
         title="Existing link suggestion source",
@@ -42,6 +46,7 @@ def test_suggestions_exclude_existing_relationships():
     )
 
     target = remember(
+        tenant_id="test-tenant",
         module="property",
         category="test",
         title="Existing link suggestion target",
@@ -51,11 +56,12 @@ def test_suggestions_exclude_existing_relationships():
 
     from ranchbrain.memory_store import link_memories
 
-    link_memories(source.memory_id, target.memory_id)
+    link_memories(source.memory_id, target.memory_id, tenant_id="test-tenant")
 
     suggestions = suggest_relationships(
         source.memory_id,
         min_score=0,
+        tenant_id="test-tenant",
     )
 
     assert all(
@@ -65,6 +71,7 @@ def test_suggestions_exclude_existing_relationships():
 
 def test_suggestions_hide_test_like_titles_by_default():
     source = remember(
+        tenant_id="test-tenant",
         module="property",
         category="maintenance",
         title="Operational suggestion source",
@@ -73,6 +80,7 @@ def test_suggestions_hide_test_like_titles_by_default():
     )
 
     candidate = remember(
+        tenant_id="test-tenant",
         module="property",
         category="maintenance",
         title="Temporary filter test memory",
@@ -83,11 +91,13 @@ def test_suggestions_hide_test_like_titles_by_default():
     default_results = suggest_relationships(
         source.memory_id,
         min_score=20,
+        tenant_id="test-tenant",
     )
     included_results = suggest_relationships(
         source.memory_id,
         min_score=20,
         include_tests=True,
+        tenant_id="test-tenant",
     )
 
     assert all(

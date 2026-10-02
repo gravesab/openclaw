@@ -13,7 +13,8 @@ from errors import error_response
 
 API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "").strip()
 REVIEW_API_KEY = os.environ.get("PROPERTYMANAGER_REVIEW_API_KEY", "").strip()
-DEV_OPERATOR_PIN = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "dev-pin").strip()
+# No default: an unset PIN disables PIN auth instead of accepting a well-known value.
+OPERATOR_PIN = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "").strip()
 AUTH_DISABLED = os.environ.get("PROPERTYMANAGER_AUTH_DISABLED", "").strip().lower() in {
     "1",
     "true",
@@ -100,9 +101,9 @@ def _resolve_identity(*, allow_pin: bool) -> dict[str, str | None] | None:
             "integration": request.headers.get("X-Integration-Identity"),
         }
 
-    if allow_pin:
+    if allow_pin and OPERATOR_PIN:
         pin = request.headers.get("X-Operator-PIN") or request.form.get("operator_pin") or ""
-        if pin and pin == DEV_OPERATOR_PIN:
+        if pin and hmac.compare_digest(pin, OPERATOR_PIN):
             return {
                 "operator": request.headers.get("X-Operator-Identity", "qr-operator"),
                 "integration": "dashboard-qr",
@@ -115,7 +116,7 @@ def auth_status() -> dict:
     return {
         "auth_required": not AUTH_DISABLED,
         "auth_mode": "disabled" if AUTH_DISABLED else "api_key",
-        "pin_auth_supported": bool(DEV_OPERATOR_PIN),
+        "pin_auth_supported": bool(OPERATOR_PIN),
         "review_auth_configured": bool(
             REVIEW_API_KEY
             and not (API_KEY and hmac.compare_digest(REVIEW_API_KEY, API_KEY))

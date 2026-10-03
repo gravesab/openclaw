@@ -7,16 +7,12 @@ import Foundation
 
 extension PropertyAPIClient {
     func fetchAssets() async throws -> [MacRanchAsset] {
-        let url = try makeURL("v1/assets")
-        let (data, response) = try await Self.sharedSession.data(from: url)
-        try validate(response, data: data)
+        let data = try await authorizedGET(makeURL("v1/assets"))
         return try MacAssetList.decode(from: data, using: decoder)
     }
 
     func fetchAsset(id: UUID) async throws -> MacRanchAsset {
-        let url = try makeURL("v1/assets/\(id.uuidString)")
-        let (data, response) = try await Self.sharedSession.data(from: url)
-        try validate(response, data: data)
+        let data = try await authorizedGET(makeURL("v1/assets/\(id.uuidString)"))
         return try decoder.decode(MacRanchAsset.self, from: data)
     }
 
@@ -69,9 +65,7 @@ extension PropertyAPIClient {
     }
 
     func fetchMeterReadings(assetId: UUID, limit: Int = 50) async throws -> [MacMeterReading] {
-        let url = try makeURL("v1/assets/\(assetId.uuidString)/meter-readings?limit=\(limit)")
-        let (data, response) = try await Self.sharedSession.data(from: url)
-        try validate(response, data: data)
+        let data = try await authorizedGET(makeURL("v1/assets/\(assetId.uuidString)/meter-readings?limit=\(limit)"))
         let page = try decoder.decode(MacMeterReadingPage.self, from: data)
         return page.items
     }
@@ -124,7 +118,7 @@ extension PropertyAPIClient {
         var body: [String: Any] = [
             "preview_token": preview.previewToken,
             "correction_reason": correctionReason,
-            "operator_identity": "mac-operator",
+            "operator_identity": operatorIdentity,
         ]
         if let note, !note.isEmpty { body["note"] = note }
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -157,6 +151,20 @@ extension PropertyAPIClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["is_active": isActive])
         let (data, response) = try await Self.sharedSession.data(for: request)
         try validate(response, data: data)
+    }
+
+    /// Sets or clears (`nil`) the civil placed-in-service date.
+    func updatePlacedInServiceDate(id: UUID, date: Date?) async throws -> MacRanchAsset {
+        let url = try makeURL("v1/assets/\(id.uuidString)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        meterApplyAuth(&request)
+        let value: Any = date.map { MacCivilDate.string(from: $0) } ?? NSNull()
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["placed_in_service_date": value])
+        let (data, response) = try await Self.sharedSession.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(MacRanchAsset.self, from: data)
     }
 
     func deactivateAsset(id: UUID) async throws {
@@ -331,6 +339,8 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
     var meterActivatedAt: Date?
     var tasks: [MacAssetTaskSummary]?
     var pmSummary: MacPMSummary?
+    /// Civil date (`yyyy-MM-dd`) the asset was first placed into service.
+    var placedInServiceDate: String?
 
     enum CodingKeys: String, CodingKey {
         case id, name, category, meter, tasks
@@ -338,6 +348,7 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         case proposedMeter = "proposed_meter"
         case meterActivatedAt = "meter_activated_at"
         case pmSummary = "pm_summary"
+        case placedInServiceDate = "placed_in_service_date"
     }
 
     init(
@@ -349,7 +360,8 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         proposedMeter: MacProposedMeter?,
         meterActivatedAt: Date?,
         tasks: [MacAssetTaskSummary]?,
-        pmSummary: MacPMSummary?
+        pmSummary: MacPMSummary?,
+        placedInServiceDate: String? = nil
     ) {
         self.id = id
         self.externalId = externalId
@@ -360,6 +372,7 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         self.meterActivatedAt = meterActivatedAt
         self.tasks = tasks
         self.pmSummary = pmSummary
+        self.placedInServiceDate = placedInServiceDate
     }
 
     init(from decoder: Decoder) throws {
@@ -373,6 +386,9 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         meterActivatedAt = MacFlexibleDate.decode(c, key: .meterActivatedAt)
         tasks = try c.decodeIfPresent([MacAssetTaskSummary].self, forKey: .tasks)
         pmSummary = try c.decodeIfPresent(MacPMSummary.self, forKey: .pmSummary)
+        placedInServiceDate = MacCivilDate.normalized(
+            try? c.decodeIfPresent(String.self, forKey: .placedInServiceDate)
+        )
     }
 
     func encode(to encoder: Encoder) throws {
@@ -386,6 +402,7 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(meterActivatedAt, forKey: .meterActivatedAt)
         try c.encodeIfPresent(tasks, forKey: .tasks)
         try c.encodeIfPresent(pmSummary, forKey: .pmSummary)
+        try c.encodeIfPresent(placedInServiceDate, forKey: .placedInServiceDate)
     }
 
     var meterNeedsActivation: Bool {
@@ -634,5 +651,35 @@ private enum MacFlexibleDate {
             padded = frac.padding(toLength: 3, withPad: "0", startingAt: 0)
         }
         return String(raw[..<afterDot]) + padded + String(raw[end...])
+    }
+}
+
+/// Civil dates travel as `yyyy-MM-dd` and are interpreted in the user's calendar,
+/// so a date never shifts by a day across time zones.
+enum MacCivilDate {
+    private static func formatter() -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .current
+        formatter.dateFormat = "yyyy-MM-dd"
+        return formatter
+    }
+
+    static func string(from date: Date) -> String {
+        formatter().string(from: date)
+    }
+
+    static func date(from civil: String) -> Date? {
+        formatter().date(from: civil)
+    }
+
+    /// Accepts `yyyy-MM-dd` or a timestamp that starts with one.
+    static func normalized(_ raw: String?) -> String? {
+        guard let raw = raw?.trimmingCharacters(in: .whitespacesAndNewlines), raw.count >= 10 else {
+            return nil
+        }
+        let civil = String(raw.prefix(10))
+        return date(from: civil) == nil ? nil : civil
     }
 }

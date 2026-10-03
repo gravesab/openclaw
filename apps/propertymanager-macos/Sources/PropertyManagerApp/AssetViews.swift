@@ -3,6 +3,15 @@ import SwiftUI
 struct MacAssetsPanel: View {
     @ObservedObject var store: MaintenanceStore
     @State private var showingNewAsset = false
+    @State private var assetSearchText = ""
+
+    private var assetMatches: [MacAssetSearchMatch] {
+        TaskSearch.assetMatches(
+            assets: displayAssets,
+            tasks: store.tasks,
+            words: TaskSearch.words(in: assetSearchText)
+        )
+    }
 
     private var groupedAssets: [[MacRanchAsset]] {
         Dictionary(grouping: store.assets) {
@@ -50,7 +59,7 @@ struct MacAssetsPanel: View {
                     Image(systemName: "shippingbox")
                         .font(.largeTitle)
                         .foregroundStyle(.secondary)
-                    Text(store.assetLoadError ?? "No active assets were returned by DEV PostgreSQL.")
+                    Text(store.assetLoadError ?? "No active assets were returned by the \(AppEnvironment.label) server.")
                         .multilineTextAlignment(.center)
                         .foregroundStyle(.secondary)
                     Button("Try Again") {
@@ -67,11 +76,22 @@ struct MacAssetsPanel: View {
                         .padding(.horizontal)
                         .padding(.bottom, 4)
                 }
+                TextField("Search assets or their tasks (any word)...", text: $assetSearchText)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal)
+                    .padding(.bottom, 6)
                 HStack(spacing: 0) {
                     List(selection: $store.selectedTaskAssetId) {
-                        ForEach(displayAssets) { asset in
+                        ForEach(assetMatches) { match in
+                            let asset = match.asset
                             VStack(alignment: .leading) {
                                 Text(asset.name).font(.headline)
+                                if !match.matchingTaskTitles.isEmpty {
+                                    Text(match.matchingTaskTitles.prefix(3).joined(separator: " • "))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(2)
+                                }
                                 if asset.meterNeedsActivation {
                                     Text("Meter proposed — activate")
                                         .font(.caption)
@@ -261,6 +281,9 @@ struct MacAssetDetailPanel: View {
     @State private var isRenaming = false
     @State private var renameText = ""
     @State private var isSavingName = false
+    @State private var hasInServiceDate = false
+    @State private var inServiceDate = Date()
+    @State private var isSavingInService = false
 
     private var linkedTasks: [MaintenanceTask] {
         store.tasks
@@ -349,6 +372,20 @@ struct MacAssetDetailPanel: View {
                         .foregroundStyle(.red)
                 }
 
+                GroupBox("Placed in service") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Toggle("Record an in-service date", isOn: $hasInServiceDate)
+                        if hasInServiceDate {
+                            DatePicker("Date", selection: $inServiceDate, displayedComponents: .date)
+                        }
+                        Button(isSavingInService ? "Saving…" : "Save in-service date") {
+                            Task { await saveInServiceDate() }
+                        }
+                        .disabled(isSavingInService || editedInServiceDate == asset.placedInServiceDate)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
                 if asset.meterNeedsActivation {
                     GroupBox("Proposed meter") {
                         if let proposed = asset.proposedMeter {
@@ -404,9 +441,31 @@ struct MacAssetDetailPanel: View {
                     }
                 }
 
+                if asset.meter?.hasMeter == true, !readings.isEmpty {
+                    GroupBox("Reading history") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(readings.prefix(10)) { reading in
+                                HStack {
+                                    Text(reading.readingAt.formatted(date: .abbreviated, time: .shortened))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                    if let usage = reading.usageSincePrevious, usage > 0 {
+                                        Text("+\(format(usage))")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Text("\(format(reading.value)) \(asset.meter?.unit ?? "")")
+                                        .monospacedDigit()
+                                }
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+
                 GroupBox("Maintenance tasks") {
                     if linkedTasks.isEmpty {
-                        Text("No tasks are linked to this asset in DEV PostgreSQL.")
+                        Text("No tasks are linked to this asset on the \(AppEnvironment.label) server.")
                             .foregroundStyle(.secondary)
                     } else {
                         VStack(alignment: .leading, spacing: 10) {
@@ -460,7 +519,40 @@ struct MacAssetDetailPanel: View {
         } message: {
             Text("This hides the asset from lists. Meter history is kept and it can be reactivated later from the API or a future Reactivate UI.")
         }
-        .task { await loadReadings() }
+        .task(id: asset.id) {
+            syncInServiceDate()
+            await loadReadings()
+        }
+        .onChange(of: asset.placedInServiceDate) { _ in syncInServiceDate() }
+    }
+
+    private var editedInServiceDate: String? {
+        hasInServiceDate ? MacCivilDate.string(from: inServiceDate) : nil
+    }
+
+    private func syncInServiceDate() {
+        if let civil = asset.placedInServiceDate, let date = MacCivilDate.date(from: civil) {
+            hasInServiceDate = true
+            inServiceDate = date
+        } else {
+            hasInServiceDate = false
+            inServiceDate = Date()
+        }
+    }
+
+    private func saveInServiceDate() async {
+        isSavingInService = true
+        defer { isSavingInService = false }
+        do {
+            _ = try await store.apiClient.updatePlacedInServiceDate(
+                id: asset.id,
+                date: hasInServiceDate ? inServiceDate : nil
+            )
+            await store.refreshAssets()
+            message = hasInServiceDate ? "In-service date saved." : "In-service date cleared."
+        } catch {
+            message = error.localizedDescription
+        }
     }
 
     private var normalizedRename: String {

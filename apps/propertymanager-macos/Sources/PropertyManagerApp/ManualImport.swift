@@ -347,6 +347,34 @@ enum ManualMaintenanceIdentity {
         semanticTaskKey(stripEquipmentHeadings(item))
     }
 
+    private static let fillerWords: Set<String> = [
+        "a", "an", "the", "and", "or", "of", "for", "to", "on", "in", "with", "any", "all", "if", "is", "be", "as",
+    ]
+    private static let actionSynonyms = ["inspect": "check", "examine": "check", "verify": "check"]
+
+    /// Content words of an identity key, with the leading action normalized so
+    /// "Inspect the knife" and "Check knife" compare equal.
+    static func contentWords(ofKey key: String) -> [String] {
+        var words = key.split(separator: " ").map(String.init).filter { !fillerWords.contains($0) }
+        if let first = words.first, let synonym = actionSynonyms[first] {
+            words[0] = synonym
+        }
+        return words
+    }
+
+    /// Same action on the same parts, allowing extra qualifiers such as
+    /// "for tightness, nicks, wear". Distinct actions (check vs replace) never match.
+    static func isSameAction(_ lhsKey: String, _ rhsKey: String) -> Bool {
+        if lhsKey == rhsKey { return true }
+        let lhs = contentWords(ofKey: lhsKey)
+        let rhs = contentWords(ofKey: rhsKey)
+        guard let lhsAction = lhs.first, lhsAction == rhs.first else { return false }
+        let smaller = Set(lhs.count <= rhs.count ? lhs : rhs)
+        let larger = Set(lhs.count <= rhs.count ? rhs : lhs)
+        guard smaller.count >= 3 else { return smaller == larger }
+        return Double(smaller.intersection(larger).count) / Double(smaller.count) >= 0.8
+    }
+
     private static func stripLeadingAreaPrefix(_ item: String, area: String) -> String {
         let trimmed = item.trimmingCharacters(in: .whitespacesAndNewlines)
         let prefix = area.trimmingCharacters(in: .whitespacesAndNewlines) + ":"
@@ -451,24 +479,20 @@ enum ManualImportReviewSelection {
         assetID: UUID?
     ) -> [UUID: String] {
         guard let assetID else { return [:] }
-        var storedItemByKey: [String: String] = [:]
-        for task in existingTasks where task.assetId == assetID && task.isActive && task.kind == .scheduled {
-            let key = ManualMaintenanceIdentity.taskIdentity(task)
-            if storedItemByKey[key] == nil {
-                storedItemByKey[key] = task.item
-            }
-        }
+        let stored = existingTasks
+            .filter { $0.assetId == assetID && $0.isActive && $0.kind == .scheduled }
+            .map { (key: ManualMaintenanceIdentity.taskIdentity($0), item: $0.item) }
 
         var notes: [UUID: String] = [:]
-        var firstProposalByKey: [String: String] = [:]
+        var proposals: [(key: String, item: String)] = []
         for draft in drafts {
             let key = draft.maintenanceIdentity
-            if let stored = storedItemByKey[key] {
-                notes[draft.id] = "Duplicate of stored task: \(stored)"
-            } else if let earlier = firstProposalByKey[key] {
-                notes[draft.id] = "Duplicate of another proposal: \(earlier)"
+            if let match = stored.first(where: { ManualMaintenanceIdentity.isSameAction(key, $0.key) }) {
+                notes[draft.id] = "Duplicate of stored task: \(match.item)"
+            } else if let earlier = proposals.first(where: { ManualMaintenanceIdentity.isSameAction(key, $0.key) }) {
+                notes[draft.id] = "Duplicate of another proposal: \(earlier.item)"
             } else {
-                firstProposalByKey[key] = draft.item
+                proposals.append((key, draft.item))
             }
         }
         return notes
@@ -707,22 +731,6 @@ enum PDFManualTextExtractor {
             return "----- page \(index + 1) -----\n\(text)"
         }
         return maintenanceChunks(fromPageTexts: pages, maxCharactersPerChunk: maxCharactersPerChunk)
-    }
-
-    static func libraryExtractionChunks(from url: URL) -> [PropertyAPIClient.AssetManualExtractionChunk] {
-        maintenanceChunks(from: url).map { content in
-            let pageNumber: Int? = {
-                let pattern = #"----- page ([0-9]+) -----"#
-                guard let range = content.range(of: pattern, options: .regularExpression) else { return nil }
-                let match = String(content[range])
-                return Int(match.replacingOccurrences(of: #"[^0-9]"#, with: "", options: .regularExpression))
-            }()
-            return PropertyAPIClient.AssetManualExtractionChunk(
-                pageNumber: pageNumber,
-                sectionHeading: "Maintenance",
-                content: content
-            )
-        }
     }
 
     static func maintenanceChunks(
@@ -1887,74 +1895,6 @@ enum ManufacturerManualImporter {
             return url
         }
         return URL(string: "http://127.0.0.1:11434")!
-    }
-
-    static func importDrafts(
-        from pdfURL: URL,
-        onProgress: (@MainActor (Progress) -> Void)? = nil
-    ) async throws -> (manufacturer: String, drafts: [ManualImportDraft], evaluation: CoverageEvaluation) {
-        let chunks = PDFManualTextExtractor.maintenanceChunks(from: pdfURL)
-        guard !chunks.isEmpty else {
-            throw ManualImportError.noText
-        }
-
-        var manufacturer = ""
-        var drafts: [ManualImportDraft] = []
-        var seenTaskTitles = Set<String>()
-        for (index, chunk) in chunks.enumerated() {
-            await onProgress?(Progress(
-                completedSections: index,
-                totalSections: chunks.count,
-                discoveredDrafts: drafts.count
-            ))
-            do {
-                let result = try await extractDrafts(
-                    manualName: pdfURL.lastPathComponent,
-                    manualText: chunk
-                )
-                if manufacturer.isEmpty {
-                    manufacturer = result.manufacturer
-                }
-                for draft in result.drafts {
-                    let key = draft.maintenanceIdentity
-                    if seenTaskTitles.insert(key).inserted {
-                        drafts.append(draft)
-                    }
-                }
-            } catch ManualImportError.emptyTasks {
-                // A section may be explanatory rather than prescriptive.
-                continue
-            }
-            await onProgress?(Progress(
-                completedSections: index + 1,
-                totalSections: chunks.count,
-                discoveredDrafts: drafts.count
-            ))
-        }
-
-        let sourceBackedDrafts = sourceBackedMaintenanceDrafts(
-            manualName: pdfURL.lastPathComponent,
-            manualText: chunks.joined(separator: "\n\n"),
-            manufacturer: manufacturer
-        )
-        let localAIDrafts = drafts
-        let evaluation = coverageEvaluation(
-            localAIDrafts: localAIDrafts,
-            sourceBackedDrafts: sourceBackedDrafts
-        )
-
-        // The local model proposes the rich procedures. This source-backed
-        // safety net preserves explicit, high-value maintenance instructions
-        // when a bounded model response omits an entire service page.
-        for draft in sourceBackedDrafts {
-            let key = draft.maintenanceIdentity
-            if seenTaskTitles.insert(key).inserted {
-                drafts.append(draft)
-            }
-        }
-
-        guard !drafts.isEmpty else { throw ManualImportError.emptyTasks }
-        return (manufacturer, drafts, evaluation)
     }
 
     static func coverageEvaluation(

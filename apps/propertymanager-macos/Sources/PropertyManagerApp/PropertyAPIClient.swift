@@ -4,6 +4,8 @@ import Foundation
 enum PropertyAPIError: LocalizedError {
     case invalidURL
     case badStatus(Int)
+    case notFound(String?)
+    case unauthorized(String?)
     case serverMessage(String)
     case decoding(Error)
     case transport(Error)
@@ -14,6 +16,10 @@ enum PropertyAPIError: LocalizedError {
             return "API base URL is invalid."
         case .badStatus(let code):
             return "Server returned HTTP \(code)."
+        case .notFound(let message):
+            return message ?? "Server returned HTTP 404."
+        case .unauthorized(let message):
+            return message ?? "The server rejected the API key or operator PIN."
         case .serverMessage(let message):
             return message
         case .decoding(let error):
@@ -31,6 +37,9 @@ struct PropertyAPIClient {
     var apiKey: String = ""
     /// PROPERTYMANAGER_OPERATOR_PIN from Mini ~/.config/openclaw/db.env (optional if API key set)
     var operatorPIN: String = ""
+    var operatorIdentity: String = PropertyAPIClient.defaultOperatorIdentity
+
+    static let defaultOperatorIdentity = "mac-operator"
 
     /// Bounded network session — never use URLSession.shared (default timeouts can hang UI tasks).
     static let sharedSession: URLSession = {
@@ -162,10 +171,25 @@ struct PropertyAPIClient {
         }
     }
 
+    /// Authenticated GET. Every read carries the same credentials as writes so
+    /// a server that requires auth on reads never sees anonymous traffic.
+    func authorizedGET(_ url: URL) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        applyAuth(&request)
+        do {
+            let (data, response) = try await Self.sharedSession.data(for: request)
+            try validate(response, data: data)
+            return data
+        } catch let error as PropertyAPIError {
+            throw error
+        } catch {
+            throw PropertyAPIError.transport(error)
+        }
+    }
+
     func health() async throws -> HealthStatus {
-        let url = try makeURL("/health")
-        let (data, response) = try await Self.sharedSession.data(from: url)
-        try validate(response, data: data)
+        let data = try await authorizedGET(makeURL("/health"))
         do {
             return try JSONDecoder().decode(HealthStatus.self, from: data)
         } catch {
@@ -173,10 +197,13 @@ struct PropertyAPIClient {
         }
     }
 
+    /// Verifies the configured API key / operator PIN without exposing identity details.
+    func authCheck() async throws {
+        _ = try await authorizedGET(makeURL("/auth/check"))
+    }
+
     func fetchCategories() async throws -> [CategoryDefinition] {
-        let url = try makeURL("/categories")
-        let (data, response) = try await Self.sharedSession.data(from: url)
-        try validate(response, data: data)
+        let data = try await authorizedGET(makeURL("/categories"))
         do {
             let rows = try decoder.decode([APICategoryDTO].self, from: data)
             return rows.map(\.asCategoryDefinition)
@@ -239,14 +266,58 @@ struct PropertyAPIClient {
     }
 
     func fetchTasks() async throws -> [MaintenanceTask] {
-        let url = try makeURL("/tasks")
-        let (data, response) = try await Self.sharedSession.data(from: url)
-        try validate(response, data: data)
+        let data = try await authorizedGET(makeURL("/tasks"))
         do {
             let rows = try decoder.decode([APITaskDTO].self, from: data)
             return rows.map(\.asMaintenanceTask)
         } catch {
             throw PropertyAPIError.decoding(error)
+        }
+    }
+
+    func fetchTask(id: UUID) async throws -> MaintenanceTask {
+        let data = try await authorizedGET(makeURL("/tasks/\(id.uuidString)"))
+        do {
+            return try decoder.decode(APITaskDTO.self, from: data).asMaintenanceTask
+        } catch {
+            throw PropertyAPIError.decoding(error)
+        }
+    }
+
+    /// Partial update limited to the server's PATCHABLE_FIELDS. Unlike the
+    /// POST upsert it never rewrites history, dates, or parts.
+    func patchTask(id: UUID, fields: [String: Any]) async throws -> MaintenanceTask {
+        try await sendTaskJSON(
+            method: "PATCH",
+            path: "/tasks/\(id.uuidString)",
+            body: fields
+        )
+    }
+
+    func replaceTaskParts(id: UUID, parts: [PartRequirement]) async throws -> MaintenanceTask {
+        try await sendTaskJSON(
+            method: "PUT",
+            path: "/tasks/\(id.uuidString)/parts",
+            body: PartRequirement.apiPayload(parts)
+        )
+    }
+
+    private func sendTaskJSON(method: String, path: String, body: Any) async throws -> MaintenanceTask {
+        var request = URLRequest(url: try makeURL(path))
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(&request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        do {
+            let (data, response) = try await Self.sharedSession.data(for: request)
+            try validate(response, data: data)
+            return try decoder.decode(APITaskDTO.self, from: data).asMaintenanceTask
+        } catch let error as PropertyAPIError {
+            throw error
+        } catch let error as DecodingError {
+            throw PropertyAPIError.decoding(error)
+        } catch {
+            throw PropertyAPIError.transport(error)
         }
     }
 
@@ -384,8 +455,8 @@ struct PropertyAPIClient {
         applyAuth(&request)
         request.httpBody = try JSONEncoder().encode(
             ExtractionRequest(
-                extractorName: "PropertyManager Mac local Ollama",
-                extractorVersion: ManufacturerManualImporter.preferredModel,
+                extractorName: AppleManualExtractor.extractorName,
+                extractorVersion: AppleManualExtractor.extractorVersion,
                 chunks: chunks
             )
         )
@@ -585,7 +656,7 @@ struct PropertyAPIClient {
             compression = max(0.45, compression * 0.8)
         }
 
-        throw PropertyAPIError.serverMessage("This photo could not be reduced to the DEV upload limit. Choose a smaller photo.")
+        throw PropertyAPIError.serverMessage("This photo could not be reduced to the upload limit. Choose a smaller photo.")
     }
 
     func deletePhoto(taskID: UUID, fileName: String) async throws {
@@ -640,7 +711,11 @@ struct PropertyAPIClient {
         if !pin.isEmpty {
             request.setValue(pin, forHTTPHeaderField: "X-Operator-PIN")
         }
-        request.setValue("mac-operator", forHTTPHeaderField: "X-Operator-Identity")
+        let identity = operatorIdentity.trimmingCharacters(in: .whitespacesAndNewlines)
+        request.setValue(
+            identity.isEmpty ? Self.defaultOperatorIdentity : identity,
+            forHTTPHeaderField: "X-Operator-Identity"
+        )
     }
 
     func validate(_ response: URLResponse, data: Data? = nil) throws {
@@ -648,19 +723,27 @@ struct PropertyAPIClient {
             throw PropertyAPIError.badStatus(-1)
         }
         guard (200..<300).contains(http.statusCode) else {
+            var message: String?
             if let data,
                let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                if let message = obj["message"] as? String, !message.isEmpty {
-                    throw PropertyAPIError.serverMessage(message)
+                if let text = obj["message"] as? String, !text.isEmpty {
+                    message = text
+                } else if let text = obj["error"] as? String, !text.isEmpty {
+                    message = text
+                } else if let error = obj["error"] as? [String: Any],
+                          let text = error["message"] as? String,
+                          !text.isEmpty {
+                    message = text
                 }
-                if let message = obj["error"] as? String, !message.isEmpty {
-                    throw PropertyAPIError.serverMessage(message)
-                }
-                if let error = obj["error"] as? [String: Any],
-                   let message = error["message"] as? String,
-                   !message.isEmpty {
-                    throw PropertyAPIError.serverMessage(message)
-                }
+            }
+            if http.statusCode == 404 {
+                throw PropertyAPIError.notFound(message)
+            }
+            if http.statusCode == 401 || http.statusCode == 403 {
+                throw PropertyAPIError.unauthorized(message)
+            }
+            if let message {
+                throw PropertyAPIError.serverMessage(message)
             }
             throw PropertyAPIError.badStatus(http.statusCode)
         }
@@ -722,7 +805,10 @@ private struct APIPartDTO: Decodable {
             oemPartNumber: oemPartNumber ?? "",
             partNumber: partNumber ?? "",
             buyURL: buyURL ?? "",
-            cost: cost ?? 0
+            cost: cost ?? 0,
+            quantity: quantity ?? 1,
+            vendor: vendor ?? "",
+            notes: notes ?? ""
         )
     }
 }
@@ -980,21 +1066,11 @@ private struct APITaskDTO: Decodable {
             "meter_interval_unit": task.meterIntervalUnit as Any,
             "next_due_meter_value": task.nextDueMeterValue.map { NSDecimalNumber(decimal: $0).stringValue } as Any,
             "asset_id": task.assetId?.uuidString as Any,
-            "parts": task.parts.enumerated().map { index, part -> [String: Any] in
-                [
-                    "id": part.id.uuidString,
-                    "name": part.name,
-                    "oem_part_number": part.oemPartNumber,
-                    "part_number": part.partNumber,
-                    "buy_url": part.buyURL,
-                    "cost": part.cost,
-                    "quantity": 1,
-                    "sort_order": index,
-                ]
-            },
+            "parts": PartRequirement.apiPayload(task.parts),
         ]
         return body
     }
+
 }
 
 

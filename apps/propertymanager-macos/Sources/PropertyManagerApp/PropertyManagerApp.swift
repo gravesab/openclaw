@@ -49,8 +49,17 @@ enum AppEnvironment {
         return bundle.bundleIdentifier?.localizedCaseInsensitiveContains(".dev") == true
     }()
 
+    static var label: String {
+        isDevelopment ? "DEV" : "Production"
+    }
+
     static var defaultAPIBaseURL: String {
-        isDevelopment ? "http://192.168.50.117:15062" : "http://100.85.36.72:5062"
+        isDevelopment ? "http://100.85.188.74:5062" : "http://100.85.36.72:5062"
+    }
+
+    /// Dashboard that serves the shared manual PDF library.
+    static var defaultManualLibraryBaseURL: String {
+        isDevelopment ? "http://100.85.188.74:5051" : "http://100.85.36.72:5051"
     }
 
     static var credentialService: String {
@@ -81,13 +90,14 @@ struct PropertyManagerApp: App {
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         HStack(spacing: 6) {
-                            Text("DEV")
+                            Text(AppEnvironment.label)
                                 .fontWeight(.bold)
+                                .foregroundStyle(AppEnvironment.isDevelopment ? Color.orange : Color.green)
                             Text(AppEnvironment.visibleVersionBuild)
                                 .font(.caption.monospacedDigit())
                         }
                         .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Property Manager DEV \(AppEnvironment.visibleVersionBuild)")
+                        .accessibilityLabel("Property Manager \(AppEnvironment.label) \(AppEnvironment.visibleVersionBuild)")
                     }
                 }
                 .onAppear {
@@ -432,11 +442,14 @@ final class MaintenanceStore: ObservableObject {
     @Published var pendingCalendarCompletionIDs: [UUID] = []
     @Published private(set) var isRestoringCalendarEvent: Bool = false
     @Published var isCalendarDeletionAlertPresented: Bool = false
+    @Published var connectionTestResult: String = ""
+    @Published var isTestingConnection: Bool = false
 
     private let apiBaseURLKey = "propertyManager.apiBaseURL"
     private let manualLibraryBaseURLKey = "propertyManager.manualLibraryBaseURL"
     private let apiKeyKey = "propertyManager.apiKey"
     private let operatorPINKey = "propertyManager.operatorPIN"
+    private let operatorIdentityKey = "propertyManager.operatorIdentity"
     private var autosaveTask: Task<Void, Never>?
     private var calendarPublishTask: Task<Void, Never>?
     private var calendarDeletionDetectionPausedUntil: Date = .distantPast
@@ -444,6 +457,13 @@ final class MaintenanceStore: ObservableObject {
     /// made after a successful response, so this prevents response-to-save
     /// feedback loops that can repeatedly grow a request body.
     private var acknowledgedTaskPayloads: [UUID: Data] = [:]
+    /// Last copy the server returned per task; saves diff against it so only
+    /// operator-changed fields are sent.
+    private var serverTasks: [UUID: MaintenanceTask] = [:]
+    /// Tasks created on this Mac that the server has not acknowledged yet.
+    private var locallyCreatedTaskIDs: Set<UUID> = []
+    /// Serializes saves so a later edit never races an in-flight request.
+    private var saveChain: Task<Void, Never>?
 
     var pendingCalendarCompletionTask: MaintenanceTask? {
         guard let id = pendingCalendarCompletionIDs.first else { return nil }
@@ -470,13 +490,14 @@ final class MaintenanceStore: ObservableObject {
         }
     }
 
-    /// Separate Dashboard address for the IntelMini-owned PDF library. An
-    /// empty value fails closed; the PropertyManager API is never guessed as
-    /// the binary source.
+    /// Separate Dashboard address for the IntelMini-owned PDF library. The
+    /// PropertyManager API is never guessed as the binary source.
     var manualLibraryBaseURL: String {
         get {
-            UserDefaults.standard.string(forKey: manualLibraryBaseURLKey)?
-                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let value = UserDefaults.standard.string(forKey: manualLibraryBaseURLKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value, !value.isEmpty { return value }
+            return AppEnvironment.defaultManualLibraryBaseURL
         }
         set {
             UserDefaults.standard.set(newValue, forKey: manualLibraryBaseURLKey)
@@ -489,6 +510,18 @@ final class MaintenanceStore: ObservableObject {
             objectWillChange.send()
             SecureCredentialStore.write(newValue, account: "operator-pin")
             UserDefaults.standard.removeObject(forKey: operatorPINKey)
+        }
+    }
+
+    /// Name recorded with meter readings and other operator-attributed writes.
+    var operatorIdentity: String {
+        get {
+            UserDefaults.standard.string(forKey: operatorIdentityKey)?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
+        set {
+            objectWillChange.send()
+            UserDefaults.standard.set(newValue, forKey: operatorIdentityKey)
         }
     }
 
@@ -556,7 +589,10 @@ final class MaintenanceStore: ObservableObject {
     }
 
     var apiClient: PropertyAPIClient {
-        PropertyAPIClient(baseURLString: apiBaseURL, apiKey: apiKey, operatorPIN: operatorPIN)
+        var client = PropertyAPIClient(baseURLString: apiBaseURL, apiKey: apiKey, operatorPIN: operatorPIN)
+        let identity = operatorIdentity
+        if !identity.isEmpty { client.operatorIdentity = identity }
+        return client
     }
 
     private var appSupportFolder: URL {
@@ -792,10 +828,8 @@ final class MaintenanceStore: ObservableObject {
             let destinationName = destination
             Task { @MainActor in
                 do {
+                    // The server reassigns the active tasks itself.
                     _ = try await apiClient.deleteCategory(id: categoryID, reassignTo: destinationName)
-                    for task in tasks where task.category.caseInsensitiveCompare(destinationName) == .orderedSame {
-                        _ = try await apiClient.upsertTask(task)
-                    }
                     await refreshFromServer()
                     statusMessage = "Deleted \(categoryName); moved \(movedCount) task\(movedCount == 1 ? "" : "s") to \(destinationName)"
                 } catch {
@@ -849,9 +883,8 @@ final class MaintenanceStore: ObservableObject {
             let url = saveURL
 
             guard FileManager.default.fileExists(atPath: url.path) else {
-                tasks = Self.sampleTasks()
-                selectedTaskID = tasks.first?.id
-                save(markDirty: false)
+                tasks = []
+                selectedTaskID = nil
                 return
             }
 
@@ -860,18 +893,11 @@ final class MaintenanceStore: ObservableObject {
             decoder.dateDecodingStrategy = .iso8601
             tasks = try decoder.decode([MaintenanceTask].self, from: data)
             selectedTaskID = tasks.first?.id
-
-            if tasks.isEmpty {
-                tasks = Self.sampleTasks()
-                selectedTaskID = tasks.first?.id
-                save(markDirty: false)
-            }
         } catch {
             backupUnreadableSaveFile()
-            tasks = Self.sampleTasks()
-            selectedTaskID = tasks.first?.id
-            statusMessage = "Started with sample tasks; unreadable data was backed up"
-            save(markDirty: false)
+            tasks = []
+            selectedTaskID = nil
+            statusMessage = "Unreadable offline cache was backed up; refresh to load tasks"
         }
     }
 
@@ -901,10 +927,11 @@ final class MaintenanceStore: ObservableObject {
             return
         }
         autosaveTask?.cancel()
+        let taskID = task.id
         autosaveTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 1_000_000_000)
             guard !Task.isCancelled else { return }
-            await upsertTaskToServer(task)
+            await enqueueSave(taskID: taskID)
         }
     }
 
@@ -912,7 +939,7 @@ final class MaintenanceStore: ObservableObject {
     /// must accept the task first; Calendar is a derived plan view.
     func scheduleAutomaticCalendarPublish(_ task: MaintenanceTask) {
         guard automaticCalendarPublishingEnabled else {
-            calendarSyncMessage = "Automatic calendar publishing paused for DEV safety"
+            calendarSyncMessage = "Automatic calendar publishing is paused"
             return
         }
         calendarPublishTask?.cancel()
@@ -937,7 +964,7 @@ final class MaintenanceStore: ObservableObject {
             return
         }
         autosaveTask?.cancel()
-        await upsertTaskToServer(tasks[index])
+        await enqueueSave(taskID: tasks[index].id)
     }
 
     @MainActor
@@ -968,7 +995,7 @@ final class MaintenanceStore: ObservableObject {
     func pushSelectedTaskToCalendarForTesting() async {
         guard let selectedTaskID,
               let selectedTask = tasks.first(where: { $0.id == selectedTaskID }) else {
-            calendarSyncMessage = "Select one task before publishing the DEV test event"
+            calendarSyncMessage = "Select one task before publishing the test event"
             return
         }
         await publishCalendarTasks([selectedTask])
@@ -1047,36 +1074,6 @@ final class MaintenanceStore: ObservableObject {
         }
     }
 
-    @MainActor
-    func confirmCalendarDeletionAsComplete() async {
-        guard let task = pendingCalendarCompletionTask,
-              let index = tasks.firstIndex(where: { $0.id == task.id }) else { return }
-        isCalendarDeletionAlertPresented = false
-        statusMessage = "Completing from Calendar…"
-        do {
-            let note = "Completed from deleted \(CalendarSyncService.calendarTitle(for: calendarSyncEnv)) calendar event."
-            let updated = try await apiClient.completeTask(id: task.id, note: note)
-            var corrected = updated.mergingEditorFields(from: tasks[index])
-            corrected.recalculateCalendarDueAfterCompletionIfApplicable()
-            let persisted = try await apiClient.upsertTask(corrected)
-            tasks[index] = persisted
-            pendingCalendarCompletionIDs.removeAll { $0 == task.id }
-            var ledger = calendarPublicationLedger
-            ledger.removeValue(forKey: task.id)
-            calendarPublicationLedger = ledger
-            writeLocalCacheOnly()
-            statusMessage = "Completed from Calendar · next due \(DateHelper.isoDate(persisted.nextDue))"
-            CalendarSyncService.shared.forgetManagedEventIdentifier(
-                taskID: task.id,
-                env: calendarSyncEnv
-            )
-            await publishCalendarTasks([persisted])
-        } catch {
-            statusMessage = "Calendar completion failed: \(error.localizedDescription)"
-            isCalendarDeletionAlertPresented = true
-        }
-    }
-
     /// Synchronously closes the deletion race before the alert dismisses.
     /// Returning to the app can fire activation detection immediately, so this
     /// guard must be set before an asynchronous restoration Task is scheduled.
@@ -1138,6 +1135,32 @@ final class MaintenanceStore: ObservableObject {
         try? await CalendarSyncService.shared.removeEventsForTask(taskId: taskId)
     }
 
+    /// Checks credentials first so a wrong key is reported as such rather
+    /// than as an unreachable server.
+    @MainActor
+    func testConnection() async {
+        guard !isTestingConnection else { return }
+        isTestingConnection = true
+        defer { isTestingConnection = false }
+        connectionTestResult = "Testing…"
+        let client = apiClient
+        do {
+            try await client.authCheck()
+        } catch PropertyAPIError.unauthorized {
+            connectionTestResult = "Reached \(AppEnvironment.label) server, but the API key or PIN was rejected."
+            return
+        } catch {
+            connectionTestResult = "Connection failed: \(error.localizedDescription)"
+            return
+        }
+        do {
+            _ = try await client.health()
+            connectionTestResult = "Connected to \(AppEnvironment.label) · credentials accepted"
+        } catch {
+            connectionTestResult = "Credentials accepted, but health check failed: \(error.localizedDescription)"
+        }
+    }
+
     private var isRefreshingFromServer = false
 
     func refreshFromServer() async {
@@ -1158,6 +1181,8 @@ final class MaintenanceStore: ObservableObject {
                 saveCategories()
             }
             tasks = remoteTasks
+            serverTasks = Dictionary(uniqueKeysWithValues: remoteTasks.map { ($0.id, $0) })
+            locallyCreatedTaskIDs.removeAll()
             acknowledgedTaskPayloads = Dictionary(
                 uniqueKeysWithValues: remoteTasks.compactMap { task in
                     apiClient.taskPayloadSignature(task).map { (task.id, $0) }
@@ -1193,91 +1218,161 @@ final class MaintenanceStore: ObservableObject {
     }
 
     @MainActor
-    func upsertTaskToServer(_ task: MaintenanceTask) async {
-        statusMessage = "Saving…"
-        do {
-            var normalized = task
-            normalized.recalculateCalendarDueIfApplicable()
-            let group = TaskTitle.displayAssetName(area: task.area, assetId: task.assetId, assets: assets)
-            normalized.area = group
-            normalized.item = TaskTitle.canonicalItem(assetName: group, title: task.item)
-            if let index = tasks.firstIndex(where: { $0.id == task.id }) {
-                tasks[index].area = normalized.area
-                tasks[index].item = normalized.item
-            }
-            let updated = try await apiClient.upsertTask(normalized)
-            if let signature = apiClient.taskPayloadSignature(updated) {
-                acknowledgedTaskPayloads[updated.id] = signature
-            }
-            if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
-                tasks[index] = updated
-            } else {
-                tasks.insert(updated, at: 0)
-            }
-            writeLocalCacheOnly()
-            isOnline = true
-            lastSyncAt = Date()
-            hasLocalChanges = false
-            persistSyncState()
-            statusMessage = "Saved"
-            scheduleAutomaticCalendarPublish(updated)
-        } catch {
-            isOnline = false
-            statusMessage = "Couldn’t save: \(error.localizedDescription)"
+    func enqueueSave(taskID: UUID) async {
+        let previous = saveChain
+        let next = Task { @MainActor [weak self] in
+            await previous?.value
+            await self?.saveTaskToServer(taskID: taskID)
         }
+        saveChain = next
+        await next.value
+    }
+
+    /// Sends only what changed since the last server copy. Tasks without a
+    /// server copy are created only when this Mac created them; anything else
+    /// would overwrite newer server data with a stale local cache.
+    @MainActor
+    private func saveTaskToServer(taskID: UUID) async {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        let group = TaskTitle.displayAssetName(area: tasks[index].area, assetId: tasks[index].assetId, assets: assets)
+        let canonicalItem = TaskTitle.canonicalItem(assetName: group, title: tasks[index].item)
+        if tasks[index].area != group { tasks[index].area = group }
+        if tasks[index].item != canonicalItem { tasks[index].item = canonicalItem }
+        let edited = tasks[index]
+
+        let saved: MaintenanceTask
+        do {
+            if let baseline = serverTasks[taskID] {
+                let plan = TaskSavePlan(baseline: baseline, edited: edited)
+                guard !plan.isEmpty else {
+                    statusMessage = "Saved"
+                    return
+                }
+                statusMessage = "Saving…"
+                saved = try await applySavePlan(plan, edited: edited)
+            } else if locallyCreatedTaskIDs.contains(taskID) {
+                statusMessage = "Saving…"
+                var created = edited
+                created.recalculateCalendarDueIfApplicable()
+                saved = try await apiClient.upsertTask(created)
+                locallyCreatedTaskIDs.remove(taskID)
+            } else {
+                statusMessage = "This task isn’t loaded from the server. Refresh, then edit again."
+                return
+            }
+        } catch {
+            if case PropertyAPIError.transport = error { isOnline = false }
+            statusMessage = "Couldn’t save: \(error.localizedDescription)"
+            return
+        }
+
+        acceptServerTask(saved.mergingEditorFields(from: edited), sentFrom: edited)
+        isOnline = true
+        lastSyncAt = Date()
+        hasLocalChanges = false
+        persistSyncState()
+        statusMessage = "Saved"
+        scheduleAutomaticCalendarPublish(saved)
     }
 
     @MainActor
-    func completeSelectedTask() async {
-        guard let selectedTaskID,
-              let index = tasks.firstIndex(where: { $0.id == selectedTaskID }) else {
-            return
+    private func applySavePlan(_ plan: TaskSavePlan, edited: MaintenanceTask) async throws -> MaintenanceTask {
+        var latest = serverTasks[edited.id] ?? edited
+        if !plan.patchFields.isEmpty {
+            latest = try await apiClient.patchTask(id: edited.id, fields: plan.patchFields)
+            serverTasks[edited.id] = latest
         }
-        let note = tasks[index].resultNotes
-        statusMessage = "Marking complete…"
-        do {
-            let updated = try await apiClient.completeTask(id: selectedTaskID, note: note)
-            var corrected = updated.mergingEditorFields(from: tasks[index])
-            corrected.recalculateCalendarDueAfterCompletionIfApplicable()
-            let persisted = try await apiClient.upsertTask(corrected)
-            tasks[index] = persisted
-            writeLocalCacheOnly()
-            isOnline = true
-            lastSyncAt = Date()
-            hasLocalChanges = false
-            persistSyncState()
-            statusMessage = "Completed · next due \(DateHelper.isoDate(persisted.nextDue))"
-            // Remove calendar event for this task (Apple Calendar is view-only; PM drives state).
-            await removeCalendarEventsForTask(id: selectedTaskID)
-            await publishCalendarTasks([persisted])
-        } catch {
-            // Fallback: local complete + upsert so the UI still works if complete endpoint fails.
-            markTaskCompleteLocally(at: index)
-            await upsertTaskToServer(tasks[index])
-            // Also remove calendar event on local-fallback path.
-            await removeCalendarEventsForTask(id: selectedTaskID)
-            if !statusMessage.hasPrefix("Couldn’t") {
-                statusMessage = "Completed (synced)"
-            }
+        if plan.partsChanged {
+            latest = try await apiClient.replaceTaskParts(id: edited.id, parts: edited.parts)
+            serverTasks[edited.id] = latest
         }
+        if !plan.fullSaveFields.isEmpty {
+            let fresh = try await apiClient.fetchTask(id: edited.id)
+            latest = try await apiClient.upsertTask(plan.applyFullSaveFields(from: edited, onto: fresh))
+            serverTasks[edited.id] = latest
+        }
+        return latest
     }
 
-    private func markTaskCompleteLocally(at index: Int) {
-        tasks[index].lastDone = Date()
-        tasks[index].recalculateCalendarDueAfterCompletionIfApplicable()
-        let trimmedNotes = tasks[index].resultNotes.trimmingCharacters(in: .whitespacesAndNewlines)
-        let completionDate = DateHelper.isoDate(tasks[index].lastDone ?? Date())
-        let historyNote: String
-        if trimmedNotes.isEmpty || (trimmedNotes.hasPrefix("Completed on ") && trimmedNotes.hasSuffix(".")) {
-            historyNote = "Completed on \(completionDate)."
-            tasks[index].resultNotes = historyNote
+    /// Records a server response as the new baseline. The visible copy is
+    /// replaced only when the operator has not edited it since the request
+    /// was built; otherwise the pending edit saves against the new baseline.
+    @MainActor
+    private func acceptServerTask(_ updated: MaintenanceTask, sentFrom sent: MaintenanceTask? = nil) {
+        serverTasks[updated.id] = updated
+        locallyCreatedTaskIDs.remove(updated.id)
+        if let signature = apiClient.taskPayloadSignature(updated) {
+            acknowledgedTaskPayloads[updated.id] = signature
+        }
+        if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
+            if sent == nil || tasks[index] == sent {
+                tasks[index] = updated
+            }
         } else {
-            historyNote = trimmedNotes
+            tasks.insert(updated, at: 0)
         }
-        let entry = "\(completionDate) — \(historyNote)"
-        if !tasks[index].completionHistory.contains(entry) {
-            tasks[index].completionHistory.insert(entry, at: 0)
+        writeLocalCacheOnly()
+    }
+
+    enum CompletionSource {
+        case editor
+        case calendarDeletion
+    }
+
+    /// Records a completion through `/tasks/{id}/complete` only. The server
+    /// owns completion time, history, the next due date, and the meter
+    /// reading; on failure nothing is recorded locally.
+    /// - Returns: An error message, or nil on success.
+    @MainActor
+    func complete(
+        task: MaintenanceTask,
+        note: String?,
+        meterValue: Double?,
+        confirmCurrentMeter: Bool,
+        source: CompletionSource = .editor
+    ) async -> String? {
+        statusMessage = "Marking complete…"
+        let updated: MaintenanceTask
+        do {
+            updated = try await apiClient.completeTask(
+                id: task.id,
+                note: note,
+                meterValueAtCompletion: meterValue,
+                confirmCurrentMeter: confirmCurrentMeter
+            )
+        } catch {
+            if case PropertyAPIError.transport = error { isOnline = false }
+            let message = error.localizedDescription
+            statusMessage = "Couldn’t complete: \(message)"
+            return message
         }
+
+        let local = tasks.first(where: { $0.id == task.id }) ?? task
+        let completed = updated.mergingEditorFields(from: local)
+        acceptServerTask(completed)
+        isOnline = true
+        lastSyncAt = Date()
+        hasLocalChanges = false
+        persistSyncState()
+        statusMessage = "Completed · next due \(DateHelper.isoDate(completed.nextDue))"
+
+        switch source {
+        case .editor:
+            await removeCalendarEventsForTask(id: task.id)
+        case .calendarDeletion:
+            pendingCalendarCompletionIDs.removeAll { $0 == task.id }
+            var ledger = calendarPublicationLedger
+            ledger.removeValue(forKey: task.id)
+            calendarPublicationLedger = ledger
+            CalendarSyncService.shared.forgetManagedEventIdentifier(taskID: task.id, env: calendarSyncEnv)
+        }
+        if AppEnvironment.isDevelopment || automaticCalendarPublishingEnabled {
+            await publishCalendarTasks([completed])
+        }
+        if meterValue != nil || confirmCurrentMeter {
+            await refreshAssets()
+        }
+        return nil
     }
 
     func addTask(category filterCategory: String? = nil, kind: TaskKind = .scheduled) {
@@ -1324,8 +1419,9 @@ final class MaintenanceStore: ObservableObject {
 
         tasks.insert(task, at: 0)
         selectedTaskID = task.id
+        locallyCreatedTaskIDs.insert(task.id)
         writeLocalCacheOnly()
-        Task { await upsertTaskToServer(task) }
+        Task { await enqueueSave(taskID: task.id) }
         if isWorkRequest {
             statusMessage = "Work Request created under \(category). Edit Item, then keep working — it saves automatically."
         } else {
@@ -1342,10 +1438,12 @@ final class MaintenanceStore: ObservableObject {
         var copy = tasks[index]
         copy.id = UUID()
         copy.item = "\(copy.item) Copy"
+        copy.completionHistory = []
         tasks.insert(copy, at: index + 1)
         self.selectedTaskID = copy.id
+        locallyCreatedTaskIDs.insert(copy.id)
         writeLocalCacheOnly()
-        Task { await upsertTaskToServer(copy) }
+        Task { await enqueueSave(taskID: copy.id) }
     }
 
 
@@ -1361,7 +1459,7 @@ final class MaintenanceStore: ObservableObject {
             return
         }
 
-        statusMessage = "Uploading photo to DEV database…"
+        statusMessage = "Uploading photo…"
         Task { @MainActor in
             do {
                 let storedName = try await apiClient.uploadPhoto(
@@ -1373,7 +1471,7 @@ final class MaintenanceStore: ObservableObject {
                 }
                 tasks[currentIndex].photoFileNames.append(storedName)
                 writeLocalCacheOnly()
-                statusMessage = "Photo saved in DEV PostgreSQL."
+                statusMessage = "Photo saved."
             } catch {
                 statusMessage = "Photo was not saved: \(error.localizedDescription)"
             }
@@ -1386,7 +1484,7 @@ final class MaintenanceStore: ObservableObject {
             return
         }
 
-        statusMessage = "Removing photo from DEV database…"
+        statusMessage = "Removing photo…"
         Task { @MainActor in
             do {
                 try await apiClient.deletePhoto(taskID: selectedTaskID, fileName: fileName)
@@ -1395,7 +1493,7 @@ final class MaintenanceStore: ObservableObject {
                 }
                 tasks[currentIndex].photoFileNames.removeAll { $0 == fileName }
                 writeLocalCacheOnly()
-                statusMessage = "Photo removed from DEV PostgreSQL."
+                statusMessage = "Photo removed."
             } catch {
                 statusMessage = "Photo was not removed: \(error.localizedDescription)"
             }
@@ -1409,6 +1507,8 @@ final class MaintenanceStore: ObservableObject {
 
         let removedID = selectedTaskID
         tasks.removeAll { $0.id == removedID }
+        serverTasks.removeValue(forKey: removedID)
+        locallyCreatedTaskIDs.remove(removedID)
         self.selectedTaskID = tasks.first?.id
         writeLocalCacheOnly()
         Task { @MainActor in
@@ -1634,7 +1734,13 @@ final class MaintenanceStore: ObservableObject {
         return panel.url
     }
 
+    /// DEV-only: Fill How-To still runs on local Ollama, which the Production
+    /// build never uses.
     func fillHowToFromManual(taskID: UUID) {
+        guard AppEnvironment.isDevelopment else {
+            statusMessage = "Fill How-To is not available in the Production build."
+            return
+        }
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else {
             statusMessage = "Select a task before filling How-To."
             return
@@ -1741,9 +1847,9 @@ final class MaintenanceStore: ObservableObject {
         return destination
     }
 
-    /// Downloads only the selected, authenticated DEV library record. The PDF
-    /// is then processed by the Mac's local Ollama instance; no cloud model or
-    /// dashboard process sees the manual text.
+    /// Downloads only the selected, authenticated library record. The PDF is
+    /// read by Apple's on-device model; no cloud model or dashboard process
+    /// sees the manual text.
     func extractLibraryManual(
         _ manual: PropertyAPIClient.AssetManualLibraryEntry,
         onDrafts: @escaping (PropertyAPIClient.AssetManualLibraryEntry, [ManualImportDraft], String, UUID) -> Void
@@ -1758,7 +1864,7 @@ final class MaintenanceStore: ObservableObject {
             discoveredDrafts: 0
         )
         manualExtractionState = .running(fileName: manual.sourceDisplayName, progress: initialProgress)
-        statusMessage = "Downloading \(manual.sourceDisplayName) from the DEV manual library…"
+        statusMessage = "Downloading \(manual.sourceDisplayName) from the manual library…"
         Task {
             do {
                 guard !manualLibraryBaseURL.isEmpty else {
@@ -1772,17 +1878,15 @@ final class MaintenanceStore: ObservableObject {
                 )
                 let localURL = try temporaryLibraryManualPDF(data, displayName: manual.sourceDisplayName)
                 defer { try? FileManager.default.removeItem(at: localURL) }
-                let sourceChunks = PDFManualTextExtractor.libraryExtractionChunks(from: localURL)
-                guard !sourceChunks.isEmpty else { throw ManualImportError.noText }
-                statusMessage = "Extracting (manual.sourceDisplayName) with local Ollama (\(ManufacturerManualImporter.preferredModel))…"
-                let result = try await ManufacturerManualImporter.importDrafts(from: localURL) { progress in
+                statusMessage = "Extracting \(manual.sourceDisplayName) with Apple's on-device model…"
+                let result = try await AppleManualExtractor.extract(pdfURL: localURL) { progress in
                     self.manualExtractionState = .running(fileName: manual.sourceDisplayName, progress: progress)
                     self.statusMessage = Self.manualExtractionProgressMessage(
                         fileName: manual.sourceDisplayName,
                         progress: progress
                     )
                 }
-                let extractedManual = try await apiClient.recordAssetManualExtraction(manual, chunks: sourceChunks)
+                let extractedManual = try await apiClient.recordAssetManualExtraction(manual, chunks: result.chunks)
                 onDrafts(extractedManual, result.drafts, result.manufacturer, manual.assetID)
                 manualExtractionState = .ready(fileName: manual.sourceDisplayName, proposalCount: result.drafts.count)
                 statusMessage = """
@@ -1813,6 +1917,7 @@ final class MaintenanceStore: ObservableObject {
         }
         tasks.insert(contentsOf: newTasks, at: 0)
         selectedTaskID = newTasks.first?.id
+        locallyCreatedTaskIDs.formUnion(newTasks.map(\.id))
         writeLocalCacheOnly()
         statusMessage = """
         Saving \(newTasks.count) reviewed manufacturer task(s) to the selected asset…
@@ -1825,9 +1930,7 @@ final class MaintenanceStore: ObservableObject {
             for task in newTasks {
                 do {
                     let saved = try await apiClient.upsertTask(task)
-                    if let index = tasks.firstIndex(where: { $0.id == saved.id }) {
-                        tasks[index] = saved
-                    }
+                    acceptServerTask(saved)
                     savedTaskIDs.append(saved.id)
                     savedCount += 1
                 } catch {
@@ -1856,7 +1959,7 @@ final class MaintenanceStore: ObservableObject {
     func chooseManualPDFAndImport(onDrafts: @escaping ([ManualImportDraft], String) -> Void) {
         let panel = NSOpenPanel()
         panel.title = "Import Maintenance Tasks from Manufacturer PDF"
-        panel.message = "Choose an owner's / service manual PDF. Local Ollama will propose tasks for review."
+        panel.message = "Choose an owner's / service manual PDF. Apple's on-device model will propose tasks for review."
         panel.allowedContentTypes = [.pdf]
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
@@ -1875,14 +1978,14 @@ final class MaintenanceStore: ObservableObject {
             progress: ManufacturerManualImporter.Progress(completedSections: 0, totalSections: 0, discoveredDrafts: 0)
         )
         statusMessage = """
-        Reading manual and asking local Ollama (\(ManufacturerManualImporter.preferredModel))…
+        Reading manual with Apple's on-device model…
 
         File: \(archivedURL.lastPathComponent)
         """
 
         Task {
             do {
-                let result = try await ManufacturerManualImporter.importDrafts(from: archivedURL) { progress in
+                let result = try await AppleManualExtractor.extract(pdfURL: archivedURL) { progress in
                     self.manualExtractionState = .running(fileName: archivedURL.lastPathComponent, progress: progress)
                     self.statusMessage = Self.manualExtractionProgressMessage(
                         fileName: archivedURL.lastPathComponent,
@@ -1913,12 +2016,18 @@ final class MaintenanceStore: ObservableObject {
     ) -> String {
         let remaining = progress.estimatedRemainingSeconds
         let estimate = remaining >= 60 ? "about \(max(1, Int(ceil(Double(remaining) / 60)))) min remaining" : "under 1 min remaining"
-        return "Extracting \(fileName) with local Ollama — service section \(progress.completedSections) of \(progress.totalSections) complete · \(progress.discoveredDrafts) proposal(s) found · \(estimate)…"
+        return "Extracting \(fileName) on device — service section \(progress.completedSections) of \(progress.totalSections) complete · \(progress.discoveredDrafts) proposal(s) found · \(estimate)…"
     }
 
     /// Import manufacturer tasks from a public manual TOC/page URL.
     /// Does **not** archive a full manual copy — links + short excerpts + provenance only.
+    /// DEV-only: URL import still runs on local Ollama, which the Production
+    /// build never uses.
     func importFromURL(_ urlString: String, onDrafts: @escaping ([ManualImportDraft], String) -> Void) {
+        guard AppEnvironment.isDevelopment else {
+            statusMessage = "Import from URL is not available in the Production build."
+            return
+        }
         let trimmed = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             statusMessage = "Paste a manufacturer manual URL first."
@@ -2538,37 +2647,6 @@ final class MaintenanceStore: ObservableObject {
         5. Mark the task complete.
         """
     }
-
-    static func sampleTasks() -> [MaintenanceTask] {
-        let today = Date()
-
-        return [
-            MaintenanceTask(
-                area: "Pool",
-                item: "Water test",
-                category: "Pool",
-                priority: .medium,
-                frequency: .weekly,
-                taskDescription: "Pool: Water test",
-                responseInstructions: """
-                1. Collect a pool water sample from elbow depth.
-
-                2. Test pH, chlorine, and alkalinity.
-
-                3. Adjust chemicals as needed.
-
-                4. Record readings and mark complete.
-                """,
-                suppliesNeeded: "Test strips, gloves, pool chemicals",
-                notes: "Sample task. Import your OpenClaw CSV to replace these.",
-                estimatedMinutes: 15,
-                warningDays: 7,
-                criticalDays: 14,
-                lastDone: Calendar.current.date(byAdding: .day, value: -7, to: today) ?? today,
-                nextDue: today
-            )
-        ]
-    }
 }
 
 struct ContentView: View {
@@ -2577,10 +2655,12 @@ struct ContentView: View {
     @State private var searchText = ""
     @State private var selectedOriginFilter: TaskOrigin? = nil
     @State private var selectedCategoryFilter: String?
+    @State private var listFilter: TaskListFilter = .toDo
     @State private var manualDrafts: [ManualImportDraft] = []
     @State private var showingManualImportReview = false
     @State private var showingURLImportSheet = false
     @State private var showingManualLibrary = false
+    @State private var completionRequest: TaskCompletionRequest?
     @State private var manualImportManufacturer = ""
     @State private var manualImportLockedAssetID: UUID?
     @State private var manualImportSourceManual: PropertyAPIClient.AssetManualLibraryEntry?
@@ -2601,6 +2681,9 @@ struct ContentView: View {
             result = result.filter { $0.origin == selectedOriginFilter }
         }
 
+        let now = Date()
+        result = result.filter { $0.matches(listFilter, now: now) }
+
         if let selectedCategoryFilter {
             result = result.filter { task in
                 let taskCategoryMatches = task.category.caseInsensitiveCompare(selectedCategoryFilter) == .orderedSame
@@ -2619,19 +2702,7 @@ struct ContentView: View {
 
         if !searchWords.isEmpty {
             result = result.filter {
-                let group = TaskTitle.displayAssetName(area: $0.area, assetId: $0.assetId, assets: store.assets)
-                return TaskSearch.matches(
-                    fields: [
-                        $0.area,
-                        $0.item,
-                        group,
-                        $0.category,
-                        $0.taskDescription,
-                        $0.manufacturer,
-                        $0.sourceManualName,
-                    ],
-                    words: searchWords
-                )
+                TaskSearch.matches(fields: TaskSearch.taskFields(for: $0, assets: store.assets), words: searchWords)
             }
         }
 
@@ -2677,6 +2748,13 @@ struct ContentView: View {
                     get: { store.operatorPIN },
                     set: { store.operatorPIN = $0 }
                 ),
+                operatorIdentity: Binding(
+                    get: { store.operatorIdentity },
+                    set: { store.operatorIdentity = $0 }
+                ),
+                connectionTestResult: store.connectionTestResult,
+                isTestingConnection: store.isTestingConnection,
+                testConnectionAction: { Task { await store.testConnection() } },
                 refreshAction: { Task { await store.refreshFromServer() } },
                 importManualAction: {
                     store.chooseManualPDFAndImport { drafts, manufacturer in
@@ -2699,7 +2777,8 @@ struct ContentView: View {
                 calendarDeletionCheckAction: { Task { await store.reviewDeletedCalendarEvents() } },
                 deleteDevCalendarEventsAction: { Task { await store.deleteDevCalendarEvents() } },
                 calendarSyncMessage: store.calendarSyncMessage,
-                isSyncingCalendar: store.isSyncingCalendar
+                isSyncingCalendar: store.isSyncingCalendar,
+                automaticCalendarPublishingEnabled: store.automaticCalendarPublishingEnabled
             )
 
             Divider()
@@ -2726,6 +2805,7 @@ struct ContentView: View {
                     }
                     TaskListHeaderView(
                     searchText: $searchText,
+                    listFilter: $listFilter,
                     selectedOriginFilter: $selectedOriginFilter,
                     selectedCategoryFilter: $selectedCategoryFilter,
                     categories: store.categories,
@@ -2734,9 +2814,6 @@ struct ContentView: View {
                     },
                     addAction: {
                         store.addTask(category: selectedCategoryFilter, kind: .scheduled)
-                    },
-                    addWorkRequestAction: {
-                        store.addTask(category: selectedCategoryFilter, kind: .workRequest)
                     },
                     addCategoryAction: { name in
                         _ = store.addCategory(named: name)
@@ -2788,7 +2865,7 @@ struct ContentView: View {
                store.automaticCalendarPublishingEnabled {
                 store.calendarSyncMessage = "Automatic task-scoped calendar sync enabled [\(store.calendarSyncEnv.label)]"
             } else if store.pendingCalendarCompletionIDs.isEmpty {
-                store.calendarSyncMessage = "Automatic calendar publishing paused for DEV safety"
+                store.calendarSyncMessage = "Automatic calendar publishing is paused"
             }
             NSLog("[CalendarSync] automatic publish status=%@", store.calendarSyncMessage as NSString)
         }
@@ -2810,9 +2887,13 @@ struct ContentView: View {
             ),
             presenting: store.pendingCalendarCompletionTask
         ) { task in
-            Button("Mark Task Completed") {
+            Button("Mark Task Completed…") {
                 store.isCalendarDeletionAlertPresented = false
-                Task { await store.confirmCalendarDeletionAsComplete() }
+                completionRequest = TaskCompletionRequest(
+                    task: task,
+                    initialNote: "Completed from deleted \(CalendarSyncService.calendarTitle(for: store.calendarSyncEnv)) calendar event.",
+                    source: .calendarDeletion
+                )
             }
             Button("Restore Calendar Event") {
                 store.beginRestoringCalendarEvent(taskID: task.id)
@@ -2820,6 +2901,11 @@ struct ContentView: View {
             }
         } message: { task in
             Text("You removed \"\(task.item)\" from \(CalendarSyncService.calendarTitle(for: store.calendarSyncEnv)). Was the work completed? Completion is recorded only after you confirm.")
+        }
+        .sheet(item: $completionRequest) { request in
+            TaskCompletionSheet(store: store, request: request) {
+                completionRequest = nil
+            }
         }
         .sheet(isPresented: $showingManualImportReview) {
             ManualImportReviewSheet(
@@ -2886,7 +2972,14 @@ struct ContentView: View {
                 assets: store.assets,
                 autosaveAction: { task in store.scheduleAutosave(task) },
                 saveAction: { Task { await store.saveSelectedTask() } },
-                completeAction: { Task { await store.completeSelectedTask() } },
+                completeAction: {
+                    let task = store.tasks[index]
+                    completionRequest = TaskCompletionRequest(
+                        task: task,
+                        initialNote: TaskCompletionPolicy.initialNote(resultNotes: task.resultNotes),
+                        source: .editor
+                    )
+                },
                 duplicateAction: store.duplicateSelectedTask,
                 deleteAction: store.deleteSelectedTask,
                 addPhotoAction: store.addPhotoToSelectedTask,
@@ -2926,6 +3019,10 @@ struct SidebarView: View {
     @Binding var apiKey: String
     @Binding var manualLibraryBaseURL: String
     @Binding var operatorPIN: String
+    @Binding var operatorIdentity: String
+    let connectionTestResult: String
+    let isTestingConnection: Bool
+    let testConnectionAction: () -> Void
     let refreshAction: () -> Void
     let importManualAction: () -> Void
     let openManualLibraryAction: () -> Void
@@ -2939,6 +3036,7 @@ struct SidebarView: View {
     let deleteDevCalendarEventsAction: () -> Void
     let calendarSyncMessage: String
     let isSyncingCalendar: Bool
+    let automaticCalendarPublishingEnabled: Bool
     @AppStorage("propertyManager.appearance") private var appearanceRaw: String = AppAppearance.system.rawValue
     @AppStorage("propertyManager.calendarStartHour") private var calendarStartHour: Int = 8
     @AppStorage("propertyManager.calendarStartMinute") private var calendarStartMinute: Int = 0
@@ -2976,7 +3074,11 @@ struct SidebarView: View {
                 apiBaseURL: $apiBaseURL,
                 apiKey: $apiKey,
                 manualLibraryBaseURL: $manualLibraryBaseURL,
-                operatorPIN: $operatorPIN
+                operatorPIN: $operatorPIN,
+                operatorIdentity: $operatorIdentity,
+                connectionTestResult: connectionTestResult,
+                isTestingConnection: isTestingConnection,
+                testConnectionAction: testConnectionAction
             )
 
             VStack(alignment: .leading, spacing: 8) {
@@ -3002,11 +3104,13 @@ struct SidebarView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                Button {
-                    importFromURLAction()
-                } label: {
-                    Label("Import from URL", systemImage: "link")
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                if AppEnvironment.isDevelopment {
+                    Button {
+                        importFromURLAction()
+                    } label: {
+                        Label("Import from URL (DEV, local Ollama)", systemImage: "link")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 ActionResultView(message: statusMessage, extractionState: manualExtractionState)
@@ -3083,8 +3187,12 @@ struct SidebarView: View {
                     .disabled(isSyncingCalendar)
 
 
-                } else {
+                } else if automaticCalendarPublishingEnabled {
                     Label("Task due dates sync automatically", systemImage: "calendar.badge.checkmark")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Label("Calendar publishing is paused", systemImage: "calendar.badge.exclamationmark")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -3171,6 +3279,10 @@ struct ConnectionStatusCard: View {
     @Binding var apiKey: String
     @Binding var manualLibraryBaseURL: String
     @Binding var operatorPIN: String
+    @Binding var operatorIdentity: String
+    let connectionTestResult: String
+    let isTestingConnection: Bool
+    let testConnectionAction: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -3205,7 +3317,7 @@ struct ConnectionStatusCard: View {
             Text("Dashboard Manual Library URL")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
-            TextField("https://dashboard-dev.example", text: $manualLibraryBaseURL)
+            TextField(AppEnvironment.defaultManualLibraryBaseURL, text: $manualLibraryBaseURL)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
 
@@ -3215,6 +3327,23 @@ struct ConnectionStatusCard: View {
             SecureField("PROPERTYMANAGER_OPERATOR_PIN", text: $operatorPIN)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
+
+            Text("Operator Name")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            TextField(PropertyAPIClient.defaultOperatorIdentity, text: $operatorIdentity)
+                .textFieldStyle(.roundedBorder)
+                .font(.caption2)
+
+            Button(isTestingConnection ? "Testing…" : "Test Connection", action: testConnectionAction)
+                .controlSize(.small)
+                .disabled(isTestingConnection)
+            if !connectionTestResult.isEmpty {
+                Text(connectionTestResult)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Text(apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "Auth: missing API key" : "Auth: API key set")
                 .font(.caption2)
@@ -3391,12 +3520,12 @@ struct SidebarItem: View {
 
 struct TaskListHeaderView: View {
     @Binding var searchText: String
+    @Binding var listFilter: TaskListFilter
     @Binding var selectedOriginFilter: TaskOrigin?
     @Binding var selectedCategoryFilter: String?
     let categories: [CategoryDefinition]
     let taskCountForCategory: (String) -> Int
     let addAction: () -> Void
-    let addWorkRequestAction: () -> Void
     let addCategoryAction: (String) -> Void
     let deleteCategoryAction: (CategoryDefinition, String?) -> Void
 
@@ -3424,7 +3553,7 @@ struct TaskListHeaderView: View {
     var body: some View {
         VStack(spacing: 12) {
             HStack {
-                TextField("Search tasks (any word)...", text: $searchText)
+                TextField("Search tasks, parts, vendors (any word)...", text: $searchText)
                     .textFieldStyle(.roundedBorder)
                 if !searchText.isEmpty {
                     Button {
@@ -3446,16 +3575,16 @@ struct TaskListHeaderView: View {
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
-
-                Button {
-                    addWorkRequestAction()
-                } label: {
-                    Label("New Work Request", systemImage: "wrench.and.screwdriver.fill")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(.orange)
             }
+
+            Picker("Show", selection: $listFilter) {
+                ForEach(TaskListFilter.allCases) { filter in
+                    Text(filter.rawValue).tag(filter)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(maxWidth: 420)
 
             HStack {
                 Spacer(minLength: 0)
@@ -4119,8 +4248,8 @@ struct TaskEditorView: View {
         CardView(title: task.kind == .workRequest ? "Work Request Photos" : "Photos", icon: "camera.fill") {
             VStack(alignment: .leading, spacing: 12) {
                 Text(task.kind == .workRequest
-                     ? "Add a photo of the damage or location. Photos are saved in DEV PostgreSQL."
-                     : "Optional photos for this task. Photos are saved in DEV PostgreSQL.")
+                     ? "Add a photo of the damage or location. Photos are saved on the PropertyManager server."
+                     : "Optional photos for this task. Photos are saved on the PropertyManager server.")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
 
@@ -4213,16 +4342,6 @@ struct TaskEditorView: View {
                 LabeledField(title: "Item (Shared)") {
                     TextField("Item", text: $task.item)
                         .textFieldStyle(.roundedBorder)
-                }
-
-                LabeledField(title: "Type") {
-                    Picker("Type", selection: $task.kind) {
-                        ForEach(TaskKind.allCases) { kind in
-                            Text(kind.rawValue).tag(kind)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(maxWidth: 260, alignment: .leading)
                 }
 
                 HStack(spacing: 16) {
@@ -5129,6 +5248,10 @@ struct ManualLibrarySheet: View {
     @State private var isUploading = false
     @State private var uploadFailed = false
     @State private var uploadMessage = ""
+    @State private var libraryPDFs: [DashboardLibraryPDF] = []
+    @State private var librarySearch = ""
+    @State private var libraryError = ""
+    @State private var connectingPath: String?
 
     init(
         store: MaintenanceStore,
@@ -5146,6 +5269,16 @@ struct ManualLibrarySheet: View {
         self.onDone = onDone
         self.onExtract = onExtract
         _selectedAssetID = State(initialValue: preferredAssetID)
+    }
+
+    private var selectedAssetName: String? {
+        store.assets.first { $0.id == selectedAssetID }?.name
+    }
+
+    private var visibleLibraryPDFs: [DashboardLibraryPDF] {
+        let words = TaskSearch.words(in: librarySearch)
+        let matching = libraryPDFs.filter { TaskSearch.matches(fields: [$0.relativePath, $0.title], words: words) }
+        return DashboardLibraryPDF.ordered(matching, forAssetName: selectedAssetName)
     }
 
     private var listState: ManualLibraryListState {
@@ -5169,7 +5302,7 @@ struct ManualLibrarySheet: View {
                     .accessibilityLabel("Done")
                     .accessibilityHint("Closes the Manual Library")
             }
-            Text("PDFs remain on the IntelMini external drive. Extract uses this Mac’s local Ollama only; the temporary download is deleted after processing.")
+            Text("PDFs remain on the IntelMini external drive. Extract uses Apple's on-device model only; the temporary download is deleted after processing.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -5210,6 +5343,8 @@ struct ManualLibrarySheet: View {
                     .foregroundStyle(uploadFailed ? Color.red : Color.secondary)
                     .textSelection(.enabled)
             }
+
+            libraryConnectSection
 
             List(manuals, id: \.versionID) { manual in
                 HStack {
@@ -5268,9 +5403,106 @@ struct ManualLibrarySheet: View {
             }
         }
         .padding(24)
-        .task { await loadManuals() }
+        .task {
+            await loadManuals()
+            await loadLibraryPDFs()
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             Task { await loadManuals() }
+        }
+    }
+
+    private var libraryConnectSection: some View {
+        GroupBox("Connect a PDF already in the library") {
+            VStack(alignment: .leading, spacing: 8) {
+                TextField("Search library PDFs (any word)...", text: $librarySearch)
+                    .textFieldStyle(.roundedBorder)
+                if !libraryError.isEmpty {
+                    Text(libraryError)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
+                List(visibleLibraryPDFs) { pdf in
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Text(pdf.filename).fontWeight(.semibold)
+                                if let name = selectedAssetName, pdf.isSuggested(forAssetName: name) {
+                                    Text("Suggested")
+                                        .font(.caption2.weight(.semibold))
+                                        .foregroundStyle(.green)
+                                }
+                            }
+                            if !pdf.folder.isEmpty {
+                                Text(pdf.folder).font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Spacer()
+                        if connectingPath == pdf.relativePath {
+                            ProgressView().controlSize(.small)
+                        }
+                        Button("Connect") {
+                            Task { await connect(pdf, extractAfter: false) }
+                        }
+                        Button("Connect & Extract") {
+                            Task { await connect(pdf, extractAfter: true) }
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                    .disabled(selectedAssetID == nil || connectingPath != nil)
+                }
+                .frame(minHeight: 140, maxHeight: 200)
+            }
+        }
+    }
+
+    @MainActor
+    private func loadLibraryPDFs() async {
+        libraryError = ""
+        do {
+            libraryPDFs = try await store.apiClient.fetchDashboardLibraryPDFs(
+                manualLibraryBaseURL: store.manualLibraryBaseURL
+            )
+        } catch {
+            libraryPDFs = []
+            libraryError = "Could not load library PDFs: \(error.localizedDescription)"
+        }
+    }
+
+    /// Connects without copying the PDF; optionally starts on-device
+    /// extraction of the version the Dashboard just registered.
+    @MainActor
+    private func connect(_ pdf: DashboardLibraryPDF, extractAfter: Bool) async {
+        guard let selectedAssetID else { return }
+        connectingPath = pdf.relativePath
+        defer { connectingPath = nil }
+        uploadFailed = false
+        do {
+            let versionID = try await store.apiClient.connectDashboardLibraryPDF(
+                pdf,
+                assetID: selectedAssetID,
+                manualLibraryBaseURL: store.manualLibraryBaseURL
+            )
+            await loadManuals()
+            guard extractAfter else {
+                uploadMessage = "Connected \(pdf.filename). Click Extract below."
+                return
+            }
+            guard let manual = manuals.first(where: { $0.versionID == versionID }) else {
+                uploadMessage = "Connected \(pdf.filename), but its manual version was not found. Click Extract below."
+                return
+            }
+            guard manual.ingestionStatus == "pending" else {
+                uploadMessage = "Connected \(pdf.filename). It was already extracted."
+                return
+            }
+            uploadMessage = "Connected \(pdf.filename). Extracting…"
+            store.extractLibraryManual(manual) { extractedManual, drafts, manufacturer, assetID in
+                onExtract(extractedManual, drafts, manufacturer, assetID)
+            }
+        } catch {
+            uploadFailed = true
+            uploadMessage = "Not connected: \(error.localizedDescription)"
         }
     }
 
@@ -5278,7 +5510,7 @@ struct ManualLibrarySheet: View {
         if manual.ingestionStatus == "extracted" {
             return "Extracted · \(manual.taskCount) accepted task(s)"
         }
-        return "Uploaded · awaiting local extraction"
+        return "Uploaded · awaiting on-device extraction"
     }
 
     @MainActor

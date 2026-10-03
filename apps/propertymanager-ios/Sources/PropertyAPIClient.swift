@@ -17,6 +17,14 @@ enum PropertyAPIError: LocalizedError {
     }
 }
 
+extension Error {
+    /// SwiftUI cancels `.task` / `.refreshable` work when a view disappears or a tab changes; that is not a failure.
+    var isCancellation: Bool {
+        if self is CancellationError { return true }
+        return (self as? URLError)?.code == .cancelled
+    }
+}
+
 /// Shared HTTP client for PropertyManager REST API.
 /// Asset/meter endpoints use `/v1/`; task endpoints remain at root (Phase 1 API).
 final class PropertyAPIClient {

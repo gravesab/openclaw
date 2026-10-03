@@ -599,6 +599,7 @@ struct MacAssetDetailPanel: View {
         do {
             readings = try await store.apiClient.fetchMeterReadings(assetId: asset.id)
         } catch {
+            guard !error.isCancellation else { return }
             message = error.localizedDescription
         }
     }

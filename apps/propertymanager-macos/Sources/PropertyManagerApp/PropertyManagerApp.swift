@@ -973,6 +973,7 @@ final class MaintenanceStore: ObservableObject {
             assets = try await apiClient.fetchAssets()
             assetLoadError = nil
         } catch {
+            guard !error.isCancellation else { return }
             let message = "Couldn’t load assets: \(error.localizedDescription)"
             assetLoadError = message
             statusMessage = message
@@ -1200,6 +1201,7 @@ final class MaintenanceStore: ObservableObject {
             persistSyncState()
             statusMessage = "Online · \(tasks.count) tasks"
         } catch {
+            guard !error.isCancellation else { return }
             isOnline = false
             statusMessage = "Can’t reach server. Showing last saved tasks. \(error.localizedDescription)"
         }
@@ -5464,6 +5466,7 @@ struct ManualLibrarySheet: View {
                 manualLibraryBaseURL: store.manualLibraryBaseURL
             )
         } catch {
+            guard !error.isCancellation else { return }
             libraryPDFs = []
             libraryError = "Could not load library PDFs: \(error.localizedDescription)"
         }
@@ -5554,6 +5557,7 @@ struct ManualLibrarySheet: View {
         do {
             manuals = try await store.apiClient.fetchAssetManuals(assetID: selectedAssetID)
         } catch {
+            guard !error.isCancellation else { return }
             errorMessage = "Could not load the manual library: \(error.localizedDescription)"
         }
     }

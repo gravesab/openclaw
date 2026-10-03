@@ -1,6 +1,17 @@
 import AppKit
 import Foundation
 
+extension Error {
+    /// SwiftUI cancels `.task` work when a view disappears or its id changes; that is not a failure.
+    var isCancellation: Bool {
+        if self is CancellationError { return true }
+        if let apiError = self as? PropertyAPIError, case .transport(let underlying) = apiError {
+            return underlying.isCancellation
+        }
+        return (self as? URLError)?.code == .cancelled
+    }
+}
+
 enum PropertyAPIError: LocalizedError {
     case invalidURL
     case badStatus(Int)

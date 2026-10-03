@@ -250,6 +250,7 @@ struct TaskCompletionSheet: View {
         do {
             linkedAsset = try await store.apiClient.fetchAsset(id: assetId)
         } catch {
+            guard !error.isCancellation else { return }
             localError = error.localizedDescription
         }
     }

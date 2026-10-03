@@ -209,3 +209,17 @@ final class AppleManualExtractionTests: XCTestCase {
         XCTAssertEqual(selection.map(\.selected), [false])
     }
 }
+
+final class ErrorCancellationTests: XCTestCase {
+    func testCancelledLoadsAreNotFailures() {
+        XCTAssertTrue(CancellationError().isCancellation)
+        XCTAssertTrue(URLError(.cancelled).isCancellation)
+        XCTAssertTrue(PropertyAPIError.transport(URLError(.cancelled)).isCancellation)
+    }
+
+    func testRealFailuresStillReport() {
+        XCTAssertFalse(PropertyAPIError.transport(URLError(.timedOut)).isCancellation)
+        XCTAssertFalse(PropertyAPIError.unauthorized(nil).isCancellation)
+        XCTAssertFalse(URLError(.notConnectedToInternet).isCancellation)
+    }
+}

@@ -8,11 +8,14 @@ creates a separate scheduled task.
 
 from __future__ import annotations
 
+import fcntl
 import hashlib
+import math
 import os
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from flask import Flask, g, jsonify, request
 
@@ -22,12 +25,69 @@ from errors import error_response, validation_error
 
 MAX_DESCRIPTION_CHARS = 12_000
 MAX_PHOTO_BYTES = 10 * 1024 * 1024
+MAX_PHOTOS_PER_REQUEST = 5
 ATTACHMENT_TTL_MINUTES = 20
 JPEG_CONTENT_TYPE = "image/jpeg"
 
 
 def _attachment_root() -> Path:
     return Path(os.environ.get("PROPERTYMANAGER_ATTACHMENTS_ROOT", "/var/lib/propertymanager/attachments"))
+
+
+@contextmanager
+def _attachment_upload_lock(root: Path, attachment_id: str):
+    """Serialize finalization for one opaque attachment across API workers."""
+    lock_path = root / f".{attachment_id}.upload.lock"
+    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+
+
+def _attachment_operation(attachment_id: str) -> dict | None:
+    return pm_db.execute_one_json(
+        """SELECT id, created_by, content_type, max_bytes, state, expires_at,
+                  allocation_idempotency_key, storage_path, byte_size, sha256
+           FROM propertymanager.maintenance_attachment_operations WHERE id = %s""",
+        (attachment_id,),
+    )
+
+
+def _operation_matches_file(operation: dict | None, destination: Path, size: int, digest: str) -> bool:
+    return bool(
+        operation
+        and operation.get("state") in {"uploaded", "attached"}
+        and operation.get("storage_path") == str(destination)
+        and int(operation.get("byte_size") or 0) == size
+        and operation.get("sha256") == digest
+    )
+
+
+def _replay_attachment_allocation(existing: dict, max_bytes: int):
+    if existing.get("content_type") != JPEG_CONTENT_TYPE or int(existing.get("max_bytes") or 0) != max_bytes:
+        return error_response("IDEMPOTENCY_CONFLICT", "Attachment retry payload does not match", status=409)
+    if existing.get("expired") and existing.get("state") != "attached":
+        root = _attachment_root()
+        root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        with _attachment_upload_lock(root, str(existing["id"])):
+            (root / f"{existing['id']}.jpg").unlink(missing_ok=True)
+            pm_db.execute(
+                """UPDATE propertymanager.maintenance_attachment_operations
+                   SET state = 'issued', expires_at = now() + interval '20 minutes',
+                       storage_path = NULL, byte_size = NULL, sha256 = NULL, uploaded_at = NULL
+                   WHERE id = %s AND expires_at <= now() AND state IN ('issued', 'uploaded', 'expired')""",
+                (existing["id"],),
+            )
+    return jsonify({
+        "attachment_id": existing["id"],
+        "content_type": JPEG_CONTENT_TYPE,
+        "max_bytes": max_bytes,
+        "expires_in_seconds": ATTACHMENT_TTL_MINUTES * 60,
+        "idempotent_replay": True,
+    })
 
 
 def _request_row(request_id: str) -> dict | None:
@@ -112,14 +172,57 @@ def _normalize_materials(raw: object) -> list[dict]:
             quantity = float(value.get("quantity") if value.get("quantity") is not None else 1)
         except (TypeError, ValueError) as exc:
             raise ValueError("material quantity must be a number") from exc
-        if quantity <= 0:
-            raise ValueError("material quantity must be greater than zero")
+        if not math.isfinite(quantity) or quantity <= 0:
+            raise ValueError("material quantity must be finite and greater than zero")
         normalized.append({
             "id": str(uuid4()), "name": name, "quantity": quantity,
             "unit": str(value.get("unit") or "").strip(),
             "notes": str(value.get("note") or "").strip(), "sort_order": position,
         })
     return normalized
+
+
+def _normalize_uuid(value: str, *, field: str) -> str:
+    try:
+        return str(UUID(value))
+    except (ValueError, AttributeError) as exc:
+        raise ValueError(f"{field} must be a valid opaque ID") from exc
+
+
+def _reap_expired_unattached_photos(submitter: str) -> None:
+    """Remove expired intake uploads without touching photos attached to requests."""
+    expired = pm_db.execute_json(
+        """SELECT id FROM propertymanager.maintenance_attachment_operations
+           WHERE created_by = %s AND state IN ('issued', 'uploaded', 'expired') AND expires_at <= now()""",
+        (submitter,),
+    )
+    if not expired:
+        return
+    root = _attachment_root()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    for row in expired:
+        attachment_id = str(row.get("id") or "")
+        try:
+            attachment_id = _normalize_uuid(attachment_id, field="attachment_id")
+        except ValueError:
+            continue
+        with _attachment_upload_lock(root, attachment_id):
+            operation = pm_db.execute_one_json(
+                """SELECT id FROM propertymanager.maintenance_attachment_operations
+                   WHERE id = %s AND created_by = %s
+                     AND state IN ('issued', 'uploaded', 'expired') AND expires_at <= now()""",
+                (attachment_id, submitter),
+            )
+            if operation is None:
+                continue
+            (root / f"{attachment_id}.jpg").unlink(missing_ok=True)
+            pm_db.execute(
+                """UPDATE propertymanager.maintenance_attachment_operations
+                   SET state = 'expired', storage_path = NULL, byte_size = NULL, sha256 = NULL
+                   WHERE id = %s AND created_by = %s
+                     AND state IN ('issued', 'uploaded', 'expired') AND expires_at <= now()""",
+                (attachment_id, submitter),
+            )
 
 
 def _attachment_values_cte(attachment_ids: list[str]) -> tuple[str, list[str]]:
@@ -149,50 +252,61 @@ def register_work_request_routes(app: Flask) -> None:
         if not idempotency_key or len(idempotency_key) > 200:
             return validation_error("Idempotency-Key is required", field="Idempotency-Key")
         existing = pm_db.execute_one_json(
-            """SELECT id, content_type, max_bytes
+            """SELECT id, content_type, max_bytes, state, expires_at <= now() AS expired
                FROM propertymanager.maintenance_attachment_operations
                WHERE created_by = %s AND allocation_idempotency_key = %s""",
             (submitter, idempotency_key),
         )
         if existing:
-            if existing.get("content_type") != JPEG_CONTENT_TYPE or int(existing.get("max_bytes") or 0) != max_bytes:
-                return error_response("IDEMPOTENCY_CONFLICT", "Attachment retry payload does not match", status=409)
-            return jsonify({"attachment_id": existing["id"], "content_type": JPEG_CONTENT_TYPE,
-                            "max_bytes": max_bytes, "expires_in_seconds": ATTACHMENT_TTL_MINUTES * 60,
-                            "idempotent_replay": True})
+            return _replay_attachment_allocation(existing, max_bytes)
+        _reap_expired_unattached_photos(submitter)
         operation_id = str(uuid4())
         try:
-            pm_db.execute(
-                """
-                INSERT INTO propertymanager.maintenance_attachment_operations
-                    (id, created_by, content_type, max_bytes, expires_at, allocation_idempotency_key)
-                VALUES (%s, %s, %s, %s, now() + interval '20 minutes', %s)
-                """,
-                (operation_id, submitter, JPEG_CONTENT_TYPE, max_bytes, idempotency_key),
+            created = pm_db.execute_top_level_one_json(
+                """WITH allocation_lock AS (
+                       SELECT pg_advisory_xact_lock(hashtextextended(%s, 0))
+                   ), issued AS (
+                       INSERT INTO propertymanager.maintenance_attachment_operations
+                           (id, created_by, content_type, max_bytes, expires_at, allocation_idempotency_key)
+                       SELECT %s, %s, %s, %s, now() + interval '20 minutes', %s
+                       FROM allocation_lock
+                       WHERE (
+                           SELECT count(*) FROM propertymanager.maintenance_attachment_operations
+                           WHERE created_by = %s AND state IN ('issued', 'uploaded') AND expires_at > now()
+                       ) < %s
+                       RETURNING id
+                   )
+                   SELECT row_to_json(issued) FROM issued""",
+                (submitter, operation_id, submitter, JPEG_CONTENT_TYPE, max_bytes, idempotency_key,
+                 submitter, MAX_PHOTOS_PER_REQUEST),
             )
         except Exception:
             existing = pm_db.execute_one_json(
-                """SELECT id, content_type, max_bytes
+                """SELECT id, content_type, max_bytes, state, expires_at <= now() AS expired
                    FROM propertymanager.maintenance_attachment_operations
                    WHERE created_by = %s AND allocation_idempotency_key = %s""",
                 (submitter, idempotency_key),
             )
-            if existing and existing.get("content_type") == JPEG_CONTENT_TYPE and int(existing.get("max_bytes") or 0) == max_bytes:
-                return jsonify({"attachment_id": existing["id"], "content_type": JPEG_CONTENT_TYPE,
-                                "max_bytes": max_bytes, "expires_in_seconds": ATTACHMENT_TTL_MINUTES * 60,
-                                "idempotent_replay": True})
+            if existing:
+                return _replay_attachment_allocation(existing, max_bytes)
             raise
+        if created is None:
+            return error_response(
+                "ATTACHMENT_LIMIT_REACHED",
+                f"At most {MAX_PHOTOS_PER_REQUEST} active photos may be allocated",
+                status=409,
+            )
         return jsonify({"attachment_id": operation_id, "content_type": JPEG_CONTENT_TYPE,
                         "max_bytes": max_bytes, "expires_in_seconds": ATTACHMENT_TTL_MINUTES * 60}), 201
 
     @app.put("/v1/work-requests/attachments/<attachment_id>/content")
     @auth_required()
     def upload_work_request_attachment(attachment_id: str):
-        operation = pm_db.execute_one_json(
-            """SELECT id, created_by, content_type, max_bytes, state, expires_at, allocation_idempotency_key
-               FROM propertymanager.maintenance_attachment_operations WHERE id = %s""",
-            (attachment_id,),
-        )
+        try:
+            UUID(attachment_id)
+        except ValueError:
+            return error_response("NOT_FOUND", "Attachment operation not found", status=404)
+        operation = _attachment_operation(attachment_id)
         if operation is None or operation.get("created_by") != server_submitter_identity():
             return error_response("NOT_FOUND", "Attachment operation not found", status=404)
         idempotency_key = str(request.headers.get("Idempotency-Key") or "").strip()
@@ -204,7 +318,7 @@ def register_work_request_routes(app: Flask) -> None:
             return error_response("ATTACHMENT_NOT_UPLOADABLE", "Attachment cannot be uploaded", status=409)
         if operation.get("expires_at") and str(operation["expires_at"]) < datetime.now(timezone.utc).isoformat():
             return error_response("ATTACHMENT_EXPIRED", "Attachment operation expired", status=409)
-        if request.content_type.split(";", 1)[0].lower() != JPEG_CONTENT_TYPE:
+        if (request.content_type or "").split(";", 1)[0].lower() != JPEG_CONTENT_TYPE:
             return validation_error("Content-Type must be image/jpeg", field="Content-Type")
         raw = request.get_data(cache=False)
         if not raw or len(raw) > int(operation["max_bytes"]):
@@ -216,14 +330,50 @@ def register_work_request_routes(app: Flask) -> None:
         root = _attachment_root()
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         destination = root / f"{attachment_id}.jpg"
-        destination.write_bytes(sanitized)
         digest = hashlib.sha256(sanitized).hexdigest()
-        pm_db.execute(
-            """UPDATE propertymanager.maintenance_attachment_operations
-               SET state = 'uploaded', storage_path = %s, byte_size = %s, sha256 = %s, uploaded_at = now()
-               WHERE id = %s AND state = 'issued'""",
-            (str(destination), len(sanitized), digest, attachment_id),
-        )
+        with _attachment_upload_lock(root, attachment_id):
+            # Re-check under the cross-process lock. A concurrent request may
+            # have finalized this operation after the first authorization read.
+            operation = _attachment_operation(attachment_id)
+            if operation is None or operation.get("created_by") != server_submitter_identity():
+                return error_response("NOT_FOUND", "Attachment operation not found", status=404)
+            if operation.get("allocation_idempotency_key") != idempotency_key:
+                return error_response("ATTACHMENT_RETRY_UNAUTHORIZED", "Attachment retry key is invalid", status=409)
+            if operation.get("state") in {"uploaded", "attached"}:
+                return jsonify({"attachment_id": attachment_id, "status": "uploaded", "idempotent_replay": True})
+            if operation.get("state") != "issued":
+                return error_response("ATTACHMENT_NOT_UPLOADABLE", "Attachment cannot be uploaded", status=409)
+            if operation.get("expires_at") and str(operation["expires_at"]) < datetime.now(timezone.utc).isoformat():
+                return error_response("ATTACHMENT_EXPIRED", "Attachment operation expired", status=409)
+
+            temporary = root / f".{attachment_id}.{uuid4()}.tmp"
+            try:
+                with temporary.open("xb") as handle:
+                    handle.write(sanitized)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, destination)
+                try:
+                    affected = pm_db.execute(
+                        """UPDATE propertymanager.maintenance_attachment_operations
+                           SET state = 'uploaded', storage_path = %s, byte_size = %s, sha256 = %s, uploaded_at = now()
+                           WHERE id = %s AND state = 'issued'""",
+                        (str(destination), len(sanitized), digest, attachment_id),
+                    )
+                except Exception:
+                    finalized = _attachment_operation(attachment_id)
+                    if _operation_matches_file(finalized, destination, len(sanitized), digest):
+                        return jsonify({"attachment_id": attachment_id, "status": "uploaded", "idempotent_replay": True})
+                    destination.unlink(missing_ok=True)
+                    raise
+                if affected != 1:
+                    finalized = _attachment_operation(attachment_id)
+                    if _operation_matches_file(finalized, destination, len(sanitized), digest):
+                        return jsonify({"attachment_id": attachment_id, "status": "uploaded", "idempotent_replay": True})
+                    destination.unlink(missing_ok=True)
+                    return error_response("ATTACHMENT_NOT_UPLOADABLE", "Attachment cannot be finalized", status=409)
+            finally:
+                temporary.unlink(missing_ok=True)
         # Never reveal a host path, filename, digest, or download URL.
         return jsonify({"attachment_id": attachment_id, "status": "uploaded"})
 
@@ -249,6 +399,11 @@ def register_work_request_routes(app: Flask) -> None:
         if not description or len(description) > MAX_DESCRIPTION_CHARS:
             return validation_error("description is required and must be at most 12000 characters", field="description")
         asset_id = str(payload.get("asset_id") or "").strip() or None
+        if asset_id:
+            try:
+                asset_id = _normalize_uuid(asset_id, field="asset_id")
+            except ValueError as exc:
+                return validation_error(str(exc), field="asset_id")
         area = str(payload.get("area") or "").strip()
         if not asset_id and not area:
             return validation_error("area is required when asset_id is not supplied", field="area")
@@ -259,6 +414,15 @@ def register_work_request_routes(app: Flask) -> None:
         attachment_ids = payload.get("attachment_ids") or []
         if not isinstance(attachment_ids, list) or any(not isinstance(value, str) for value in attachment_ids):
             return validation_error("attachment_ids must be an array of opaque IDs", field="attachment_ids")
+        if len(attachment_ids) > MAX_PHOTOS_PER_REQUEST:
+            return validation_error(
+                f"At most {MAX_PHOTOS_PER_REQUEST} photos may be attached",
+                field="attachment_ids",
+            )
+        try:
+            attachment_ids = [_normalize_uuid(value, field="attachment_ids") for value in attachment_ids]
+        except ValueError as exc:
+            return validation_error(str(exc), field="attachment_ids")
         if len(set(attachment_ids)) != len(attachment_ids):
             return validation_error("attachment_ids must not contain duplicates", field="attachment_ids")
         for attachment_id in attachment_ids:
@@ -288,7 +452,7 @@ def register_work_request_routes(app: Flask) -> None:
             "(id, area, item, category_name, priority, frequency, task_description, warning_days, critical_days, "
             "last_done, next_due, is_active, kind, asset_id, intake_state, submitted_by, submitted_at, "
             "intake_idempotency_key, schedule_kind, completion_history, tools_required) "
-            "SELECT %s, %s, 'Work request', 'House', 'Medium', 'As Needed', %s, 0, 0, %s, %s, true, "
+            "SELECT %s, %s, %s, 'House', 'Medium', 'As Needed', %s, 0, 0, %s, %s, true, "
             "'Work Request', %s, 'submitted', %s, %s, %s, 'calendar', '[]'::jsonb, '[]'::jsonb "
             "FROM attachment_guard RETURNING id"
             ")",
@@ -298,7 +462,8 @@ def register_work_request_routes(app: Flask) -> None:
             ")",
         ]
         params: list[object] = [
-            *attachment_params, submitter, len(attachment_ids), request_id, area or "Unassigned", description,
+            *attachment_params, submitter, len(attachment_ids), request_id, area or "Unassigned",
+            f"Work request {request_id}", description,
             now, now, asset_id, submitter, now, idempotency_key, str(uuid4()), submitter,
         ]
         for position, material in enumerate(materials):
@@ -369,6 +534,10 @@ def register_work_request_routes(app: Flask) -> None:
         reason = str(payload.get("reason") or "").strip()
         if not all((area, asset_id, category, priority, reason)):
             return validation_error("area, asset_id, category_name, priority, and reason are required")
+        try:
+            asset_id = _normalize_uuid(asset_id, field="asset_id")
+        except ValueError as exc:
+            return validation_error(str(exc), field="asset_id")
         triaged = pm_db.execute_top_level_one_json(
             """WITH triaged_request AS (
                    UPDATE propertymanager.maintenance_tasks
@@ -404,7 +573,8 @@ def register_work_request_routes(app: Flask) -> None:
                        (id, area, item, category_name, priority, frequency, task_description,
                         warning_days, critical_days, last_done, next_due, is_active, kind,
                         asset_id, schedule_kind, origin, completion_history, tools_required)
-                   SELECT %s, area, 'Work request: ' || left(coalesce(task_description, ''), 120),
+                   SELECT %s, area, 'Work request: ' || left(coalesce(task_description, ''), 72)
+                          || ' [' || id::text || ']',
                           category_name, priority, 'As Needed', task_description,
                           30, 45, now(), now() + interval '30 days', true, 'Scheduled',
                           asset_id, 'calendar', 'owner', '[]'::jsonb, '[]'::jsonb

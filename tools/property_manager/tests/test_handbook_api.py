@@ -320,6 +320,41 @@ class HandbookAPITests(unittest.TestCase):
         self.assertNotIn("source_locator", row)
         self.assertNotIn("source_sha256", row)
 
+    def test_listing_counts_only_explicit_manual_task_links(self):
+        with mock.patch.object(self.api.pm_db, "execute_one_json", return_value=self.asset()), mock.patch.object(
+            self.api.pm_db, "execute_json", return_value=[self.stored_manual()]
+        ) as query:
+            response = self.client.get("/v1/assets/asset-1/manuals", headers=self.app_headers())
+        self.assertEqual(response.status_code, 200)
+        sql = query.call_args.args[0]
+        self.assertIn("accepted_task_ids", sql)
+        self.assertNotIn("source_manual_name", sql)
+
+    def test_task_linking_requires_extracted_manual_and_asset_owned_tasks(self):
+        with mock.patch.object(self.api.pm_db, "execute_top_level_one_json", return_value={
+            "version_count": 1, "valid_task_count": 2, "updated_count": 1,
+        }) as write:
+            response = self.client.post(
+                "/v1/assets/asset-1/manuals/manual-1/versions/version-1/tasks/link",
+                headers=self.app_headers(),
+                json={"task_ids": ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000002"]},
+            )
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(response.get_json(), {"linked_task_count": 2})
+        sql = write.call_args.args[0]
+        self.assertIn("ingestion_status = 'extracted'", sql)
+        self.assertIn("accepted_task_ids", sql)
+
+    def test_task_linking_rejects_duplicate_task_identifiers(self):
+        with mock.patch.object(self.api.pm_db, "execute_top_level_one_json") as write:
+            response = self.client.post(
+                "/v1/assets/asset-1/manuals/manual-1/versions/version-1/tasks/link",
+                headers=self.app_headers(),
+                json={"task_ids": ["00000000-0000-0000-0000-000000000001", "00000000-0000-0000-0000-000000000001"]},
+            )
+        self.assertEqual(response.status_code, 400)
+        write.assert_not_called()
+
     def test_source_resolution_is_dashboard_only(self):
         row = {
             "source_locator": "dashboard-library://Assets/polaris-ranger-0123456789ab.pdf",

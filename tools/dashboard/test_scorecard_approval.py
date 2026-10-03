@@ -40,6 +40,7 @@ def install_stubs():
     flask.session = {}
     flask.redirect = lambda location: location
     flask.abort = lambda code: (_ for _ in ()).throw(PermissionError(code))
+    flask.jsonify = lambda *args, **kwargs: (args, kwargs)
     flask.send_from_directory = lambda *_args, **_kwargs: None
     flask.stream_with_context = lambda function: function
     sys.modules["flask"] = flask

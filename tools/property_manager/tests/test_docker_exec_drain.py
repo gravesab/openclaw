@@ -40,8 +40,9 @@ class DockerExecDrainTests(unittest.TestCase):
             def poll(self):
                 return self._polled
 
-            def communicate(self):
+            def communicate(self, input=None):
                 seen_inflight["count"] = self_db.inflight_docker_exec_count()
+                seen_inflight["sql"] = input
                 self._polled = 0
                 return ("ok\n", "")
 
@@ -56,6 +57,7 @@ class DockerExecDrainTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0)
         self.assertEqual(result.stdout, "ok\n")
+        self.assertEqual(seen_inflight["sql"], "SELECT 1")
         self.assertGreaterEqual(seen_inflight["count"], 1)
         self.assertEqual(self.db.inflight_docker_exec_count(), 0)
 
@@ -82,6 +84,24 @@ class DockerExecDrainTests(unittest.TestCase):
         self.assertTrue(sql.endswith("COMMIT;"))
         self.assertIn("operator''s mower", sql)
         self.assertIn("active = TRUE", sql)
+
+    def test_mogrify_renders_binary_as_postgres_hex_bytea(self) -> None:
+        sql = self.db._mogrify(
+            "INSERT INTO sample (content) VALUES (%s)",
+            (b"\x00\xffphoto",),
+        )
+        self.assertIn("'\\x00ff70686f746f'::bytea", sql)
+        self.assertNotIn("\\377", sql)
+
+    def test_mogrify_keeps_backslashes_literal_for_psql(self) -> None:
+        sql = self.db._mogrify(
+            "SELECT %s, %s::jsonb",
+            ["a\\b it's", [{"size": "1/16\""}]],
+        )
+        self.assertEqual(
+            sql,
+            "SELECT 'a\\b it''s', '[{\"size\": \"1/16\\\"\"}]'::jsonb",
+        )
 
     def test_wait_inflight_terminates_on_timeout(self) -> None:
         class HangProc:

@@ -3,11 +3,16 @@ from __future__ import annotations
 
 import logging
 import os
+import base64
+import hashlib
 import json
+import re
+from calendar import monthrange
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from uuid import uuid4
 
-from flask import Flask, jsonify, request
+from flask import Flask, Response, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 import db as pm_db
@@ -19,7 +24,7 @@ from decimal_utils import parse_decimal, decimal_to_db
 from errors import error_response, validation_error
 from mapping_proposals import register_mapping_routes
 from maintenance_proposals import register_maintenance_proposal_routes
-from work_requests import register_work_request_routes
+from work_requests import _sanitize_jpeg, register_work_request_routes
 from handbook_api import register_handbook_routes
 
 app = Flask(__name__)
@@ -27,9 +32,9 @@ register_maintenance_proposal_routes(app)
 register_work_request_routes(app)
 register_handbook_routes(app)
 
-# Intentional upload ceiling (aligned with Gunicorn request timeout for large bodies).
-# 32 MiB covers photo/manual attachments without unbounded memory growth.
-MAX_UPLOAD_BYTES = int(os.environ.get("PROPERTYMANAGER_MAX_CONTENT_LENGTH", str(32 * 1024 * 1024)))
+# The dashboard documents a 50 MiB PDF ceiling.  Keep the API boundary aligned
+# so a valid manual or photo is not rejected by Flask before route validation.
+MAX_UPLOAD_BYTES = int(os.environ.get("PROPERTYMANAGER_MAX_CONTENT_LENGTH", str(50 * 1024 * 1024)))
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
 ATTACHMENTS_ROOT = os.environ.get(
@@ -38,6 +43,111 @@ ATTACHMENTS_ROOT = os.environ.get(
 )
 
 logger = logging.getLogger("propertymanager_api")
+EXPECTED_SCHEMA_VERSION = "014"
+MAX_TASK_PHOTO_BYTES = 25 * 1024 * 1024
+MAX_COMPLETION_HISTORY_ENTRIES = 100
+MAX_COMPLETION_HISTORY_ENTRY_BYTES = 4 * 1024
+_TASK_PHOTO_NAME_RE = re.compile(r"^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}\.jpg$")
+
+
+def _requested_task_photo_name(file_name: object) -> str | None:
+    value = str(file_name or "").strip()
+    if not value or len(value) > 255 or "/" in value or "\\" in value or "\x00" in value:
+        return None
+    return value
+
+
+def _completion_history_error(history: object) -> str | None:
+    """Keep task upserts bounded even if a client retries a malformed state."""
+    if not isinstance(history, list):
+        return "completion_history must be an array"
+    if len(history) > MAX_COMPLETION_HISTORY_ENTRIES:
+        return "completion_history has too many entries"
+    if any(
+        not isinstance(entry, str)
+        or len(entry.encode("utf-8")) > MAX_COMPLETION_HISTORY_ENTRY_BYTES
+        for entry in history
+    ):
+        return "completion_history contains an invalid or oversized entry"
+    return None
+
+
+def _safe_legacy_photo_bytes(storage_path: object) -> bytes | None:
+    """Read an importer-era photo only when it remains under the configured root."""
+    if not storage_path:
+        return None
+    try:
+        root = Path(ATTACHMENTS_ROOT).resolve(strict=True)
+        candidate = Path(str(storage_path)).resolve(strict=True)
+        if not candidate.is_file() or not candidate.is_relative_to(root):
+            return None
+        if candidate.stat().st_size > MAX_TASK_PHOTO_BYTES:
+            return None
+        return candidate.read_bytes()
+    except (OSError, ValueError):
+        return None
+
+
+def _legacy_photo_content_type(file_name: str) -> str:
+    suffix = Path(file_name).suffix.lower()
+    return {
+        ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+        ".heic": "image/heic", ".heif": "image/heic", ".gif": "image/gif",
+        ".webp": "image/webp", ".tif": "image/tiff", ".tiff": "image/tiff",
+    }.get(suffix, "application/octet-stream")
+
+
+def _add_calendar_months(value: datetime, months: int) -> datetime:
+    """Advance a timestamp by whole calendar months without changing its timezone."""
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    return value.replace(day=min(value.day, monthrange(year, month)[1]), year=year, month=month)
+
+
+def next_calendar_due(
+    completed_at: datetime,
+    *,
+    frequency: str | None,
+    warning_days: int,
+) -> datetime:
+    """Return the next calendar occurrence; warning days are alert thresholds, not cadence."""
+    normalized = " ".join((frequency or "").casefold().split())
+    day_intervals = {
+        "daily": 1,
+        "weekly": 7,
+        "biweekly": 14,
+        "every 2 weeks": 14,
+    }
+    if normalized in day_intervals:
+        return completed_at + timedelta(days=day_intervals[normalized])
+    if normalized == "monthly":
+        return _add_calendar_months(completed_at, 1)
+    if normalized == "quarterly":
+        return _add_calendar_months(completed_at, 3)
+    if normalized in {"semiannual", "semi-annually", "every 6 months"}:
+        return _add_calendar_months(completed_at, 6)
+    if normalized in {"annual", "annually", "yearly"}:
+        return _add_calendar_months(completed_at, 12)
+
+    every_match = re.fullmatch(
+        r"every\s+(\d+)(?:\s*-\s*\d+)?\s+(day|days|week|weeks|month|months|year|years)",
+        normalized,
+    )
+    if every_match:
+        interval = int(every_match.group(1))
+        unit = every_match.group(2)
+        if unit.startswith("day"):
+            return completed_at + timedelta(days=interval)
+        if unit.startswith("week"):
+            return completed_at + timedelta(days=interval * 7)
+        if unit.startswith("month"):
+            return _add_calendar_months(completed_at, interval)
+        return _add_calendar_months(completed_at, interval * 12)
+
+    # Legacy free-text frequencies remain deployable. Preserve their existing
+    # fallback until each is normalized to an explicit cadence.
+    return completed_at + timedelta(days=max(warning_days, 1))
 
 TASK_COLUMNS = """
     id, area, item, category_name, priority, frequency,
@@ -242,15 +352,19 @@ def normalize_part_payload(raw: dict, *, sort_order: int) -> dict:
 
 
 def fetch_task_or_404(task_id: str) -> dict | None:
-    return pm_db.execute_one_json(
+    row = pm_db.execute_one_json(
         f"""
         SELECT
             {TASK_COLUMNS}
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
+          AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
+    if row and (row.get("kind") == "Work Request" or row.get("intake_state") is not None):
+        return None
+    return row
 
 
 def enrich_tasks(rows: list[dict]) -> list[dict]:
@@ -271,7 +385,7 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     )
     photos_rows = pm_db.execute_json(
         f"""
-        SELECT id, task_id, file_name, storage_path, created_at
+        SELECT id, task_id, file_name, created_at
         FROM propertymanager.maintenance_task_photos
         WHERE task_id IN ({placeholders})
         ORDER BY created_at
@@ -287,6 +401,9 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     for photo in photos_rows:
         photos_by_task.setdefault(str(photo["task_id"]), []).append(photo)
 
+    # One query for all meters: a per-task lookup made GET /tasks exceed client timeouts.
+    meters_by_asset = ms.fetch_meter_rows([str(row["asset_id"]) for row in rows if row.get("asset_id")])
+
     enriched = []
     for row in rows:
         item = dict(row)
@@ -300,7 +417,7 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
         current_meter = None
         asset_id = item.get("asset_id")
         if asset_id:
-            meter_row = ms.fetch_meter_row(str(asset_id))
+            meter_row = meters_by_asset.get(str(asset_id))
             if meter_row:
                 current_meter = ms._as_decimal(meter_row.get("current_value"))
             item = ms.enrich_task_meter_fields(item, current_meter)
@@ -308,8 +425,8 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
     return enriched
 
 
-def _probe_postgres_and_schema() -> tuple[bool, bool]:
-    """Return (postgres_reachable, schema_available). Never raises."""
+def _probe_postgres_and_schema() -> tuple[bool, bool, bool]:
+    """Return reachability, base-schema availability, and verified current-migration status."""
     try:
         row = pm_db.execute_one_json(
             """
@@ -317,27 +434,96 @@ def _probe_postgres_and_schema() -> tuple[bool, bool]:
                 to_regclass('propertymanager.assets')::text AS assets_table,
                 to_regclass('propertymanager.asset_meter')::text AS meter_table,
                 to_regclass('propertymanager.maintenance_tasks')::text AS tasks_table,
-                to_regclass('propertymanager.maintenance_proposals')::text AS proposals_table
+                to_regclass('propertymanager.maintenance_proposals')::text AS proposals_table,
+                (
+                    SELECT count(*) = 8
+                    FROM information_schema.tables
+                    WHERE table_schema = 'propertymanager'
+                      AND table_name IN (
+                          'asset_manual', 'asset_manual_version', 'asset_manual_chunk',
+                          'asset_manual_state_event', 'maintenance_attachment_operations',
+                          'maintenance_task_intake_events', 'maintenance_task_photos',
+                          'schema_migrations'
+                      )
+                ) AS required_tables,
+                (
+                    SELECT count(*) = 8
+                    FROM information_schema.columns
+                    WHERE table_schema = 'propertymanager'
+                      AND table_name = 'maintenance_tasks'
+                      AND column_name IN (
+                          'intake_state', 'submitted_by', 'submitted_at', 'triaged_by',
+                          'triaged_at', 'triage_reason', 'converted_task_id',
+                          'intake_idempotency_key'
+                      )
+                ) AS intake_columns,
+                (
+                    SELECT count(*) = 11
+                    FROM information_schema.columns
+                    WHERE table_schema = 'propertymanager'
+                      AND table_name = 'maintenance_task_photos'
+                      AND column_name IN (
+                          'id', 'task_id', 'file_name', 'storage_path', 'created_at',
+                          'original_file_name', 'content_type', 'byte_size', 'sha256',
+                          'content', 'sanitized_at'
+                      )
+                ) AS photo_columns,
+                (
+                    SELECT count(*) = 5
+                    FROM pg_indexes
+                    WHERE schemaname = 'propertymanager'
+                      AND indexname IN (
+                          'asset_manual_version_one_active_idx',
+                          'asset_manual_chunk_search_idx',
+                          'maintenance_tasks_work_request_idempotency_idx',
+                          'maintenance_attachment_operations_allocation_idempotency_idx',
+                          'maintenance_task_photos_task_file_name_uidx'
+                      )
+                ) AS required_indexes
             """
         )
         if row is None:
-            return True, False
+            return True, False, False
         schema_ok = bool(
             row.get("assets_table")
             and row.get("meter_table")
             and row.get("tasks_table")
             and row.get("proposals_table")
         )
-        return True, schema_ok
+        required_objects = bool(
+            row.get("required_tables")
+            and row.get("intake_columns")
+            and row.get("photo_columns")
+            and row.get("required_indexes")
+        )
+        if not (schema_ok and required_objects):
+            return True, schema_ok, False
+        marker = pm_db.execute_one_json(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM propertymanager.schema_migrations
+                WHERE version = %s
+            ) AS migration_applied
+            """,
+            (EXPECTED_SCHEMA_VERSION,),
+        )
+        return True, schema_ok, bool(marker and marker.get("migration_applied"))
     except Exception:
         logger.exception("health check: postgres/schema probe failed")
-        return False, False
+        return False, False, False
 
 
 @app.get("/health")
 def health():
-    postgres_reachable, schema_available = _probe_postgres_and_schema()
-    healthy = postgres_reachable and schema_available
+    postgres_reachable, schema_available, schema_current = _probe_postgres_and_schema()
+    healthy = postgres_reachable and schema_available and schema_current
+    if schema_current:
+        schema_contract_status = f"migration_{EXPECTED_SCHEMA_VERSION}_applied"
+    elif postgres_reachable:
+        schema_contract_status = f"migration_{EXPECTED_SCHEMA_VERSION}_not_verified"
+    else:
+        schema_contract_status = "unavailable"
     body = {
         "status": "ok" if healthy else "degraded",
         "service": "propertymanager-api",
@@ -346,8 +532,8 @@ def health():
         "postgres_reachable": postgres_reachable,
         "schema_available": schema_available,
         "db_mode": "docker_exec" if pm_db.use_docker() else "tcp",
-        "schema_version": "009",
-        "attachments_root": ATTACHMENTS_ROOT,
+        "schema_version": EXPECTED_SCHEMA_VERSION if schema_current else None,
+        "schema_contract_status": schema_contract_status,
         "max_content_length": MAX_UPLOAD_BYTES,
         **auth_status(),
     }
@@ -517,7 +703,7 @@ def delete_category(category_id: str):
         """
         SELECT COUNT(*)::int AS task_count
         FROM propertymanager.maintenance_tasks
-        WHERE is_active = true AND kind <> 'Work Request'
+        WHERE is_active = true AND kind <> 'Work Request' AND intake_state IS NULL
           AND lower(category_name) = lower(%s)
         """,
         (name,),
@@ -568,6 +754,7 @@ def delete_category(category_id: str):
                 area = %s,
                 updated_at = now()
             WHERE is_active = true
+              AND kind <> 'Work Request' AND intake_state IS NULL
               AND lower(category_name) = lower(%s)
             """,
             (destination_name, destination_name, name),
@@ -615,7 +802,8 @@ def task_detail(task_id: str):
         SELECT
             {TASK_COLUMNS}
         FROM propertymanager.maintenance_tasks
-        WHERE id = %s AND is_active = true AND kind <> 'Work Request'
+        WHERE id = %s AND is_active = true
+          AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
@@ -632,6 +820,14 @@ def upsert_task():
     if not isinstance(payload, dict):
         return jsonify({"error": "JSON object body required"}), 400
 
+    requested_kind = str(payload.get("kind") or "Scheduled").strip() or "Scheduled"
+    if requested_kind.casefold() == "work request":
+        return error_response(
+            "INTAKE_ROUTE_REQUIRED",
+            "Work requests may be created only through the work-request intake API",
+            status=409,
+        )
+
     task_id = str(payload.get("id") or uuid4())
     origin = normalize_origin(payload.get("origin"))
     source_manual = str(payload.get("source_manual_name") or "").strip()
@@ -642,8 +838,9 @@ def upsert_task():
     history = payload.get("completion_history") or []
     if not isinstance(tools, list):
         tools = []
-    if not isinstance(history, list):
-        history = []
+    history_error = _completion_history_error(history)
+    if history_error:
+        return validation_error(history_error, field="completion_history")
 
     schedule_kind = str(payload.get("schedule_kind") or "calendar").strip().lower()
     if schedule_kind not in ms.SCHEDULE_KINDS:
@@ -725,7 +922,7 @@ def upsert_task():
 
     pm_db.execute(
         """
-        INSERT INTO propertymanager.maintenance_tasks (
+        INSERT INTO propertymanager.maintenance_tasks AS current_task (
             id, area, item, category_name, priority, frequency,
             task_description, response_instructions, supplies_needed,
             notes, result_notes, estimated_minutes,
@@ -785,6 +982,7 @@ def upsert_task():
             completion_history = EXCLUDED.completion_history,
             tools_required = EXCLUDED.tools_required,
             updated_at = now()
+        WHERE current_task.kind <> 'Work Request' AND current_task.intake_state IS NULL
         """,
         (
             task_id,
@@ -807,7 +1005,7 @@ def upsert_task():
             bool(payload.get("include_in_daily_briefing", True)),
             bool(payload.get("alert_if_overdue", True)),
             bool(payload.get("is_active", True)),
-            str(payload.get("kind") or "Scheduled"),
+            requested_kind,
             str(payload.get("manufacturer") or ""),
             source_manual,
             origin,
@@ -821,6 +1019,17 @@ def upsert_task():
             json.dumps(tools),
         ),
     )
+
+    # The ON CONFLICT predicate is the atomic authority boundary. Re-fetch
+    # before any meter or parts side effect so an intake-record collision fails
+    # closed even when another request created that row after our earlier reads.
+    updated = fetch_task_or_404(task_id)
+    if updated is None:
+        return error_response(
+            "INTAKE_ROUTE_REQUIRED",
+            "Work requests may be changed only through the work-request API",
+            status=409,
+        )
 
     if asset_id and schedule_kind in {"meter", "both"}:
         meter_row = ms.fetch_meter_row(str(asset_id))
@@ -943,6 +1152,7 @@ def patch_task(task_id: str):
         SET {set_clause},
             updated_at = now()
         WHERE id = %s AND is_active = true
+          AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         values,
     )
@@ -966,12 +1176,126 @@ def delete_task(task_id: str):
         SET is_active = false,
             updated_at = now()
         WHERE id = %s AND is_active = true
+          AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
     if affected == 0:
         return jsonify({"error": "Task not found"}), 404
     return jsonify({"deleted": True, "task_id": task_id})
+
+
+@app.post("/tasks/<task_id>/photos")
+@auth_required()
+def upload_task_photo(task_id: str):
+    """Store one validated task photo in PostgreSQL under an opaque identifier."""
+    if fetch_task_or_404(task_id) is None:
+        return jsonify({"error": "Task not found"}), 404
+
+    uploaded = request.files.get("file")
+    if uploaded is None:
+        return validation_error("Photo file is required", field="file")
+    content = uploaded.read(MAX_TASK_PHOTO_BYTES + 1)
+    if not content:
+        return validation_error("Photo file is empty", field="file")
+    if len(content) > MAX_TASK_PHOTO_BYTES:
+        return validation_error("Photo exceeds the 25 MiB limit", field="file")
+    try:
+        content = _sanitize_jpeg(content)
+    except ValueError:
+        return validation_error("Only JPEG photos are accepted", field="file")
+
+    content_type, extension = "image/jpeg", "jpg"
+    digest = hashlib.sha256(content).hexdigest()
+    existing = pm_db.execute_one_json(
+        """SELECT file_name FROM propertymanager.maintenance_task_photos
+           WHERE task_id = %s AND sha256 = %s
+           ORDER BY created_at LIMIT 1""",
+        (task_id, digest),
+    )
+    if existing and existing.get("file_name"):
+        return jsonify({"file_name": existing["file_name"], "idempotent_replay": True})
+    photo_id = str(uuid4())
+    file_name = f"{photo_id}.{extension}"
+    pm_db.execute(
+        """
+        INSERT INTO propertymanager.maintenance_task_photos
+            (id, task_id, file_name, storage_path, original_file_name, content_type,
+             byte_size, sha256, content, sanitized_at)
+        VALUES (%s, %s, %s, %s, NULL, %s, %s, %s, %s, now())
+        """,
+        (
+            photo_id,
+            task_id,
+            file_name,
+            f"database://maintenance-task-photo/{photo_id}",
+            content_type,
+            len(content),
+            digest,
+            content,
+        ),
+    )
+    return jsonify({"file_name": file_name}), 201
+
+
+@app.get("/tasks/<task_id>/photos/content")
+@auth_required()
+def download_task_photo(task_id: str):
+    """Return photo bytes only for the owning active maintenance task."""
+    if fetch_task_or_404(task_id) is None:
+        return jsonify({"error": "Task not found"}), 404
+    file_name = _requested_task_photo_name(request.args.get("file_name"))
+    if file_name is None:
+        return validation_error("file_name must be an opaque photo ID", field="file_name")
+    row = pm_db.execute_one_json(
+        """
+        SELECT encode(content, 'base64') AS content_base64, content_type, storage_path
+        FROM propertymanager.maintenance_task_photos
+        WHERE task_id = %s AND file_name = %s
+        """,
+        (task_id, file_name),
+    )
+    if row is None:
+        return jsonify({"error": "Photo content not found"}), 404
+    content_type = str(row.get("content_type") or _legacy_photo_content_type(file_name))
+    if row.get("content_base64"):
+        try:
+            # PostgreSQL's encode(..., 'base64') wraps long values at 76
+            # characters. Strip only that transport whitespace, then retain
+            # strict validation for the actual Base64 payload.
+            encoded = "".join(str(row["content_base64"]).split())
+            content = base64.b64decode(encoded, validate=True)
+        except ValueError:
+            logger.error("task photo %s has malformed stored content", file_name)
+            return jsonify({"error": "Photo content not found"}), 404
+    else:
+        content = _safe_legacy_photo_bytes(row.get("storage_path"))
+        if content is None:
+            return jsonify({"error": "Photo content not found"}), 404
+    response = Response(content, mimetype=content_type)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "private, no-store"
+    return response
+
+
+@app.delete("/tasks/<task_id>/photos")
+@auth_required()
+def delete_task_photo(task_id: str):
+    """Delete one opaque task photo without resolving any filesystem path."""
+    if fetch_task_or_404(task_id) is None:
+        return jsonify({"error": "Task not found"}), 404
+    payload = request.get_json(silent=True)
+    file_name = _requested_task_photo_name(payload.get("file_name") if isinstance(payload, dict) else None)
+    if file_name is None:
+        return validation_error("file_name is required", field="file_name")
+    affected = pm_db.execute(
+        """DELETE FROM propertymanager.maintenance_task_photos
+           WHERE task_id = %s AND file_name = %s""",
+        (task_id, file_name),
+    )
+    if affected == 0:
+        return jsonify({"error": "Photo not found"}), 404
+    return jsonify({"deleted": True, "file_name": file_name})
 
 
 @app.put("/tasks/<task_id>/parts")
@@ -1029,7 +1353,7 @@ def replace_task_parts(task_id: str):
         """
         UPDATE propertymanager.maintenance_tasks
         SET updated_at = now()
-        WHERE id = %s
+        WHERE id = %s AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
@@ -1091,7 +1415,7 @@ def create_task_part(task_id: str):
         """
         UPDATE propertymanager.maintenance_tasks
         SET updated_at = now()
-        WHERE id = %s
+        WHERE id = %s AND kind <> 'Work Request' AND intake_state IS NULL
         """,
         (task_id,),
     )
@@ -1110,7 +1434,7 @@ def complete_task(task_id: str):
 
     task = pm_db.execute_one_json(
         """
-        SELECT id, warning_days, asset_id, schedule_kind, kind, intake_state
+        SELECT id, frequency, warning_days, asset_id, schedule_kind, kind, intake_state
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
         """,
@@ -1121,12 +1445,13 @@ def complete_task(task_id: str):
     if task.get("kind") == "Work Request" or task.get("intake_state"):
         return error_response("INTAKE_NOT_MAINTENANCE", "Work requests cannot be completed", status=409)
 
-    # Calendar next_due on complete: completed_at + warning_days (legacy CSV-era
-    # interval). Mac Recalculate Next Due uses Frequency instead (lastDone +
-    # Daily/Weekly/…/Yearly). Do not change this prod formula without an
-    # explicit migration — Mac Recalculate is local until Save.
+    # Frequency defines recurrence; warning and critical days define alert windows.
     warning_days = int(task.get("warning_days") or 0)
-    next_due = completed_at + timedelta(days=max(warning_days, 1))
+    next_due = next_calendar_due(
+        completed_at,
+        frequency=task.get("frequency"),
+        warning_days=warning_days,
+    )
 
     meter_value = None
     meter_value_raw = payload.get("meter_value_at_completion")
@@ -1135,8 +1460,19 @@ def complete_task(task_id: str):
             meter_value = parse_decimal(meter_value_raw, field="meter_value_at_completion")
         except ValueError as exc:
             return validation_error(str(exc), field="meter_value_at_completion")
+        if not meter_value.is_finite() or meter_value < 0:
+            return validation_error(
+                "meter_value_at_completion must be a finite nonnegative number",
+                field="meter_value_at_completion",
+            )
 
-    confirm_current = bool(payload.get("confirm_current_meter"))
+    confirm_current_raw = payload.get("confirm_current_meter", False)
+    if not isinstance(confirm_current_raw, bool):
+        return validation_error(
+            "confirm_current_meter must be a boolean",
+            field="confirm_current_meter",
+        )
+    confirm_current = confirm_current_raw
 
     try:
         meter_result = ms.complete_task_meter(
@@ -1158,48 +1494,44 @@ def complete_task(task_id: str):
     elif meter_value is not None:
         meter_val_db = decimal_to_db(meter_value)
 
-    statements: list[tuple] = [
-        (
-            """
-            INSERT INTO propertymanager.maintenance_completions
-                (id, task_id, completed_at, note, meter_value_at_completion, meter_reading_id)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (
-                completion_id,
-                task_id,
-                completed_at,
-                note,
-                meter_val_db,
-                (meter_result or {}).get("meter_reading_id"),
-            ),
-        ),
-    ]
-
     if meter_result and meter_result.get("applied_meter"):
-        statements.append(
+        try:
+            applied = ms.apply_task_completion_transaction(
+                task_id=task_id,
+                completion_id=completion_id,
+                completed_at=completed_at,
+                next_due=next_due,
+                note=note,
+                meter_result=meter_result,
+                operator_identity=getattr(g, "operator_identity", None),
+                integration_identity=getattr(g, "integration_identity", None),
+            )
+        except RuntimeError as exc:
+            return error_response("DB_ERROR", str(exc), status=500)
+        if not applied:
+            return error_response(
+                "COMPLETION_CONFLICT",
+                "Task or meter changed before completion; reload and confirm the current reading.",
+                status=409,
+            )
+    else:
+        statements: list[tuple] = [
             (
                 """
-                UPDATE propertymanager.maintenance_tasks
-                SET last_done = %s,
-                    next_due = %s,
-                    last_done_meter_value = %s,
-                    next_due_meter_value = %s,
-                    result_notes = COALESCE(%s, result_notes),
-                    updated_at = now()
-                WHERE id = %s
+                INSERT INTO propertymanager.maintenance_completions
+                    (id, task_id, completed_at, note, meter_value_at_completion, meter_reading_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """,
                 (
-                    completed_at,
-                    next_due,
-                    meter_val_db,
-                    meter_result.get("next_due_meter_value"),
-                    note,
+                    completion_id,
                     task_id,
+                    completed_at,
+                    note,
+                    meter_val_db,
+                    (meter_result or {}).get("meter_reading_id"),
                 ),
-            )
-        )
-    else:
+            ),
+        ]
         statements.append(
             (
                 """
@@ -1214,10 +1546,10 @@ def complete_task(task_id: str):
             )
         )
 
-    try:
-        pm_db.execute_script(statements)
-    except RuntimeError as exc:
-        return error_response("DB_ERROR", str(exc), status=500)
+        try:
+            pm_db.execute_script(statements)
+        except RuntimeError as exc:
+            return error_response("DB_ERROR", str(exc), status=500)
 
     updated = pm_db.execute_one_json(
         f"""
@@ -1235,6 +1567,13 @@ def complete_task(task_id: str):
 
 register_asset_routes(app)
 register_mapping_routes(app)
+
+
+@app.get("/auth/check")
+@auth_required()
+def auth_check():
+    """Verify the configured runtime credential without exposing identity details."""
+    return jsonify({"authenticated": True})
 
 
 if __name__ == "__main__":

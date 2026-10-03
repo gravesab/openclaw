@@ -18,7 +18,7 @@ enum PropertyManagerBuildEnvironment {
     static let apiBaseURLKey = "propertyManager.apiBaseURL"
     static let apiBaseURL = "http://100.85.36.72:5062"
     static let manualLibraryBaseURLKey = "propertyManager.manualLibraryBaseURL"
-    static let manualLibraryBaseURL = ""
+    static let manualLibraryBaseURL = "http://100.85.36.72:5051"
     static let apiKeyKey = "propertyManager.apiKey"
     static let operatorPINKey = "propertyManager.operatorPIN"
     static let operatorIdentityKey = "propertyManager.operatorIdentity"

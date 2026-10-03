@@ -294,7 +294,7 @@ overdue_meter   = current_meter_value >  next_due_meter_value   # strict >; neve
 - Deliberate Save only after valid Decimal parse — no autosave of partial trigger
 - Editing trigger must not strip manufacturer `origin` / `source_manual_name` / `manualImport`
 
-**On task complete** with a meter schedule (after operator confirms meter), atomically (`BEGIN…COMMIT` as one multi-statement script):
+**On task complete** with a meter schedule (after operator confirms meter), atomically in one database transaction:
 
 - `last_done_meter_value = meter_value_at_completion`
 - If interval present: `next_due_meter_value = meter_value_at_completion + meter_interval_value`
@@ -353,8 +353,15 @@ Body includes `preview_token`, `correction_reason`, `operator_id`, optional `not
 1. Client fetches live meter from `GET /assets/<id>` (not local cache alone).
 2. UI displays current reading and prompts: **Confirm** or **Enter new reading**.
 3. If new reading differs or cache was stale, create reading first (standard or confirm flow).
-4. Complete task with `meter_value_at_completion` and `meter_reading_id`.
-5. Recalc PM meter fields.
+4. Complete the task with `meter_value_at_completion` and `meter_reading_id`.
+5. Recalculate PM meter fields.
+
+Every completion linked to an activated asset meter must use this flow, even
+when the task schedule is calendar-only. The client must load the fresh meter
+state, and the operator must confirm it or enter a nonnegative value; `0` is a
+valid reading. A proposed meter requires a separate explicit activation action
+before completion. Meter capture on a calendar-only task does not change its
+schedule kind or create a meter due threshold.
 
 **Forbidden:** silently submitting completion with cached/stale meter without operator acknowledgment.
 

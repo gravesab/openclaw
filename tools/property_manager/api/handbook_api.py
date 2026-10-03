@@ -14,7 +14,7 @@ import os
 import re
 from functools import wraps
 from pathlib import PurePosixPath
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from flask import Flask, g, jsonify, request
 
@@ -232,8 +232,12 @@ _MANUAL_SELECT = """
            (
                SELECT count(*)
                FROM propertymanager.maintenance_tasks t
-               WHERE t.asset_id = m.asset_id AND t.is_active = true
-                 AND t.source_manual_name = v.source_display_name
+               WHERE t.is_active = true
+                 AND t.id::text IN (
+                     SELECT jsonb_array_elements_text(
+                         COALESCE(v.provenance -> 'accepted_task_ids', '[]'::jsonb)
+                     )
+                 )
            ) AS task_count
     FROM propertymanager.asset_manual m
     JOIN propertymanager.asset_manual_version v ON v.manual_id = m.id
@@ -501,3 +505,70 @@ def register_handbook_routes(app: Flask) -> None:
                 status=409,
             )
         return jsonify(_public_manual(created))
+
+    @app.post("/v1/assets/<asset_id>/manuals/<manual_id>/versions/<version_id>/tasks/link")
+    @auth_required()
+    def link_asset_manual_tasks(asset_id: str, manual_id: str, version_id: str):
+        payload = request.get_json(silent=True)
+        task_ids = payload.get("task_ids") if isinstance(payload, dict) else None
+        if not isinstance(task_ids, list) or not task_ids or len(task_ids) > 100:
+            return validation_error("task_ids must contain 1 to 100 task identifiers", field="task_ids")
+        try:
+            normalized_task_ids = [str(UUID(task_id)) for task_id in task_ids if isinstance(task_id, str)]
+        except (TypeError, ValueError, AttributeError):
+            return validation_error("task_ids must contain UUID identifiers", field="task_ids")
+        if len(normalized_task_ids) != len(task_ids):
+            return validation_error("task_ids must contain UUID identifiers", field="task_ids")
+        if len(set(normalized_task_ids)) != len(normalized_task_ids):
+            return validation_error("task_ids must not contain duplicates", field="task_ids")
+
+        values_sql = ", ".join("(%s::uuid)" for _ in normalized_task_ids)
+        linked = pm_db.execute_top_level_one_json(
+            f"""
+            WITH selected_version AS (
+                SELECT v.id
+                FROM propertymanager.asset_manual m
+                JOIN propertymanager.asset_manual_version v ON v.manual_id = m.id
+                WHERE m.id = %s AND m.asset_id = %s AND v.id = %s
+                  AND v.ingestion_status = 'extracted' AND v.lifecycle_status = 'draft'
+                FOR SHARE
+            ), supplied_tasks(id) AS (VALUES {values_sql}), valid_tasks AS (
+                SELECT t.id FROM propertymanager.maintenance_tasks t
+                JOIN supplied_tasks s ON s.id = t.id
+                WHERE t.asset_id = %s
+            ), updated_version AS (
+                UPDATE propertymanager.asset_manual_version v
+                SET provenance = jsonb_set(
+                    v.provenance,
+                    '{{accepted_task_ids}}',
+                    (
+                        SELECT COALESCE(jsonb_agg(id_text ORDER BY id_text), '[]'::jsonb)
+                        FROM (
+                            SELECT jsonb_array_elements_text(
+                                COALESCE(v.provenance -> 'accepted_task_ids', '[]'::jsonb)
+                            ) AS id_text
+                            UNION
+                            SELECT t.id::text FROM valid_tasks t
+                        ) accepted_ids
+                    ),
+                    true
+                )
+                FROM selected_version s
+                WHERE v.id = s.id AND (SELECT count(*) FROM valid_tasks) = %s
+                RETURNING v.id
+            )
+            SELECT row_to_json(result) FROM (
+                SELECT (SELECT count(*) FROM selected_version) AS version_count,
+                       (SELECT count(*) FROM valid_tasks) AS valid_task_count,
+                       (SELECT count(*) FROM updated_version) AS updated_count
+            ) result
+            """,
+            (manual_id, asset_id, version_id, *normalized_task_ids, asset_id, len(normalized_task_ids)),
+        )
+        if linked is None or int(linked.get("version_count") or 0) != 1:
+            return error_response("MANUAL_NOT_LINKABLE", "Manual is not ready for task linking", status=409)
+        if int(linked.get("valid_task_count") or 0) != len(normalized_task_ids):
+            return error_response("TASK_NOT_FOUND", "One or more tasks do not belong to this asset", status=404)
+        if int(linked.get("updated_count") or 0) != 1:
+            return error_response("TASK_NOT_FOUND", "One or more tasks do not belong to this asset", status=404)
+        return jsonify({"linked_task_count": len(normalized_task_ids)})

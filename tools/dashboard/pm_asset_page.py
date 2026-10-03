@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import html as html_module
 import json
 import os
@@ -14,8 +15,15 @@ PROPERTYMANAGER_API = os.environ.get(
     "PROPERTYMANAGER_API_BASE",
     "http://127.0.0.1:5062",
 )
-OPERATOR_PIN = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "dev-pin")
+# No defaults: PIN unlock needs both a configured PIN and a session-signing secret,
+# otherwise well-known values would let anyone unlock or forge the session cookie.
+OPERATOR_PIN = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "").strip()
+DASHBOARD_SECRET = os.environ.get("PROPERTYMANAGER_DASHBOARD_SECRET", "").strip()
 API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "")
+
+
+def pin_unlock_configured() -> bool:
+    return bool(OPERATOR_PIN and DASHBOARD_SECRET)
 
 
 def _auth_headers(*, pin: str | None = None) -> dict[str, str]:
@@ -65,7 +73,8 @@ def meter_button_label(meter_type: str) -> str:
 
 
 def register_pm_asset_routes(app) -> None:
-    app.secret_key = os.environ.get("PROPERTYMANAGER_DASHBOARD_SECRET", "dev-dashboard-secret-change-me")
+    if DASHBOARD_SECRET:
+        app.secret_key = DASHBOARD_SECRET
 
     @app.route("/pm/asset/<qr_token>", methods=["GET", "POST"])
     def pm_asset_page(qr_token: str):
@@ -89,7 +98,9 @@ def register_pm_asset_routes(app) -> None:
 
             if action == "auth":
                 pin = (request.form.get("operator_pin") or "").strip()
-                if pin == OPERATOR_PIN:
+                if not pin_unlock_configured():
+                    message = "Operator PIN entry is not configured on this dashboard."
+                elif pin and hmac.compare_digest(pin, OPERATOR_PIN):
                     session["pm_operator_authenticated"] = True
                     authenticated = True
                     message = "Authenticated. You may submit meter readings."
@@ -144,7 +155,8 @@ def register_pm_asset_routes(app) -> None:
                             )
                         elif status == 401:
                             message = "Authentication required. Enter operator PIN."
-                            session.pop("pm_operator_authenticated", None)
+                            if "pm_operator_authenticated" in session:
+                                session.pop("pm_operator_authenticated", None)
                             authenticated = False
                         elif status >= 400:
                             message = result.get("message", result.get("error", str(result))) if isinstance(result, dict) else str(result)

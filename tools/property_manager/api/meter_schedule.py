@@ -241,6 +241,24 @@ def fetch_meter_row(asset_id: str, *, for_update: bool = False) -> dict[str, Any
     )
 
 
+def fetch_meter_rows(asset_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Meter rows for many assets in one query, keyed by asset id string."""
+    unique_ids = sorted({str(asset_id) for asset_id in asset_ids if asset_id})
+    if not unique_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(unique_ids))
+    rows = pm_db.execute_json(
+        f"""
+        SELECT asset_id, meter_type, current_value, unit, latest_reading_at,
+               meter_epoch, row_version, updated_at
+        FROM propertymanager.asset_meter
+        WHERE asset_id IN ({placeholders})
+        """,
+        unique_ids,
+    )
+    return {str(row["asset_id"]): row for row in rows}
+
+
 def fetch_asset_proposed_meter(asset_id: str) -> dict[str, Any] | None:
     return pm_db.execute_one_json(
         """
@@ -352,26 +370,35 @@ def _accepted_readings_in_epoch(asset_id: str, epoch: int) -> list[dict[str, Any
 
 
 def recalc_usage_for_epoch(asset_id: str, epoch: int) -> None:
-    readings = _accepted_readings_in_epoch(asset_id, epoch)
-    prev_id = None
-    prev_value: Decimal | None = None
-    for row in readings:
-        rid = str(row["id"])
-        value = _as_decimal(row.get("value")) or Decimal("0")
-        usage = None
-        if prev_value is not None:
-            usage = decimal_to_db(value - prev_value)
-        pm_db.execute(
-            """
-            UPDATE propertymanager.asset_meter_reading
-            SET usage_since_previous = %s,
-                previous_reading_id = %s
-            WHERE id = %s
-            """,
-            (usage, prev_id, rid),
-        )
-        prev_id = rid
-        prev_value = value
+    pm_db.execute_top_level_one_json(
+        """WITH locked_meter AS (
+               SELECT asset_id
+               FROM propertymanager.asset_meter
+               WHERE asset_id = %s AND meter_epoch = %s
+               FOR UPDATE
+           ), ordered AS (
+               SELECT reading.id,
+                      lag(reading.id) OVER chronology AS previous_id,
+                      reading.value - lag(reading.value) OVER chronology AS usage
+               FROM propertymanager.asset_meter_reading reading
+               JOIN locked_meter meter ON meter.asset_id = reading.asset_id
+               WHERE reading.meter_epoch = %s AND reading.status = 'accepted'
+               WINDOW chronology AS (
+                   ORDER BY reading.reading_at, reading.created_at, reading.id
+               )
+           ), updated AS (
+               UPDATE propertymanager.asset_meter_reading reading
+               SET previous_reading_id = ordered.previous_id,
+                   usage_since_previous = ordered.usage
+               FROM ordered
+               WHERE reading.id = ordered.id
+               RETURNING reading.id
+           ), result AS (
+               SELECT count(*)::integer AS updated_count FROM updated
+           )
+           SELECT row_to_json(result) FROM result""",
+        (asset_id, epoch, epoch),
+    )
 
 
 def update_current_meter_from_latest(asset_id: str, epoch: int) -> None:
@@ -478,49 +505,93 @@ def insert_accepted_reading(
     corrects_reading_id: str | None = None,
     status: str = "accepted",
 ) -> dict[str, Any]:
-    prev = _latest_accepted_in_epoch(asset_id, meter_epoch)
-    prev_id = str(prev["id"]) if prev else None
-    usage = None
-    if prev is not None and correction_reason not in {"replacement", "rollover"}:
-        prev_val = _as_decimal(prev.get("value")) or Decimal("0")
-        usage = decimal_to_db(value - prev_val)
-
+    if status != "accepted":
+        raise ValueError("insert_accepted_reading requires accepted status")
     rid = str(uuid4())
-    pm_db.execute(
-        """
-        INSERT INTO propertymanager.asset_meter_reading
-            (id, asset_id, value, reading_at, entry_method, note, correction_reason,
-             usage_since_previous, previous_reading_id, meter_type_at_entry, unit_at_entry,
-             status, operator_identity, integration_identity, idempotency_key, meter_epoch,
-             corrects_reading_id)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        """,
+    normalized_value = decimal_to_db(value)
+    allow_lower = correction_reason is not None
+    inserted = pm_db.execute_top_level_one_json(
+        """WITH locked_meter AS (
+               SELECT asset_id, meter_type, unit, meter_epoch, current_value,
+                      latest_reading_at
+               FROM propertymanager.asset_meter
+               WHERE asset_id = %s AND meter_epoch = %s
+               FOR UPDATE
+           ), latest_reading AS (
+               SELECT r.id, r.value
+               FROM propertymanager.asset_meter_reading r
+               JOIN locked_meter m ON m.asset_id = r.asset_id
+               WHERE r.meter_epoch = m.meter_epoch AND r.status = 'accepted'
+               ORDER BY r.reading_at DESC, r.created_at DESC
+               LIMIT 1
+           ), inserted_reading AS (
+               INSERT INTO propertymanager.asset_meter_reading
+                   (id, asset_id, value, reading_at, entry_method, note,
+                    correction_reason, usage_since_previous, previous_reading_id,
+                    meter_type_at_entry, unit_at_entry, status, operator_identity,
+                    integration_identity, idempotency_key, meter_epoch, corrects_reading_id)
+               SELECT %s, m.asset_id, %s, %s, %s, %s, %s,
+                      CASE
+                          WHEN latest.id IS NULL OR %s IN ('replacement', 'rollover') THEN NULL
+                          ELSE %s - latest.value
+                      END,
+                      latest.id, m.meter_type, m.unit, 'accepted', %s, %s, %s,
+                      m.meter_epoch, %s
+               FROM locked_meter m
+               LEFT JOIN latest_reading latest ON true
+               WHERE %s OR %s >= COALESCE(latest.value, m.current_value, 0)
+               RETURNING id, asset_id, value, reading_at
+           ), updated_meter AS (
+               UPDATE propertymanager.asset_meter m
+               SET current_value = CASE
+                       WHEN m.latest_reading_at IS NULL OR reading.reading_at >= m.latest_reading_at
+                           THEN reading.value
+                       ELSE m.current_value
+                   END,
+                   latest_reading_at = CASE
+                       WHEN m.latest_reading_at IS NULL OR reading.reading_at >= m.latest_reading_at
+                           THEN reading.reading_at
+                       ELSE m.latest_reading_at
+                   END,
+                   row_version = row_version + 1,
+                   updated_at = now()
+               FROM inserted_reading reading
+               WHERE m.asset_id = reading.asset_id
+               RETURNING m.asset_id, m.current_value
+           ), result AS (
+               SELECT reading.id, meter.current_value
+               FROM inserted_reading reading
+               JOIN updated_meter meter ON meter.asset_id = reading.asset_id
+           )
+           SELECT row_to_json(result) FROM result""",
         (
-            rid,
             asset_id,
-            decimal_to_db(value),
+            meter_epoch,
+            rid,
+            normalized_value,
             reading_at,
             entry_method,
             note,
             correction_reason,
-            usage,
-            prev_id,
-            meter_type,
-            unit,
-            status,
+            correction_reason,
+            normalized_value,
             operator_identity,
             integration_identity,
             idempotency_key,
-            meter_epoch,
             corrects_reading_id,
+            allow_lower,
+            normalized_value,
         ),
     )
+    if inserted is None:
+        raise ValueError("CONFLICT: meter changed; reload before recording the reading")
+
+    _ = (meter_type, unit)
     recalc_usage_for_epoch(asset_id, meter_epoch)
-    update_current_meter_from_latest(asset_id, meter_epoch)
     meter = fetch_meter_row(asset_id)
     current = _as_decimal((meter or {}).get("current_value"))
     recalc_tasks_for_asset(asset_id, current)
-    return {"reading_id": rid, "current_value": format_decimal(current)}
+    return {"reading_id": str(inserted["id"]), "current_value": format_decimal(current)}
 
 
 def apply_meter_reading(
@@ -686,7 +757,8 @@ def complete_task_meter(
 ) -> dict[str, Any] | None:
     task = pm_db.execute_one_json(
         """
-        SELECT id, asset_id, warning_days, schedule_kind, meter_interval_value, last_done_meter_value
+        SELECT id, asset_id, warning_days, schedule_kind, meter_interval_value,
+               last_done_meter_value, next_due_meter_value
         FROM propertymanager.maintenance_tasks
         WHERE id = %s AND is_active = true
         """,
@@ -702,39 +774,49 @@ def complete_task_meter(
     next_due_meter: Decimal | None = None
     cleared_one_time = False
 
-    if asset_id and schedule_kind in {"meter", "both"}:
-        meter_row = fetch_meter_row(str(asset_id))
+    meter_row = fetch_meter_row(str(asset_id)) if asset_id else None
+    proposed_meter = fetch_asset_proposed_meter(str(asset_id)) if asset_id else None
+    active_meter = bool(
+        asset_id
+        and meter_row
+        and meter_row.get("meter_type") != "none"
+        and (proposed_meter or {}).get("meter_activated_at") is not None
+    )
+    proposed_type = str((proposed_meter or {}).get("meter_proposed_type") or "none")
+    meter_scheduled = schedule_kind in {"meter", "both"}
+    meter_supplied = meter_value_at_completion is not None or confirm_current_meter
+
+    if asset_id and not active_meter and proposed_type != "none":
+        raise ValueError("activate the proposed asset meter before completing this task")
+    if meter_scheduled and not active_meter:
+        raise ValueError("meter-scheduled tasks require an activated asset meter")
+    if active_meter and not meter_supplied:
+        raise ValueError(
+            "meter_value_at_completion or confirm_current_meter=true required for tasks linked to an active meter"
+        )
+    if meter_supplied and not active_meter:
+        raise ValueError("meter completion values require an activated asset meter")
+
+    if active_meter:
         if meter_val is None and confirm_current_meter:
-            if meter_row is None:
-                raise ValueError("confirm_current_meter requested but asset has no meter")
             meter_val = _as_decimal(meter_row.get("current_value"))
         elif meter_value_at_completion is not None:
             meter_val = meter_value_at_completion
-        else:
-            raise ValueError(
-                "meter_value_at_completion or confirm_current_meter=true required for meter-scheduled tasks"
-            )
 
         if meter_val is not None:
-            result = apply_meter_reading(
-                str(asset_id),
-                meter_val,
-                reading_at=completed_at,
-                entry_method="completion",
-                note=note,
-                operator_identity=operator_identity,
-                integration_identity=integration_identity,
-            )
-            if result.get("lower_reading_preview"):
+            current_value = _as_decimal(meter_row.get("current_value")) or Decimal("0")
+            if meter_val < current_value:
                 raise ValueError("lower reading at completion requires preview/confirm flow first")
-            reading_id = result.get("reading_id")
-            interval = _as_decimal(task.get("meter_interval_value"))
-            if interval is not None and interval > 0:
-                next_due_meter = decimal_to_db(meter_val + interval)
-            else:
-                # One-time trigger: clear absolute due threshold.
-                next_due_meter = None
-                cleared_one_time = True
+            reading_id = str(uuid4())
+            next_due_meter = _as_decimal(task.get("next_due_meter_value"))
+            if meter_scheduled:
+                interval = _as_decimal(task.get("meter_interval_value"))
+                if interval is not None and interval > 0:
+                    next_due_meter = decimal_to_db(meter_val + interval)
+                else:
+                    # One-time trigger: clear absolute due threshold.
+                    next_due_meter = None
+                    cleared_one_time = True
 
     return {
         "asset_id": str(asset_id) if asset_id else None,
@@ -744,5 +826,126 @@ def complete_task_meter(
         "next_due_meter_value": next_due_meter,
         "cleared_one_time": cleared_one_time,
         "schedule_kind": schedule_kind,
-        "applied_meter": bool(asset_id and schedule_kind in {"meter", "both"} and meter_val is not None),
+        "applied_meter": bool(active_meter and meter_val is not None),
     }
+
+
+def apply_task_completion_transaction(
+    *,
+    task_id: str,
+    completion_id: str,
+    completed_at: datetime,
+    next_due: datetime,
+    note: str | None,
+    meter_result: dict[str, Any],
+    operator_identity: str | None,
+    integration_identity: str | None,
+) -> bool:
+    """Atomically append the meter reading, completion, and rescheduled task state."""
+    asset_id = str(meter_result["asset_id"])
+    reading_id = str(meter_result["meter_reading_id"])
+    meter_value = decimal_to_db(meter_result["meter_value_decimal"])
+    next_due_meter = meter_result.get("next_due_meter_value")
+
+    updated = pm_db.execute_top_level_one_json(
+        """WITH locked_task AS (
+               SELECT id, asset_id
+               FROM propertymanager.maintenance_tasks
+               WHERE id = %s AND asset_id = %s AND is_active = true
+                 AND kind <> 'Work Request' AND intake_state IS NULL
+               FOR UPDATE
+           ), locked_meter AS (
+               SELECT m.asset_id, m.meter_type, m.unit, m.meter_epoch,
+                      m.current_value, m.latest_reading_at
+               FROM propertymanager.asset_meter m
+               JOIN propertymanager.assets a ON a.id = m.asset_id
+               JOIN locked_task t ON t.asset_id = m.asset_id
+               WHERE m.meter_type <> 'none' AND a.meter_activated_at IS NOT NULL
+               FOR UPDATE OF m
+           ), latest_reading AS (
+               SELECT r.id, r.value
+               FROM propertymanager.asset_meter_reading r
+               JOIN locked_meter m ON m.asset_id = r.asset_id
+               WHERE r.meter_epoch = m.meter_epoch AND r.status = 'accepted'
+               ORDER BY r.reading_at DESC, r.created_at DESC
+               LIMIT 1
+           ), inserted_reading AS (
+               INSERT INTO propertymanager.asset_meter_reading
+                   (id, asset_id, value, reading_at, entry_method, note,
+                    correction_reason, usage_since_previous, previous_reading_id,
+                    meter_type_at_entry, unit_at_entry, status, operator_identity,
+                    integration_identity, idempotency_key, meter_epoch, corrects_reading_id)
+               SELECT %s, m.asset_id, %s, %s, 'completion', %s,
+                      NULL,
+                      CASE WHEN latest.id IS NULL THEN NULL ELSE %s - latest.value END,
+                      latest.id, m.meter_type, m.unit, 'accepted', %s, %s, NULL,
+                      m.meter_epoch, NULL
+               FROM locked_meter m
+               LEFT JOIN latest_reading latest ON true
+               WHERE %s >= COALESCE(latest.value, m.current_value, 0)
+               RETURNING id, asset_id, value, reading_at
+           ), updated_meter AS (
+               UPDATE propertymanager.asset_meter m
+               SET current_value = CASE
+                       WHEN m.latest_reading_at IS NULL OR reading.reading_at >= m.latest_reading_at
+                           THEN reading.value
+                       ELSE m.current_value
+                   END,
+                   latest_reading_at = CASE
+                       WHEN m.latest_reading_at IS NULL OR reading.reading_at >= m.latest_reading_at
+                           THEN reading.reading_at
+                       ELSE m.latest_reading_at
+                   END,
+                   row_version = row_version + 1,
+                   updated_at = now()
+               FROM inserted_reading reading
+               WHERE m.asset_id = reading.asset_id
+               RETURNING m.asset_id, m.meter_epoch
+           ), inserted_completion AS (
+               INSERT INTO propertymanager.maintenance_completions
+                   (id, task_id, completed_at, note, meter_value_at_completion, meter_reading_id)
+               SELECT %s, task.id, %s, %s, reading.value, reading.id
+               FROM locked_task task
+               JOIN inserted_reading reading ON reading.asset_id = task.asset_id
+               RETURNING task_id
+           ), updated_task AS (
+               UPDATE propertymanager.maintenance_tasks task
+               SET last_done = %s,
+                   next_due = %s,
+                   last_done_meter_value = %s,
+                   next_due_meter_value = %s,
+                   result_notes = COALESCE(%s, result_notes),
+                   updated_at = now()
+               FROM inserted_completion completion
+               WHERE task.id = completion.task_id
+               RETURNING task.id
+           ), result AS (
+               SELECT task.id, meter.meter_epoch
+               FROM updated_task task
+               JOIN updated_meter meter ON true
+           )
+           SELECT row_to_json(result) FROM result""",
+        (
+            task_id,
+            asset_id,
+            reading_id,
+            meter_value,
+            completed_at,
+            note,
+            meter_value,
+            operator_identity,
+            integration_identity,
+            meter_value,
+            completion_id,
+            completed_at,
+            note,
+            completed_at,
+            next_due,
+            meter_value,
+            next_due_meter,
+            note,
+        ),
+    )
+    if updated is not None:
+        recalc_usage_for_epoch(asset_id, int(updated["meter_epoch"]))
+    return updated is not None

@@ -2,11 +2,11 @@ from flask import (
     Flask,
     Response,
     abort,
+    jsonify,
     redirect,
     request,
     send_from_directory,
     stream_with_context,
-    url_for,
 )
 from werkzeug.exceptions import HTTPException
 from pathlib import Path
@@ -3987,6 +3987,158 @@ def pdf_upload_find_available_asset_pdf(relative_path):
         conn.close()
 
 
+def pdf_library_list_asset_pdfs():
+    """List every PDF under Assets/ on the library drive for the link picker."""
+    scan = pdf_library_scan_files()
+    if not scan.get("available"):
+        raise RuntimeError(scan.get("error") or "The PDF library is unavailable.")
+    documents = [
+        {"relative_path": str(item["relative_path"]), "title": str(item.get("title") or "")}
+        for item in scan.get("documents") or []
+        if str(item.get("relative_path") or "").startswith("Assets/")
+    ]
+    documents.sort(key=lambda item: (item["title"].casefold(), item["relative_path"]))
+    return documents
+
+
+def pdf_library_fetch_to_temp(relative):
+    """Read a library PDF into a temporary file for validation. The stored file is not changed."""
+    temporary = Path("/tmp") / f"openclaw-pdf-register-{time.time_ns()}.pdf"
+    if pdf_document_storage_is_local():
+        shutil.copyfile(pdf_upload_resolve(relative)["path"], temporary)
+        return temporary
+    encoded_root = base64.b64encode(str(PDF_DOCUMENT_ROOT).encode("utf-8")).decode("ascii")
+    encoded_path = base64.b64encode(relative.encode("utf-8")).decode("ascii")
+    remote_program = (
+        "import base64, os, sys\n"
+        f"full = os.path.join(base64.b64decode('{encoded_root}').decode(), base64.b64decode('{encoded_path}').decode())\n"
+        "if not os.path.isfile(full):\n"
+        "    sys.stderr.write('PDF was not found.\\n'); sys.exit(2)\n"
+        f"if os.path.getsize(full) > {int(PDF_MAX_UPLOAD_BYTES)}:\n"
+        "    sys.stderr.write('PDF exceeds the 50 MB limit.\\n'); sys.exit(3)\n"
+        "with open(full, 'rb') as handle:\n"
+        "    sys.stdout.buffer.write(handle.read())\n"
+    )
+    encoded_program = base64.b64encode(remote_program.encode("utf-8")).decode("ascii")
+    data = ai_storage_ssh(
+        "python3 -c 'import base64;"
+        f'exec(base64.b64decode("{encoded_program}"))'
+        "'",
+        timeout=120,
+        binary=True,
+    )
+    temporary.write_bytes(data)
+    return temporary
+
+
+def pdf_library_register_existing_asset_pdf(relative_path):
+    """Create the missing library record for an Assets PDF already on the drive, then return its path."""
+    relative = pdf_library_validate_relative_path(relative_path)
+    if not relative.startswith("Assets/"):
+        raise ValueError("Only PDFs stored in the Assets library can be linked to a PropertyManager asset.")
+    temporary = pdf_library_fetch_to_temp(relative)
+    try:
+        validation = pdf_upload_validate(temporary)
+    finally:
+        temporary.unlink(missing_ok=True)
+    duplicate = pdf_upload_find_duplicate(validation["sha256"])
+    if duplicate and str(duplicate.get("relative_path") or "").startswith("Assets/"):
+        return str(duplicate["relative_path"])
+    pdf_upload_record(
+        {
+            "uploaded_at": datetime.now().astimezone().isoformat(),
+            "original_filename": Path(relative).name,
+            "stored_filename": Path(relative).name,
+            "relative_path": relative,
+            "category": "Assets",
+            "title": Path(relative).stem,
+            "notes": "Existing library file recorded for PropertyManager linking",
+            "size_bytes": validation["size_bytes"],
+            "page_count": validation["page_count"],
+            "encrypted": validation["encrypted"],
+            "sha256": validation["sha256"],
+            "source_host": os.uname().nodename if pdf_document_storage_is_local() else INTELMINI_STORAGE_HOST,
+        }
+    )
+    return relative
+
+
+def propertymanager_manual_library_link_stored_asset_pdf(
+    asset_id,
+    relative_path,
+    *,
+    title="",
+    document_type="operator_manual",
+    manufacturer="",
+    model_number="",
+):
+    """Register an Assets-library PDF on one active asset without copying the file."""
+    asset_id = str(asset_id or "").strip().lower()
+    assets = propertymanager_manual_library_list_assets()
+    if asset_id not in {str(asset.get("id") or "").lower() for asset in assets}:
+        raise ValueError("Choose an active PropertyManager asset.")
+    try:
+        existing = pdf_upload_find_available_asset_pdf(relative_path)
+    except FileNotFoundError:
+        existing = pdf_upload_find_available_asset_pdf(pdf_library_register_existing_asset_pdf(relative_path))
+    return propertymanager_manual_library_register(
+        asset_id,
+        {
+            "source_locator": f"dashboard-library://{existing['relative_path']}",
+            "source_display_name": existing["original_filename"],
+            "source_sha256": existing["sha256"],
+            "byte_size": existing["size_bytes"],
+            "title": str(title or "").strip() or existing["title"],
+            "document_type": str(document_type or "operator_manual").strip() or "operator_manual",
+            "manufacturer": str(manufacturer or "").strip(),
+            "model_number": str(model_number or "").strip(),
+        },
+    )
+
+
+class PdfLibraryUploadCompleted(Exception):
+    """A stored library PDF was linked, so the upload route should not store another copy."""
+
+    def __init__(self, html_message, css="document-viewer"):
+        super().__init__(html_message)
+        self.html = html_message
+        self.css = css
+
+
+def pdf_upload_link_or_reject_duplicate(
+    duplicate,
+    link_asset_id,
+    *,
+    title,
+    document_type,
+    manufacturer,
+    model_number,
+):
+    path = str(duplicate.get("relative_path") or "")
+    if not link_asset_id:
+        raise ValueError(
+            "This PDF is already stored as "
+            f"{path}. Choose the asset this manual is for to link that stored file. "
+            "A second copy was not stored."
+        )
+    propertymanager_manual_library_link_stored_asset_pdf(
+        link_asset_id,
+        path,
+        title=title,
+        document_type=document_type,
+        manufacturer=manufacturer,
+        model_number=model_number,
+    )
+    return (
+        "<h2>Existing PDF linked to the asset</h2>"
+        f"<p>This file was already stored as {html.escape(path)}. "
+        "It is now linked to the selected asset. A second copy was not stored.</p>"
+        "<p>Open Manual Library in DEV and choose Extract. "
+        "Tasks already stored for that asset are shown unchecked. "
+        "Import Selected adds only the new maintenance actions from this revision.</p>"
+    )
+
+
 def pdf_upload_record(metadata):
     conn = ranchbrain_db()
     cur = conn.cursor()
@@ -4197,6 +4349,13 @@ def documentation_upload_pdf():
         category = str(request.form.get("category") or "Unsorted").strip()
         title = str(request.form.get("title") or "").strip()
         notes = str(request.form.get("notes") or "").strip()
+        asset_choice = str(request.form.get("asset_id") or "").strip()
+        document_type = str(request.form.get("document_type") or "operator_manual").strip()
+        manufacturer = str(request.form.get("manufacturer") or "").strip()
+        model_number = str(request.form.get("model_number") or "").strip()
+        link_asset_id = "" if asset_choice in {"", "library-only"} else asset_choice
+        if link_asset_id:
+            category = "Assets"
 
         temporary_path = None
         final_path = None
@@ -4216,9 +4375,15 @@ def documentation_upload_pdf():
                 if duplicate:
                     temporary_path.unlink(missing_ok=True)
                     temporary_path = None
-                    raise ValueError(
-                        "This PDF is already stored as "
-                        f"{duplicate['relative_path']}."
+                    raise PdfLibraryUploadCompleted(
+                        pdf_upload_link_or_reject_duplicate(
+                            duplicate,
+                            link_asset_id,
+                            title=title,
+                            document_type=document_type,
+                            manufacturer=manufacturer,
+                            model_number=model_number,
+                        )
                     )
                 relative_path = pdf_upload_remote_destination(
                     category,
@@ -4272,9 +4437,15 @@ def documentation_upload_pdf():
                 if duplicate:
                     temporary_path.unlink(missing_ok=True)
                     temporary_path = None
-                    raise ValueError(
-                        "This PDF is already stored as "
-                        f"{duplicate['relative_path']}."
+                    raise PdfLibraryUploadCompleted(
+                        pdf_upload_link_or_reject_duplicate(
+                            duplicate,
+                            link_asset_id,
+                            title=title,
+                            document_type=document_type,
+                            manufacturer=manufacturer,
+                            model_number=model_number,
+                        )
                     )
 
                 temporary_path.replace(final_path)
@@ -4315,8 +4486,38 @@ def documentation_upload_pdf():
 <p><b>Pages:</b> {metadata['page_count']}</p>
 <p><b>Size:</b> {html.escape(documentation_human_size(metadata['size_bytes']))}</p>
 <p><a href="{open_url}" target="_blank" rel="noopener">Open uploaded PDF →</a></p>"""
+            if link_asset_id:
+                try:
+                    propertymanager_manual_library_link_stored_asset_pdf(
+                        link_asset_id,
+                        metadata["relative_path"],
+                        title=metadata["title"],
+                        document_type=document_type,
+                        manufacturer=manufacturer,
+                        model_number=model_number,
+                    )
+                except (ValueError, RuntimeError, FileNotFoundError) as exc:
+                    message_class = "empty-state error"
+                    message += (
+                        "<p>The PDF is stored, but it is not linked to the asset yet: "
+                        f"{html.escape(str(exc))}</p>"
+                    )
+                else:
+                    message += (
+                        "<p>The PDF is linked to the selected asset. "
+                        "Open Manual Library in DEV and choose Extract. "
+                        "Tasks already stored for that asset are shown unchecked. "
+                        "Import Selected adds only the new maintenance actions from this revision.</p>"
+                    )
+            else:
+                message += (
+                    "<p>This PDF is in the library only. No asset was selected, so it is not linked.</p>"
+                )
 
-        except ValueError as exc:
+        except PdfLibraryUploadCompleted as done:
+            message = done.html
+            message_class = done.css
+        except (ValueError, FileNotFoundError) as exc:
             if temporary_path:
                 Path(temporary_path).unlink(missing_ok=True)
 
@@ -4348,6 +4549,27 @@ def documentation_upload_pdf():
         else "Uploads are stored on the local external AI drive at "
         f"{html.escape(str(PDF_DOCUMENT_ROOT))}."
     )
+    upload_assets = []
+    asset_notice = ""
+    try:
+        upload_assets = propertymanager_manual_library_list_assets()
+    except Exception:
+        asset_notice = (
+            "<p class=\"muted\">PropertyManager assets could not be loaded. "
+            "A PDF can still be stored, but it cannot be linked until the asset list is available.</p>"
+        )
+    asset_options = [
+        '<option value="" selected disabled>What asset is this for?</option>',
+        '<option value="library-only">Not an asset manual</option>',
+    ]
+    for asset in sorted(upload_assets, key=lambda item: str(item.get("name") or "").lower()):
+        asset_id = str(asset.get("id") or "")
+        if not asset_id:
+            continue
+        asset_options.append(
+            f'<option value="{html.escape(asset_id, quote=True)}">'
+            f'{html.escape(str(asset.get("name") or "Unnamed asset"))}</option>'
+        )
 
     body = f"""
 <p class="breadcrumb">
@@ -4361,7 +4583,10 @@ def documentation_upload_pdf():
 <p class="muted">
 The original PDF will be stored on the external AI drive.
 Only valid PDF files up to 50 MB are accepted.
+Choose the asset this manual belongs to and the stored PDF is linked to that asset.
+If the same file is already in the library, it is linked without storing a second copy.
 </p>
+{asset_notice}
 
 <div class="health" style="margin:16px 0;">
 <div class="muted">Upload destination</div>
@@ -4371,6 +4596,34 @@ Only valid PDF files up to 50 MB are accepted.
 <form method="POST"
       action="/documentation/upload"
       enctype="multipart/form-data">
+
+<p>
+<label for="pdf-asset"><b>What asset is this for?</b></label><br>
+<select id="pdf-asset" name="asset_id" required>
+{"".join(asset_options)}
+</select>
+</p>
+
+<p>
+<label for="pdf-document-type"><b>Document type</b></label><br>
+<select id="pdf-document-type" name="document_type">
+<option value="operator_manual">Owner / operator manual</option>
+<option value="service_manual">Service manual</option>
+<option value="parts_manual">Parts manual</option>
+<option value="safety_manual">Safety manual</option>
+<option value="other">Other</option>
+</select>
+</p>
+
+<p>
+<label for="pdf-manufacturer"><b>Manufacturer</b></label><br>
+<input id="pdf-manufacturer" name="manufacturer" type="text" maxlength="200">
+</p>
+
+<p>
+<label for="pdf-model"><b>Model number</b></label><br>
+<input id="pdf-model" name="model_number" type="text" maxlength="200">
+</p>
 
 <p>
 <label for="pdf-file"><b>PDF file</b></label><br>
@@ -4445,108 +4698,82 @@ def propertymanager_manual_library_list_manuals(asset_id):
     return payload if isinstance(payload, list) else []
 
 
-@app.post("/pm/manual-library/link-existing")
-def propertymanager_manual_library_link_existing():
-    """Link an already checksum-verified Dashboard PDF without copying it again."""
-    asset_id = str(request.form.get("asset_id") or "").strip()
-    relative_path = str(request.form.get("relative_path") or "").strip()
-    try:
-        assets = propertymanager_manual_library_list_assets()
-        if asset_id not in {str(asset.get("id") or "") for asset in assets}:
-            raise ValueError("Choose an active PropertyManager asset.")
-        existing = pdf_upload_find_available_asset_pdf(relative_path)
-        propertymanager_manual_library_register(
-            asset_id,
-            {
-                "source_locator": f"dashboard-library://{existing['relative_path']}",
-                "source_display_name": existing["original_filename"],
-                "source_sha256": existing["sha256"],
-                "byte_size": existing["size_bytes"],
-                "title": str(request.form.get("title") or "").strip() or existing["title"],
-                "document_type": str(request.form.get("document_type") or "operator_manual"),
-                "manufacturer": str(request.form.get("manufacturer") or "").strip(),
-                "model_number": str(request.form.get("model_number") or "").strip(),
-            },
-        )
-    except (FileNotFoundError, ValueError, RuntimeError):
-        return redirect(url_for("propertymanager_manual_library", asset_id=asset_id, library_notice="link_failed"))
-    return redirect(url_for("propertymanager_manual_library", asset_id=asset_id, library_notice="linked"))
+PM_MANUAL_DOCUMENT_TYPES = (
+    ("operator_manual", "Owner / operator manual"),
+    ("service_manual", "Service manual"),
+    ("parts_manual", "Parts manual"),
+    ("safety_manual", "Safety manual"),
+    ("other", "Other"),
+)
+PM_MANUAL_MATCH_STOPWORDS = frozenset(
+    {
+        "the", "and", "for", "of", "manual", "manuals", "owner", "owners", "operator", "pdf", "assets",
+        "home", "user", "guide", "english", "equipment", "series", "inc", "co", "company",
+    }
+)
 
 
-@app.route("/pm/manual-library", methods=["GET", "POST"])
-def propertymanager_manual_library():
-    """Dashboard-only binary library for PropertyManager manuals.
+def propertymanager_manual_match_tokens(text):
+    return {
+        token
+        for token in re.split(r"[^a-z0-9]+", str(text or "").lower())
+        if len(token) >= 2 and token not in PM_MANUAL_MATCH_STOPWORDS
+    }
 
-    The dashboard writes PDFs to the IntelMini external drive first, then
-    registers only the opaque Dashboard-library locator with PropertyManager.
-    """
-    selected_asset_id = str(
-        request.form.get("asset_id") if request.method == "POST" else request.args.get("asset_id") or ""
-    ).strip()
-    notice = str(request.args.get("library_notice") or "")
-    message = "" if not notice else (
-        "Existing PDF linked to this asset. Open PropertyManager for Mac and choose Manual Library → Extract."
-        if notice == "linked" else "The existing PDF could not be linked. It remains unchanged in the Dashboard library."
-    )
-    message_class = "empty-state"
-    if notice == "linked":
-        message_class = "document-viewer"
-    elif notice:
-        message_class = "empty-state error"
+
+def propertymanager_manual_library_suggestions(asset, stored_pdfs):
+    """Best-matching stored Assets PDFs; asset-name words count double over manufacturer/model words."""
+    name_words = propertymanager_manual_match_tokens(asset.get("name"))
+    other_words = set()
+    for key in ("manufacturer", "make", "model", "model_number"):
+        other_words |= propertymanager_manual_match_tokens(asset.get(key))
+    other_words -= name_words
+    scored = []
+    for stored in stored_pdfs:
+        words = propertymanager_manual_match_tokens(f"{stored['relative_path']} {stored['title']}")
+        score = 2 * len(name_words & words) + len(other_words & words)
+        if score:
+            scored.append((score, stored))
+    best = max((score for score, _ in scored), default=0)
+    return [stored for score, stored in scored if score == best]
+
+
+def propertymanager_manual_form_details(form):
+    return {
+        "title": str(form.get("title") or "").strip(),
+        "document_type": str(form.get("document_type") or "operator_manual"),
+        "manufacturer": str(form.get("manufacturer") or "").strip(),
+        "model_number": str(form.get("model_number") or "").strip(),
+    }
+
+
+def propertymanager_manual_library_upload_and_link(asset_id, upload, details):
+    """Store an uploaded PDF in the Assets library, or reuse the identical stored copy, then connect it."""
     remote_mode = not pdf_document_storage_is_local()
-    assets = []
-
+    temporary_path = Path("/tmp") / f"openclaw-propertymanager-manual-{time.time_ns()}.pdf"
+    upload.save(temporary_path)
     try:
-        assets = propertymanager_manual_library_list_assets()
-    except Exception:
-        message = "PropertyManager assets are unavailable. No manual was uploaded."
-        message_class = "empty-state error"
-
-    if request.method == "POST" and not message:
-        upload = request.files.get("pdf_file")
-        temporary_path = None
-        try:
-            if not selected_asset_id:
-                raise ValueError("Choose the asset this manual belongs to.")
-            if not upload or not upload.filename:
-                raise ValueError("Select a PDF file before uploading.")
-            if selected_asset_id not in {str(asset.get("id") or "") for asset in assets}:
-                raise ValueError("Choose an active PropertyManager asset.")
-            temporary_path = Path("/tmp") / f"openclaw-propertymanager-manual-{time.time_ns()}.pdf"
-            upload.save(temporary_path)
-            normalized_bom = pdf_upload_normalize_known_bom(temporary_path)
-            validation = pdf_upload_validate(temporary_path)
-            duplicate = pdf_upload_find_duplicate(validation["sha256"])
-            if duplicate:
-                raise ValueError(
-                    "This PDF is already stored in the IntelMini library. "
-                    "Use the existing library record instead of uploading another copy."
-                )
-            relative_path = pdf_upload_remote_destination(
-                "Assets",
-                upload.filename,
-                validation["sha256"],
-            )
-            created = False
-            if remote_mode:
-                created = pdf_upload_copy_remote(
-                    temporary_path,
-                    relative_path,
-                    validation["sha256"],
-                )
-            else:
-                destination = pdf_upload_safe_destination("Assets", upload.filename)
-                temporary_path.replace(destination)
-                temporary_path = None
-                relative_path = str(destination.relative_to(PDF_DOCUMENT_ROOT))
-                created = True
-            metadata = {
+        normalized_bom = pdf_upload_normalize_known_bom(temporary_path)
+        validation = pdf_upload_validate(temporary_path)
+        duplicate = pdf_upload_find_duplicate(validation["sha256"])
+        if duplicate:
+            pdf_upload_link_or_reject_duplicate(duplicate, asset_id, **details)
+            return "This exact PDF was already in the Dashboard library, so that copy is now connected. No second copy was saved."
+        relative_path = pdf_upload_remote_destination("Assets", upload.filename, validation["sha256"])
+        if remote_mode:
+            pdf_upload_copy_remote(temporary_path, relative_path, validation["sha256"])
+        else:
+            destination = pdf_upload_safe_destination("Assets", upload.filename)
+            temporary_path.replace(destination)
+            relative_path = str(destination.relative_to(PDF_DOCUMENT_ROOT))
+        pdf_upload_record(
+            {
                 "uploaded_at": datetime.now().astimezone().isoformat(),
                 "original_filename": str(upload.filename),
                 "stored_filename": Path(relative_path).name,
                 "relative_path": relative_path,
                 "category": "Assets",
-                "title": str(request.form.get("title") or "").strip() or Path(relative_path).stem,
+                "title": details["title"] or Path(relative_path).stem,
                 "notes": "PropertyManager asset manual",
                 "size_bytes": validation["size_bytes"],
                 "page_count": validation["page_count"],
@@ -4554,124 +4781,271 @@ def propertymanager_manual_library():
                 "sha256": validation["sha256"],
                 "source_host": INTELMINI_STORAGE_HOST if remote_mode else os.uname().nodename,
             }
-            pdf_upload_record(metadata)
-            try:
-                propertymanager_manual_library_register(
-                    selected_asset_id,
-                    {
-                        "source_locator": f"dashboard-library://{relative_path}",
-                        "source_display_name": str(upload.filename),
-                        "source_sha256": validation["sha256"],
-                        "byte_size": validation["size_bytes"],
-                        "title": str(request.form.get("title") or "").strip(),
-                        "document_type": str(request.form.get("document_type") or "operator_manual"),
-                        "manufacturer": str(request.form.get("manufacturer") or "").strip(),
-                        "model_number": str(request.form.get("model_number") or "").strip(),
-                    },
-                )
-            except Exception:
-                # The PDF remains in its governed external library rather than
-                # risking deletion of a verified copy. It cannot be extracted
-                # until the operator resolves this explicit linking failure.
-                message = "PDF stored on the IntelMini library, but asset linking failed. No extraction is available yet."
-                message_class = "empty-state error"
+        )
+        try:
+            propertymanager_manual_library_register(
+                asset_id,
+                {
+                    "source_locator": f"dashboard-library://{relative_path}",
+                    "source_display_name": str(upload.filename),
+                    "source_sha256": validation["sha256"],
+                    "byte_size": validation["size_bytes"],
+                    **details,
+                },
+            )
+        except Exception as exc:
+            # The verified PDF stays in the library; it can be connected from the library list.
+            raise RuntimeError(
+                "The PDF was saved to the Dashboard library, but connecting it failed. "
+                "Choose it from the library list and click Connect Manual again."
+            ) from exc
+        message = "PDF uploaded to the Dashboard library and connected."
+        if normalized_bom:
+            message += " A stray byte-order mark at the start of the file was removed."
+        return message
+    finally:
+        temporary_path.unlink(missing_ok=True)
+
+
+@app.post("/pm/manual-library/api/assets/<asset_id>/manuals")
+def propertymanager_manual_library_api_upload(asset_id):
+    """Mac app upload: store (or reuse the identical stored copy of) a PDF and connect it to the asset."""
+    if not propertymanager_manual_library_client_authorized():
+        return jsonify({"error": "Unauthorized."}), 401
+    asset_id = str(asset_id or "").strip().lower()
+    upload = request.files.get("pdf_file")
+    if not upload or not upload.filename:
+        return jsonify({"error": "Choose a PDF file."}), 400
+    try:
+        assets = propertymanager_manual_library_list_assets()
+        if asset_id not in {str(asset.get("id") or "").lower() for asset in assets}:
+            raise ValueError("Choose an active PropertyManager asset.")
+        message = propertymanager_manual_library_upload_and_link(
+            asset_id, upload, propertymanager_manual_form_details(request.form)
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+    except Exception:
+        app.logger.exception("Mac manual upload failed")
+        return jsonify({"error": "The manual could not be stored. Check the Dashboard log before retrying."}), 500
+    return jsonify({"message": message}), 201
+
+
+@app.get("/pm/manual-library/api/library")
+def propertymanager_manual_library_api_library():
+    """App picker: PDFs uploaded to the Dashboard Assets library, never their bytes."""
+    if not propertymanager_manual_library_client_authorized():
+        return jsonify({"error": "Unauthorized."}), 401
+    try:
+        documents = pdf_library_list_asset_pdfs()
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+    return jsonify({"documents": documents})
+
+
+@app.post("/pm/manual-library/api/assets/<asset_id>/manuals/link")
+def propertymanager_manual_library_api_link(asset_id):
+    """App picker: connect a stored Assets-library PDF to the asset without copying it."""
+    if not propertymanager_manual_library_client_authorized():
+        return jsonify({"error": "Unauthorized."}), 401
+    body = request.get_json(silent=True) or {}
+    relative_path = str(body.get("relative_path") or "").strip()
+    if not relative_path:
+        return jsonify({"error": "Choose a PDF from the library."}), 400
+    try:
+        manual = propertymanager_manual_library_link_stored_asset_pdf(
+            asset_id, relative_path, title=str(body.get("title") or "")
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        return jsonify({"error": str(exc)}), 400
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 502
+    except Exception:
+        app.logger.exception("App manual link failed")
+        return jsonify({"error": "The manual could not be connected. Check the Dashboard log before retrying."}), 500
+    manual = manual if isinstance(manual, dict) else {}
+    return jsonify({"message": "Manual connected.", "version_id": manual.get("version_id")}), 201
+
+
+@app.route("/pm/manual-library", methods=["GET", "POST"])
+def propertymanager_manual_library():
+    """Upload, update, or connect a manual PDF for one PropertyManager asset.
+
+    PDFs stay on the IntelMini external drive; PropertyManager stores only the
+    opaque Dashboard-library locator.
+    """
+    # The Mac app sends Swift's uppercase UUID string; asset ids from the API are lowercase.
+    source = request.form if request.method == "POST" else request.args
+    selected_asset_id = str(source.get("asset_id") or "").strip().lower()
+    message = ""
+    message_class = "empty-state"
+    try:
+        assets = propertymanager_manual_library_list_assets()
+    except Exception:
+        assets = None
+    asset = next(
+        (item for item in assets or [] if str(item.get("id") or "").lower() == selected_asset_id),
+        None,
+    )
+    asset_name = str((asset or {}).get("name") or "this asset")
+
+    if request.method == "POST":
+        upload = request.files.get("pdf_file")
+        relative_path = str(request.form.get("relative_path") or "").strip()
+        details = propertymanager_manual_form_details(request.form)
+        try:
+            if assets is None:
+                raise RuntimeError("PropertyManager assets are unavailable right now. Try again shortly.")
+            if asset is None:
+                raise ValueError("Choose the asset this manual belongs to.")
+            if upload and upload.filename:
+                message = propertymanager_manual_library_upload_and_link(selected_asset_id, upload, details)
+            elif relative_path:
+                propertymanager_manual_library_link_stored_asset_pdf(selected_asset_id, relative_path, **details)
+                message = "Manual connected."
             else:
-                message = (
-                    "PDF stored on the IntelMini external drive and linked to this asset. "
-                    "Open PropertyManager for Mac and choose Manual Library → Extract."
-                )
-                if normalized_bom:
-                    message += " The known leading PDF BOM was removed before storage."
-                message_class = "document-viewer"
-        except ValueError as exc:
-            message = str(exc)
+                raise ValueError("Choose a PDF from the library list, or upload one from this computer.")
+            message += (
+                f" Go back to PropertyManager: it now appears in Manual Library for {asset_name}. Click Extract."
+            )
+            message_class = "document-viewer"
+        except (ValueError, FileNotFoundError, RuntimeError) as exc:
+            message = f"Not connected. {exc}"
             message_class = "empty-state error"
         except Exception:
-            message = "The manual upload could not be completed. Check the external library before retrying."
+            app.logger.exception("PropertyManager manual connect failed")
+            message = "Not connected because of an unexpected error. Check the Dashboard log before retrying."
             message_class = "empty-state error"
-        finally:
-            if temporary_path:
-                temporary_path.unlink(missing_ok=True)
+    elif assets is None:
+        message = "PropertyManager assets are unavailable right now. Try again shortly."
+        message_class = "empty-state error"
 
     manuals = []
-    if selected_asset_id and not message.endswith("No manual was uploaded."):
+    if asset is not None:
         try:
             manuals = propertymanager_manual_library_list_manuals(selected_asset_id)
         except Exception:
             if not message:
-                message = "The asset manual status could not be loaded."
+                message = "The manuals connected to this asset could not be loaded."
                 message_class = "empty-state error"
 
     asset_options = ['<option value="">Choose an asset</option>']
-    for asset in sorted(assets, key=lambda item: str(item.get("name") or "").lower()):
-        asset_id = str(asset.get("id") or "")
-        selected = " selected" if asset_id == selected_asset_id else ""
+    for item in sorted(assets or [], key=lambda entry: str(entry.get("name") or "").lower()):
+        item_id = str(item.get("id") or "")
+        selected = " selected" if item_id.lower() == selected_asset_id else ""
         asset_options.append(
-            f'<option value="{html.escape(asset_id, quote=True)}"{selected}>'
-            f'{html.escape(str(asset.get("name") or "Unnamed asset"))}</option>'
+            f'<option value="{html.escape(item_id, quote=True)}"{selected}>'
+            f'{html.escape(str(item.get("name") or "Unnamed asset"))}</option>'
         )
 
-    manual_rows = []
-    for manual in manuals:
-        extraction = "Uploaded — awaiting local extraction"
-        if manual.get("ingestion_status") == "extracted":
-            extraction = f"Extracted {html.escape(str(manual.get('extracted_at') or ''))}"
-        manual_rows.append(
-            "<tr>"
-            f"<td>{html.escape(str(manual.get('title') or 'Untitled manual'))}</td>"
-            f"<td>{html.escape(str(manual.get('source_display_name') or 'manual.pdf'))}</td>"
-            f"<td>{extraction}</td>"
-            f"<td>{int(manual.get('task_count') or 0)}</td>"
-            "</tr>"
+    message_html = (
+        f'<div class="{message_class}" style="margin:12px 0 18px;padding:16px;font-size:1.05em;">'
+        f"{html.escape(message)}</div>"
+        if message
+        else ""
+    )
+    asset_form = f"""
+<form method="get" action="/pm/manual-library">
+<label><strong>Asset</strong></label><br>
+<select name="asset_id" onchange="this.form.submit()">{"".join(asset_options)}</select>
+<noscript><button type="submit">Open</button></noscript>
+</form>
+"""
+
+    connect_section = ""
+    if asset is not None:
+        connected_names = {str(manual.get("source_display_name") or "") for manual in manuals}
+        manual_rows = []
+        for manual in manuals:
+            status = "Waiting for Extract in PropertyManager"
+            if manual.get("ingestion_status") == "extracted":
+                status = f"Extracted · {int(manual.get('task_count') or 0)} accepted task(s)"
+            manual_rows.append(
+                "<tr>"
+                f"<td>{html.escape(str(manual.get('title') or 'Untitled manual'))}</td>"
+                f"<td>{html.escape(str(manual.get('source_display_name') or 'manual.pdf'))}</td>"
+                f"<td>{html.escape(status)}</td>"
+                "</tr>"
+            )
+        connected_html = (
+            "<table><thead><tr><th>Manual</th><th>PDF</th><th>Status</th></tr></thead>"
+            f"<tbody>{''.join(manual_rows)}</tbody></table>"
+            if manual_rows
+            else '<p class="muted">No manuals are connected yet.</p>'
         )
-    library_table = ""
-    if selected_asset_id:
-        library_table = f"""
-<h2>Linked manuals</h2>
-<table><thead><tr><th>Manual</th><th>PDF</th><th>Extraction</th><th>Accepted tasks</th></tr></thead>
-<tbody>{''.join(manual_rows) or '<tr><td colspan="4">No manuals are linked to this asset.</td></tr>'}</tbody></table>
+
+        def stored_option(stored):
+            name = Path(stored["relative_path"]).name
+            label = f"{stored['title']} ({stored['relative_path']})" if stored["title"] else stored["relative_path"]
+            if name in connected_names:
+                label += " ✓ already connected"
+            return f'<option value="{html.escape(stored["relative_path"], quote=True)}">{html.escape(label)}</option>'
+
+        try:
+            stored_pdfs = pdf_library_list_asset_pdfs()
+            suggested = propertymanager_manual_library_suggestions(asset, stored_pdfs)
+            groups = []
+            if suggested:
+                groups.append(
+                    f'<optgroup label="Suggested for {html.escape(asset_name, quote=True)}">'
+                    f"{''.join(stored_option(item) for item in suggested)}</optgroup>"
+                )
+            suggested_paths = {item["relative_path"] for item in suggested}
+            others = [item for item in stored_pdfs if item["relative_path"] not in suggested_paths]
+            groups.append(
+                f'<optgroup label="{"Everything else in the library" if suggested else "Everything in the library"}">'
+                f'{"".join(stored_option(item) for item in others)}</optgroup>'
+            )
+            library_select = (
+                '<select name="relative_path" style="max-width:100%">'
+                '<option value="">Not from the library</option>'
+                f"{''.join(groups)}</select>"
+            )
+        except Exception:
+            library_select = '<p class="empty-state error">The Dashboard library could not be read. Upload the PDF instead.</p>'
+
+        type_options = "".join(
+            f'<option value="{value}">{html.escape(label)}</option>' for value, label in PM_MANUAL_DOCUMENT_TYPES
+        )
+        connect_section = f"""
+<h3>Connected to {html.escape(asset_name)}</h3>
+{connected_html}
+<h3>Add a manual</h3>
+<form method="post" action="/pm/manual-library" enctype="multipart/form-data">
+<input type="hidden" name="asset_id" value="{html.escape(selected_asset_id, quote=True)}">
+<p><label><strong>Already in the Dashboard library</strong></label><br>{library_select}</p>
+<p class="muted">or</p>
+<p><label><strong>Upload a PDF from this computer</strong> (a new manual, or a newer revision from the manufacturer)</label><br>
+<input name="pdf_file" type="file" accept="application/pdf,.pdf"></p>
+<details><summary>Optional details</summary>
+<p><label>Title</label><br><input name="title" maxlength="300" placeholder="Owner's or service manual"></p>
+<p><label>Document type</label><br><select name="document_type">{type_options}</select></p>
+<p><label>Manufacturer</label><br><input name="manufacturer" maxlength="200"></p>
+<p><label>Model number</label><br><input name="model_number" maxlength="200"></p>
+</details>
+<p><button type="submit">Connect Manual</button></p>
+</form>
+<p class="muted">If you upload a newer revision, Extract in PropertyManager leaves tasks you already have unchecked, so only the new ones are added.</p>
 """
 
     storage_note = (
-        f"PDFs are stored on the IntelMini external drive ({html.escape(INTELMINI_STORAGE_HOST)})."
-        if remote_mode
-        else f"PDFs are stored on the local external drive at {html.escape(str(PDF_DOCUMENT_ROOT))}."
+        f"PDFs stay on the IntelMini external drive ({html.escape(INTELMINI_STORAGE_HOST)})."
+        if not pdf_document_storage_is_local()
+        else f"PDFs stay on the local external drive at {html.escape(str(PDF_DOCUMENT_ROOT))}."
     )
     body = f"""
-<p class="breadcrumb"><a href="/documentation">Documentation Center</a> &nbsp;→&nbsp; PropertyManager Manual Library</p>
+<p class="breadcrumb"><a href="/documentation">Documentation Center</a> &nbsp;→&nbsp; Manuals for PropertyManager</p>
 <div class="document-viewer">
-<h2>PropertyManager Manual Library <small>DEV</small></h2>
-<p>Store an owner’s or service manual here, linked to its asset. The Mac app later performs local-Ollama extraction and returns only extracted text, task proposals, and lifecycle status to PropertyManager.</p>
-<p class="muted">{storage_note} PropertyManager does not store PDF bytes or filesystem paths.</p>
-<form method="get" action="/pm/manual-library">
-<label>Asset</label><br><select name="asset_id">{"".join(asset_options)}</select>
-<button type="submit">Open Asset Library</button>
-</form>
-{library_table}
-<h2>Upload and link a PDF</h2>
-<form method="post" enctype="multipart/form-data">
-<input type="hidden" name="asset_id" value="{html.escape(selected_asset_id, quote=True)}">
-<p><label>PDF file</label><br><input name="pdf_file" type="file" accept="application/pdf,.pdf" required></p>
-<p><label>Title</label><br><input name="title" maxlength="300" placeholder="Owner's or service manual"></p>
-<p><label>Document type</label><br><select name="document_type"><option value="operator_manual">Owner / operator manual</option><option value="service_manual">Service manual</option><option value="parts_manual">Parts manual</option><option value="safety_manual">Safety manual</option><option value="other">Other</option></select></p>
-<p><label>Manufacturer</label><br><input name="manufacturer" maxlength="200"></p>
-<p><label>Model number</label><br><input name="model_number" maxlength="200"></p>
-<p><button type="submit">Upload and Link Manual</button></p>
-</form>
-<h2>Link an existing Assets-library PDF</h2>
-<form method="post" action="/pm/manual-library/link-existing">
-<input type="hidden" name="asset_id" value="{html.escape(selected_asset_id, quote=True)}">
-<p><label>Stored PDF path</label><br><input name="relative_path" maxlength="1024" placeholder="Assets/manual-<checksum>.pdf" required></p>
-<p><label>Title</label><br><input name="title" maxlength="300" placeholder="Owner's or service manual"></p>
-<p><label>Document type</label><br><select name="document_type"><option value="operator_manual">Owner / operator manual</option><option value="service_manual">Service manual</option><option value="parts_manual">Parts manual</option><option value="safety_manual">Safety manual</option><option value="other">Other</option></select></p>
-<p><label>Manufacturer</label><br><input name="manufacturer" maxlength="200"></p>
-<p><label>Model number</label><br><input name="model_number" maxlength="200"></p>
-<p><button type="submit">Link Existing Manual</button></p>
-</form>
+<h2>Upload, update, or connect a manual <small>DEV</small></h2>
+{message_html}
+{asset_form}
+{connect_section}
+<p class="muted">{storage_note}</p>
 </div>
-{f'<div class="{message_class}" style="margin-top:18px;padding:20px;">{html.escape(message)}</div>' if message else ''}
 """
-    return documentation_shell("PropertyManager Manual Library", body)
+    return documentation_shell("Upload, update, or connect a manual", body)
 
 
 @app.get("/pm/manual-library/content/<asset_id>/<manual_id>/<version_id>")

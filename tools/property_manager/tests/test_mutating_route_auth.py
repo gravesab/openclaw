@@ -182,6 +182,37 @@ class MutatingRouteAuthTests(unittest.TestCase):
         self.assertEqual(response.get_json(), [])
 
 
+class OperatorPinAuthTests(unittest.TestCase):
+    METER_READING_PATH = "/v1/assets/00000000-0000-0000-0000-000000000001/meter-readings"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.api = _load_app()
+        cls.client = cls.api.app.test_client()
+        cls.auth = sys.modules["auth"]
+        cls.assets_api = sys.modules["assets_api"]
+
+    def _post_with_pin(self, pin: str) -> int:
+        with mock.patch.object(self.assets_api, "fetch_asset_or_404", return_value=None):
+            response = self.client.post(
+                self.METER_READING_PATH,
+                json={"value": 1},
+                headers={"Content-Type": "application/json", "X-Operator-PIN": pin},
+            )
+        return response.status_code
+
+    def test_unset_pin_rejects_former_default(self) -> None:
+        with mock.patch.object(self.auth, "OPERATOR_PIN", ""):
+            self.assertEqual(self._post_with_pin("dev-pin"), 401)
+            self.assertEqual(self._post_with_pin(""), 401)
+            self.assertFalse(self.auth.auth_status()["pin_auth_supported"])
+
+    def test_configured_pin_authenticates_and_wrong_pin_does_not(self) -> None:
+        with mock.patch.object(self.auth, "OPERATOR_PIN", "configured-pin"):
+            self.assertEqual(self._post_with_pin("configured-pin"), 404)
+            self.assertEqual(self._post_with_pin("dev-pin"), 401)
+
+
 class DockerExecInterruptMessageTests(unittest.TestCase):
     def test_signal_kill_maps_to_interrupt_message(self) -> None:
         if str(API_DIR) not in sys.path:

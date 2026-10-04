@@ -3,6 +3,7 @@ import SwiftUI
 struct TaskListView: View {
     @EnvironmentObject private var store: PropertyStore
     @State private var completingTask: MaintenanceTask?
+    @State private var bypassingTask: MaintenanceTask?
     @State private var showManualLibrary = false
 
     var body: some View {
@@ -33,6 +34,14 @@ struct TaskListView: View {
                             groupName: section.name
                         ) {
                             completingTask = task
+                        }
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                bypassingTask = task
+                            } label: {
+                                Label("Bypass", systemImage: "forward.end")
+                            }
+                            .tint(.indigo)
                         }
                     }
                 }
@@ -81,6 +90,10 @@ struct TaskListView: View {
                 completingTask = nil
             }
             .environmentObject(store)
+        }
+        .sheet(item: $bypassingTask) { task in
+            TaskBypassSheet(task: task)
+                .environmentObject(store)
         }
         .sheet(isPresented: $showManualLibrary) {
             NavigationStack {

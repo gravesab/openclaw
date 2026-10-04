@@ -53,6 +53,7 @@ final class PropertyStore: ObservableObject {
     @Published var isLoadingAssets = false
     @Published var isCompleting = false
     @Published var isSaving = false
+    @Published var isBypassing = false
     @Published var errorMessage: String?
     @Published var statusMessage: String?
 
@@ -299,6 +300,50 @@ final class PropertyStore: ObservableObject {
             }
             statusMessage = "Marked \(updated.area) / \(updated.item) done"
             await refreshAssets()
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    func skip(task: MaintenanceTask, note: String) async -> Bool {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return await bypass(task: task) {
+            try await $0.skipTask(id: task.id, note: trimmed.isEmpty ? nil : trimmed)
+        } status: { updated in
+            "Skipped \(updated.item) — next due \(updated.nextDue.formatted(date: .abbreviated, time: .omitted))"
+        }
+    }
+
+    func reschedule(task: MaintenanceTask, body: [String: Any]) async -> Bool {
+        await bypass(task: task) {
+            try await $0.rescheduleTask(id: task.id, body: body)
+        } status: { updated in
+            if updated.deferred == true, let held = TaskBypassPolicy.civilDate(updated.deferredUntil) {
+                return "Rescheduled \(updated.item) — held until \(held.formatted(date: .abbreviated, time: .omitted))"
+            }
+            if body["next_due_meter_value"] != nil, let trigger = updated.nextDueMeterValue {
+                return "Rescheduled \(updated.item) — due at \(NSDecimalNumber(decimal: trigger).stringValue) hrs"
+            }
+            return "Rescheduled \(updated.item) to \(updated.nextDue.formatted(date: .abbreviated, time: .omitted))"
+        }
+    }
+
+    private func bypass(
+        task: MaintenanceTask,
+        request: (PropertyAPIClient) async throws -> MaintenanceTask,
+        status: (MaintenanceTask) -> String
+    ) async -> Bool {
+        isBypassing = true
+        errorMessage = nil
+        defer { isBypassing = false }
+        do {
+            let updated = try await request(client)
+            if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
+                tasks[index] = updated
+            }
+            statusMessage = status(updated)
             return true
         } catch {
             errorMessage = error.localizedDescription

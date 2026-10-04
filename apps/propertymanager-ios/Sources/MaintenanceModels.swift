@@ -120,6 +120,9 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
     var remainingMeter: Decimal?
     var dueMeter: Bool?
     var overdueMeter: Bool?
+    /// Civil date (`YYYY-MM-DD`) a rescheduled meter task is held until.
+    var deferredUntil: String?
+    var deferred: Bool?
     var isActive: Bool
     var primaryPartNumber: String?
     var manufacturer: String?
@@ -150,6 +153,8 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         case remainingMeter = "remaining_meter"
         case dueMeter = "due_meter"
         case overdueMeter = "overdue_meter"
+        case deferredUntil = "deferred_until"
+        case deferred
         case isActive = "is_active"
         case primaryPartNumber = "primary_part_number"
         case sourceManualName = "source_manual_name"
@@ -185,6 +190,8 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         remainingMeter = FlexibleDecimal.decodeDecimal(c, key: .remainingMeter)
         dueMeter = try c.decodeIfPresent(Bool.self, forKey: .dueMeter)
         overdueMeter = try c.decodeIfPresent(Bool.self, forKey: .overdueMeter)
+        deferredUntil = try c.decodeIfPresent(String.self, forKey: .deferredUntil)
+        deferred = try c.decodeIfPresent(Bool.self, forKey: .deferred)
         isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
         primaryPartNumber = try c.decodeIfPresent(String.self, forKey: .primaryPartNumber)
         manufacturer = try c.decodeIfPresent(String.self, forKey: .manufacturer)
@@ -247,6 +254,9 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
     }
 
     var runHoursBadge: String? {
+        if deferred == true, let held = TaskBypassPolicy.civilDate(deferredUntil) {
+            return "Held until \(held.formatted(date: .abbreviated, time: .omitted))"
+        }
         if overdueMeter == true { return "Overdue" }
         if dueMeter == true { return "Due now" }
         if let rem = remainingMeter, rem > 0 {

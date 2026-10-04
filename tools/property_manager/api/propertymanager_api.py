@@ -12,11 +12,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import uuid4
 
-from flask import Flask, Response, jsonify, request
+from flask import Flask, Response, g, jsonify, request
 from werkzeug.exceptions import HTTPException
 
 import db as pm_db
 import meter_schedule as ms
+import task_schedule as ts
 import task_title as tt
 from assets_api import register_asset_routes
 from auth import auth_required, auth_status
@@ -43,7 +44,7 @@ ATTACHMENTS_ROOT = os.environ.get(
 )
 
 logger = logging.getLogger("propertymanager_api")
-EXPECTED_SCHEMA_VERSION = "014"
+EXPECTED_SCHEMA_VERSION = "015"
 MAX_TASK_PHOTO_BYTES = 25 * 1024 * 1024
 MAX_COMPLETION_HISTORY_ENTRIES = 100
 MAX_COMPLETION_HISTORY_ENTRY_BYTES = 4 * 1024
@@ -160,7 +161,7 @@ TASK_COLUMNS = """
     part_url, vendor, part_number, part_cost, annual_cost,
     kind, manufacturer, source_manual_name, origin,
     asset_id, schedule_kind, meter_interval_value, meter_interval_unit,
-    last_done_meter_value, next_due_meter_value,
+    last_done_meter_value, next_due_meter_value, deferred_until,
     completion_history, tools_required,
     created_at, updated_at
 """
@@ -403,6 +404,7 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
 
     # One query for all meters: a per-task lookup made GET /tasks exceed client timeouts.
     meters_by_asset = ms.fetch_meter_rows([str(row["asset_id"]) for row in rows if row.get("asset_id")])
+    today = ts.ranch_today(datetime.now(timezone.utc))
 
     enriched = []
     for row in rows:
@@ -421,6 +423,10 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
             if meter_row:
                 current_meter = ms._as_decimal(meter_row.get("current_value"))
             item = ms.enrich_task_meter_fields(item, current_meter)
+        item["deferred"] = ts.is_deferred(item.get("deferred_until"), today)
+        if item["deferred"]:
+            item["due_meter"] = False
+            item["overdue_meter"] = False
         enriched.append(item)
     return enriched
 
@@ -809,7 +815,9 @@ def task_detail(task_id: str):
     )
     if row is None:
         return jsonify({"error": "Task not found"}), 404
-    return jsonify(enrich_tasks([row])[0])
+    body = enrich_tasks([row])[0]
+    body["schedule_events"] = ts.fetch_schedule_events(task_id)
+    return jsonify(body)
 
 
 @app.post("/tasks")
@@ -1538,6 +1546,7 @@ def complete_task(task_id: str):
                 UPDATE propertymanager.maintenance_tasks
                 SET last_done = %s,
                     next_due = %s,
+                    deferred_until = NULL,
                     result_notes = COALESCE(%s, result_notes),
                     updated_at = now()
                 WHERE id = %s
@@ -1563,6 +1572,166 @@ def complete_task(task_id: str):
     if updated is None:
         return jsonify({"error": "Task not found"}), 404
     return jsonify(enrich_tasks([updated])[0])
+
+
+METER_SCHEDULE_KINDS = {"meter", "both"}
+
+
+def _load_schedulable_task(task_id: str) -> tuple[dict | None, tuple[Response, int] | None]:
+    task = pm_db.execute_one_json(
+        """
+        SELECT id, frequency, warning_days, asset_id, schedule_kind, kind, intake_state,
+               next_due, meter_interval_value, next_due_meter_value, deferred_until
+        FROM propertymanager.maintenance_tasks
+        WHERE id = %s AND is_active = true
+        """,
+        (task_id,),
+    )
+    if task is None:
+        return None, error_response("NOT_FOUND", "Task not found", status=404)
+    if task.get("kind") == "Work Request" or task.get("intake_state"):
+        return None, error_response(
+            "INTAKE_NOT_MAINTENANCE", "Work requests cannot be skipped or rescheduled", status=409
+        )
+    return task, None
+
+
+def _current_meter_value(task: dict):
+    asset_id = task.get("asset_id")
+    if not asset_id:
+        return None
+    meter_row = ms.fetch_meter_row(str(asset_id))
+    if not meter_row or meter_row.get("meter_type") == "none":
+        return None
+    return ms._as_decimal(meter_row.get("current_value"))
+
+
+def _apply_schedule_change(task: dict, *, action: str, new_next_due, new_next_due_meter, new_deferred_until, note):
+    try:
+        applied = ts.apply_schedule_change(
+            task=task,
+            action=action,
+            new_next_due=new_next_due,
+            new_next_due_meter=new_next_due_meter,
+            new_deferred_until=new_deferred_until,
+            note=note,
+            operator_identity=getattr(g, "operator_identity", None),
+            integration_identity=getattr(g, "integration_identity", None),
+        )
+    except RuntimeError as exc:
+        return error_response("DB_ERROR", str(exc), status=500)
+    if not applied:
+        return error_response(
+            "SCHEDULE_CONFLICT",
+            "Task changed before it could be rescheduled; reload and try again.",
+            status=409,
+        )
+    updated = fetch_task_or_404(str(task["id"]))
+    if updated is None:
+        return error_response("NOT_FOUND", "Task not found", status=404)
+    body = enrich_tasks([updated])[0]
+    body["schedule_events"] = ts.fetch_schedule_events(str(task["id"]))
+    return jsonify(body)
+
+
+@app.post("/tasks/<task_id>/skip")
+@auth_required()
+def skip_task(task_id: str):
+    """Bypass this occurrence: move to the next scheduled one without a completion."""
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return validation_error("JSON object body required")
+    try:
+        note = ts.normalize_note(payload.get("note"))
+    except ValueError as exc:
+        return validation_error(str(exc), field="note")
+
+    task, error = _load_schedulable_task(task_id)
+    if error is not None:
+        return error
+
+    now = datetime.now(timezone.utc)
+    warning_days = int(task.get("warning_days") or 0)
+    try:
+        # Anchored on the current due date, not today, so the cadence is kept.
+        new_next_due = ts.skip_calendar_due(
+            ts.parse_db_timestamp(task.get("next_due")),
+            now=now,
+            advance=lambda anchor: next_calendar_due(
+                anchor, frequency=task.get("frequency"), warning_days=warning_days
+            ),
+        )
+        new_next_due_meter = ms._as_decimal(task.get("next_due_meter_value"))
+        if (task.get("schedule_kind") or "calendar") in METER_SCHEDULE_KINDS:
+            new_next_due_meter = ts.skip_meter_due(
+                new_next_due_meter,
+                interval=ms._as_decimal(task.get("meter_interval_value")),
+                current_meter=_current_meter_value(task),
+            )
+    except ValueError as exc:
+        return validation_error(str(exc))
+
+    return _apply_schedule_change(
+        task,
+        action="skip",
+        new_next_due=new_next_due,
+        new_next_due_meter=new_next_due_meter,
+        new_deferred_until=None,
+        note=note,
+    )
+
+
+@app.post("/tasks/<task_id>/reschedule")
+@auth_required()
+def reschedule_task(task_id: str):
+    """Move a task to a picked date, or a meter task to a new meter target."""
+    payload = request.get_json(silent=True) or {}
+    if not isinstance(payload, dict):
+        return validation_error("JSON object body required")
+    targets = [field for field in ("next_due", "next_due_meter_value") if payload.get(field) is not None]
+    if len(targets) != 1:
+        return validation_error("Provide exactly one of next_due or next_due_meter_value")
+    try:
+        note = ts.normalize_note(payload.get("note"))
+    except ValueError as exc:
+        return validation_error(str(exc), field="note")
+
+    task, error = _load_schedulable_task(task_id)
+    if error is not None:
+        return error
+
+    meter_scheduled = (task.get("schedule_kind") or "calendar") in METER_SCHEDULE_KINDS
+    try:
+        if targets[0] == "next_due":
+            day = ts.parse_reschedule_date(
+                payload["next_due"], today=ts.ranch_today(datetime.now(timezone.utc))
+            )
+            new_next_due = ts.due_at_for_date(day)
+            new_next_due_meter = ms._as_decimal(task.get("next_due_meter_value"))
+            # Meter tasks are held, not retargeted: due flags return on the picked date.
+            new_deferred_until = day if meter_scheduled else None
+        else:
+            if not meter_scheduled:
+                return validation_error(
+                    "Only meter-scheduled tasks can be rescheduled to a meter value",
+                    field="next_due_meter_value",
+                )
+            new_next_due = ts.parse_db_timestamp(task.get("next_due"))
+            new_next_due_meter = ts.parse_reschedule_meter(
+                payload["next_due_meter_value"], current_meter=_current_meter_value(task)
+            )
+            new_deferred_until = None
+    except ValueError as exc:
+        return validation_error(str(exc), field=targets[0])
+
+    return _apply_schedule_change(
+        task,
+        action="reschedule",
+        new_next_due=new_next_due,
+        new_next_due_meter=new_next_due_meter,
+        new_deferred_until=new_deferred_until,
+        note=note,
+    )
 
 
 register_asset_routes(app)

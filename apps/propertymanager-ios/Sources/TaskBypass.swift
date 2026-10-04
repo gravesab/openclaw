@@ -14,6 +14,37 @@ enum TaskBypassAction: String, CaseIterable, Identifiable {
     }
 }
 
+struct TaskBypassRequest: Identifiable {
+    let task: MaintenanceTask
+    let action: TaskBypassAction
+
+    var id: UUID { task.id }
+}
+
+struct TaskBypassMenu<MenuLabel: View>: View {
+    let task: MaintenanceTask
+    let onSelect: (TaskBypassAction) -> Void
+    @ViewBuilder let label: () -> MenuLabel
+
+    var body: some View {
+        Menu {
+            Button {
+                onSelect(.skip)
+            } label: {
+                Label("Skip to Next Due", systemImage: "forward.end")
+            }
+            .disabled(!TaskBypassPolicy.canSkip(task))
+            Button {
+                onSelect(.reschedule)
+            } label: {
+                Label("Reschedule…", systemImage: "calendar.badge.clock")
+            }
+        } label: {
+            label()
+        }
+    }
+}
+
 enum TaskRescheduleTarget: String, CaseIterable, Identifiable {
     case date
     case meter

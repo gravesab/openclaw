@@ -3,7 +3,7 @@ import SwiftUI
 struct TaskListView: View {
     @EnvironmentObject private var store: PropertyStore
     @State private var completingTask: MaintenanceTask?
-    @State private var bypassingTask: MaintenanceTask?
+    @State private var bypassRequest: TaskBypassRequest?
     @State private var showManualLibrary = false
 
     var body: some View {
@@ -31,13 +31,15 @@ struct TaskListView: View {
                     ForEach(section.tasks) { task in
                         TaskRowView(
                             task: task,
-                            groupName: section.name
-                        ) {
-                            completingTask = task
-                        }
+                            groupName: section.name,
+                            onComplete: { completingTask = task },
+                            onBypass: { action in
+                                bypassRequest = TaskBypassRequest(task: task, action: action)
+                            }
+                        )
                         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                             Button {
-                                bypassingTask = task
+                                bypassRequest = TaskBypassRequest(task: task, action: .skip)
                             } label: {
                                 Label("Bypass", systemImage: "forward.end")
                             }
@@ -91,8 +93,8 @@ struct TaskListView: View {
             }
             .environmentObject(store)
         }
-        .sheet(item: $bypassingTask) { task in
-            TaskBypassSheet(task: task)
+        .sheet(item: $bypassRequest) { request in
+            TaskBypassSheet(task: request.task, initialAction: request.action)
                 .environmentObject(store)
         }
         .sheet(isPresented: $showManualLibrary) {
@@ -113,6 +115,7 @@ struct TaskRowView: View {
     let task: MaintenanceTask
     let groupName: String
     let onComplete: () -> Void
+    let onBypass: (TaskBypassAction) -> Void
 
     var body: some View {
         let title = TaskTitle.displayItemTitle(item: task.item, group: groupName)
@@ -158,6 +161,12 @@ struct TaskRowView: View {
                 Button("Done", action: onComplete)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                TaskBypassMenu(task: task, onSelect: onBypass) {
+                    Text("Bypass")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.indigo)
             }
             .fixedSize(horizontal: true, vertical: false)
         }

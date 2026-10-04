@@ -156,18 +156,8 @@ struct TaskDetailView: View {
                             }
                         }
                         .disabled(store.isCompleting)
-                        Menu {
-                            Button {
-                                bypassAction = .skip
-                            } label: {
-                                Label("Skip to Next Due", systemImage: "forward.end")
-                            }
-                            .disabled(!TaskBypassPolicy.canSkip(task))
-                            Button {
-                                bypassAction = .reschedule
-                            } label: {
-                                Label("Reschedule…", systemImage: "calendar.badge.clock")
-                            }
+                        TaskBypassMenu(task: task) { action in
+                            bypassAction = action
                         } label: {
                             Label("Bypass", systemImage: "arrow.uturn.forward.circle")
                         }

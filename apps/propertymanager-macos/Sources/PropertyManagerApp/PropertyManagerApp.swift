@@ -239,6 +239,9 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
     var dueMeter: Bool? = nil
     var overdueMeter: Bool? = nil
     var assetId: UUID? = nil
+    /// Civil date (`YYYY-MM-DD`) a meter-scheduled task is held off To Do until.
+    var deferredUntil: String? = nil
+    var deferred: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, area, item, category, kind, priority, frequency
@@ -249,6 +252,7 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         case manufacturer, sourceManualName, origin, partNumbers, referenceURLs, toolsRequired, parts, photoFileNames
         case manualImport
         case scheduleKind, meterIntervalValue, meterIntervalUnit, nextDueMeterValue, remainingMeter, dueMeter, overdueMeter, assetId
+        case deferredUntil, deferred
     }
 
     init(
@@ -290,7 +294,9 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         remainingMeter: Decimal? = nil,
         dueMeter: Bool? = nil,
         overdueMeter: Bool? = nil,
-        assetId: UUID? = nil
+        assetId: UUID? = nil,
+        deferredUntil: String? = nil,
+        deferred: Bool? = nil
     ) {
         self.id = id
         self.area = area
@@ -331,6 +337,8 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         self.dueMeter = dueMeter
         self.overdueMeter = overdueMeter
         self.assetId = assetId
+        self.deferredUntil = deferredUntil
+        self.deferred = deferred
     }
 
     init(from decoder: Decoder) throws {
@@ -381,6 +389,8 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         dueMeter = try c.decodeIfPresent(Bool.self, forKey: .dueMeter)
         overdueMeter = try c.decodeIfPresent(Bool.self, forKey: .overdueMeter)
         assetId = try c.decodeIfPresent(UUID.self, forKey: .assetId)
+        deferredUntil = try c.decodeIfPresent(String.self, forKey: .deferredUntil)
+        deferred = try c.decodeIfPresent(Bool.self, forKey: .deferred)
     }
 
     /// Keep Mac-only editor fields when an API response omits them.
@@ -1373,6 +1383,45 @@ final class MaintenanceStore: ObservableObject {
         }
         if meterValue != nil || confirmCurrentMeter {
             await refreshAssets()
+        }
+        return nil
+    }
+
+    /// Skips or reschedules through the server without recording a completion.
+    /// The server owns the new due date, hold, and history entry.
+    /// - Returns: An error message, or nil on success.
+    @MainActor
+    func bypass(task: MaintenanceTask, submission: TaskBypassSubmission) async -> String? {
+        statusMessage = "Bypassing…"
+        let updated: MaintenanceTask
+        do {
+            switch submission {
+            case .skip(let note):
+                updated = try await apiClient.skipTask(id: task.id, note: note)
+            case .reschedule(let body):
+                updated = try await apiClient.rescheduleTask(id: task.id, body: body)
+            }
+        } catch {
+            if case PropertyAPIError.transport = error { isOnline = false }
+            let message = error.localizedDescription
+            statusMessage = "Couldn’t bypass: \(message)"
+            return message
+        }
+
+        let local = tasks.first(where: { $0.id == task.id }) ?? task
+        let bypassed = updated.mergingEditorFields(from: local)
+        acceptServerTask(bypassed)
+        isOnline = true
+        lastSyncAt = Date()
+        hasLocalChanges = false
+        persistSyncState()
+        if bypassed.deferred == true, let held = TaskBypassPolicy.civilDay(bypassed.deferredUntil) {
+            statusMessage = "Bypassed · held until \(held)"
+        } else {
+            statusMessage = "Bypassed · next due \(DateHelper.isoDate(bypassed.nextDue))"
+        }
+        if AppEnvironment.isDevelopment || automaticCalendarPublishingEnabled {
+            await publishCalendarTasks([bypassed])
         }
         return nil
     }
@@ -2663,6 +2712,7 @@ struct ContentView: View {
     @State private var showingURLImportSheet = false
     @State private var showingManualLibrary = false
     @State private var completionRequest: TaskCompletionRequest?
+    @State private var bypassRequest: TaskBypassRequest?
     @State private var manualImportManufacturer = ""
     @State private var manualImportLockedAssetID: UUID?
     @State private var manualImportSourceManual: PropertyAPIClient.AssetManualLibraryEntry?
@@ -2844,6 +2894,12 @@ struct ContentView: View {
                                     .onTapGesture {
                                         store.selectedTaskID = task.id
                                     }
+                                    .contextMenu {
+                                        TaskBypassMenuItems(task: task) { action in
+                                            store.selectedTaskID = task.id
+                                            bypassRequest = TaskBypassRequest(task: task, action: action)
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2907,6 +2963,11 @@ struct ContentView: View {
         .sheet(item: $completionRequest) { request in
             TaskCompletionSheet(store: store, request: request) {
                 completionRequest = nil
+            }
+        }
+        .sheet(item: $bypassRequest) { request in
+            TaskBypassSheet(store: store, request: request) {
+                bypassRequest = nil
             }
         }
         .sheet(isPresented: $showingManualImportReview) {
@@ -2981,6 +3042,13 @@ struct ContentView: View {
                         initialNote: TaskCompletionPolicy.initialNote(resultNotes: task.resultNotes),
                         source: .editor
                     )
+                },
+                bypassAction: { action in
+                    guard let task = store.tasks.first(where: { $0.id == selectedTaskID }) else { return }
+                    bypassRequest = TaskBypassRequest(task: task, action: action)
+                },
+                loadScheduleEventsAction: { taskID in
+                    try await store.apiClient.fetchScheduleEvents(taskID: taskID)
                 },
                 duplicateAction: store.duplicateSelectedTask,
                 deleteAction: store.deleteSelectedTask,
@@ -3977,6 +4045,9 @@ extension MaintenanceTask {
 
     func meterBadge(assets: [MacRanchAsset]) -> String? {
         let unit = meterUnitLabel(assets: assets)
+        if deferred == true, let held = TaskBypassPolicy.civilDay(deferredUntil) {
+            return "Held until \(held)"
+        }
         if overdueMeter == true { return "Overdue" }
         if dueMeter == true { return "Due now" }
         if let rem = remainingMeter, rem > 0 {
@@ -4114,6 +4185,8 @@ struct TaskEditorView: View {
     let autosaveAction: (MaintenanceTask) -> Void
     let saveAction: () -> Void
     let completeAction: () -> Void
+    let bypassAction: (TaskBypassAction) -> Void
+    let loadScheduleEventsAction: (UUID) async throws -> [TaskScheduleEvent]
     let duplicateAction: () -> Void
     let deleteAction: () -> Void
     let addPhotoAction: () -> Void
@@ -4121,6 +4194,24 @@ struct TaskEditorView: View {
     let loadPhotoAction: (UUID, String) async throws -> Data
     let fillHowToAction: () -> Void
     @State private var isFillingHowTo = false
+    @State private var scheduleEvents: [TaskScheduleEvent] = []
+    @State private var scheduleEventsError: String?
+
+    private struct ScheduleHistoryKey: Equatable {
+        let taskID: UUID
+        let nextDue: Date
+        let nextDueMeterValue: Decimal?
+        let deferredUntil: String?
+    }
+
+    private var scheduleHistoryKey: ScheduleHistoryKey {
+        ScheduleHistoryKey(
+            taskID: task.id,
+            nextDue: task.nextDue,
+            nextDueMeterValue: task.nextDueMeterValue,
+            deferredUntil: task.deferredUntil
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -4143,6 +4234,7 @@ struct TaskEditorView: View {
 
                         completionCard
                         historyCard
+                        bypassHistoryCard
                         automationCard
                     }
                     .padding(20)
@@ -4160,6 +4252,24 @@ struct TaskEditorView: View {
         }
         .onChange(of: task) { newValue in
             autosaveAction(newValue)
+        }
+        .task(id: scheduleHistoryKey) {
+            await loadScheduleEvents()
+        }
+    }
+
+    @MainActor
+    private func loadScheduleEvents() async {
+        let taskID = task.id
+        do {
+            let events = try await loadScheduleEventsAction(taskID)
+            guard task.id == taskID else { return }
+            scheduleEvents = events
+            scheduleEventsError = nil
+        } catch {
+            guard !error.isCancellation, task.id == taskID else { return }
+            scheduleEvents = []
+            scheduleEventsError = "Couldn’t load bypass history: \(error.localizedDescription)"
         }
     }
 
@@ -4704,6 +4814,13 @@ struct TaskEditorView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
 
+                    TaskBypassMenu(task: task, onSelect: bypassAction) {
+                        Label("Bypass", systemImage: "arrow.uturn.forward.circle")
+                    }
+                    .fixedSize()
+                    .disabled(!TaskBypassPolicy.canBypass(task))
+                    .help("Skip to the next due date or reschedule, without marking the task done.")
+
                     Text(task.lastDone.map { "Last done: \(DateHelper.isoDate($0))" } ?? "Last done: Never")
                         .foregroundStyle(.secondary)
 
@@ -4743,6 +4860,18 @@ struct TaskEditorView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
+            }
+        }
+    }
+
+    var bypassHistoryCard: some View {
+        CardView(title: "Bypass History", icon: "arrow.uturn.forward.circle") {
+            VStack(alignment: .leading, spacing: 8) {
+                if let scheduleEventsError {
+                    Text(scheduleEventsError)
+                        .foregroundStyle(.secondary)
+                }
+                TaskScheduleHistoryList(events: scheduleEvents)
             }
         }
     }
@@ -4799,6 +4928,13 @@ struct TaskEditorView: View {
                 .tint(.green)
                 .fixedSize()
                 .help("Mark complete on the server (advances next due). Does not replace Save for field edits.")
+
+                TaskBypassMenu(task: task, onSelect: bypassAction) {
+                    Label("Bypass", systemImage: "arrow.uturn.forward.circle")
+                }
+                .fixedSize()
+                .disabled(!TaskBypassPolicy.canBypass(task))
+                .help("Skip to the next due date or reschedule, without marking the task done.")
             }
         }
         .padding(16)

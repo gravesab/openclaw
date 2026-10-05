@@ -289,10 +289,14 @@ struct PropertyAPIClient {
     func fetchTask(id: UUID) async throws -> MaintenanceTask {
         let data = try await authorizedGET(makeURL("/tasks/\(id.uuidString)"))
         do {
-            return try decoder.decode(APITaskDTO.self, from: data).asMaintenanceTask
+            return try decodeTask(data)
         } catch {
             throw PropertyAPIError.decoding(error)
         }
+    }
+
+    func decodeTask(_ data: Data) throws -> MaintenanceTask {
+        try decoder.decode(APITaskDTO.self, from: data).asMaintenanceTask
     }
 
     /// Partial update limited to the server's PATCHABLE_FIELDS. Unlike the
@@ -313,6 +317,38 @@ struct PropertyAPIClient {
         )
     }
 
+    /// Moves the task to its next scheduled occurrence without recording a completion.
+    func skipTask(id: UUID, note: String?) async throws -> MaintenanceTask {
+        var body: [String: Any] = [:]
+        if let note { body["note"] = note }
+        return try await sendTaskJSON(method: "POST", path: "/tasks/\(id.uuidString)/skip", body: body)
+    }
+
+    /// Body carries exactly one of `next_due` (`YYYY-MM-DD`) or `next_due_meter_value`.
+    func rescheduleTask(id: UUID, body: [String: Any]) async throws -> MaintenanceTask {
+        try await sendTaskJSON(method: "POST", path: "/tasks/\(id.uuidString)/reschedule", body: body)
+    }
+
+    func fetchScheduleEvents(taskID: UUID) async throws -> [TaskScheduleEvent] {
+        let data = try await authorizedGET(makeURL("/tasks/\(taskID.uuidString)"))
+        do {
+            return try JSONDecoder().decode(TaskScheduleEventsBody.self, from: data).scheduleEvents
+        } catch {
+            throw PropertyAPIError.decoding(error)
+        }
+    }
+
+    private struct TaskScheduleEventsBody: Decodable {
+        let scheduleEvents: [TaskScheduleEvent]
+
+        enum CodingKeys: String, CodingKey { case scheduleEvents = "schedule_events" }
+
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            scheduleEvents = try c.decodeIfPresent([TaskScheduleEvent].self, forKey: .scheduleEvents) ?? []
+        }
+    }
+
     private func sendTaskJSON(method: String, path: String, body: Any) async throws -> MaintenanceTask {
         var request = URLRequest(url: try makeURL(path))
         request.httpMethod = method
@@ -322,7 +358,7 @@ struct PropertyAPIClient {
         do {
             let (data, response) = try await Self.sharedSession.data(for: request)
             try validate(response, data: data)
-            return try decoder.decode(APITaskDTO.self, from: data).asMaintenanceTask
+            return try decodeTask(data)
         } catch let error as PropertyAPIError {
             throw error
         } catch let error as DecodingError {
@@ -869,6 +905,8 @@ private struct APITaskDTO: Decodable {
     let dueMeter: Bool?
     let overdueMeter: Bool?
     let assetId: UUID?
+    let deferredUntil: String?
+    let deferred: Bool?
 
     enum CodingKeys: String, CodingKey {
         case id, area, item, kind, priority, frequency, notes, manufacturer, origin, parts, photos
@@ -897,6 +935,8 @@ private struct APITaskDTO: Decodable {
         case dueMeter = "due_meter"
         case overdueMeter = "overdue_meter"
         case assetId = "asset_id"
+        case deferredUntil = "deferred_until"
+        case deferred
     }
 
     init(from decoder: Decoder) throws {
@@ -937,6 +977,8 @@ private struct APITaskDTO: Decodable {
         dueMeter = try c.decodeIfPresent(Bool.self, forKey: .dueMeter)
         overdueMeter = try c.decodeIfPresent(Bool.self, forKey: .overdueMeter)
         assetId = try c.decodeIfPresent(UUID.self, forKey: .assetId)
+        deferredUntil = try c.decodeIfPresent(String.self, forKey: .deferredUntil)
+        deferred = try c.decodeIfPresent(Bool.self, forKey: .deferred)
     }
 
     private 
@@ -1032,7 +1074,9 @@ private struct APITaskDTO: Decodable {
             remainingMeter: remainingMeter,
             dueMeter: dueMeter,
             overdueMeter: overdueMeter,
-            assetId: assetId
+            assetId: assetId,
+            deferredUntil: deferredUntil,
+            deferred: deferred
         )
     }
 

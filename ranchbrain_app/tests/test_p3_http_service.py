@@ -20,6 +20,7 @@ import pytest
 import ranchbrain.api.server as server_mod
 import ranchbrain.memory_store as memory_store_mod
 from ranchbrain.api.membership import MembershipStoreError, StaticMembershipStore
+from ranchbrain.api.sessions import SESSION_PREFIX, MemorySessionStore, SESSION_TTL
 from ranchbrain.api.server import ServiceConfig, create_server
 from ranchbrain.identity_oidc import GOOGLE_OIDC_ISSUER, OidcConfiguration
 from ranchbrain.memory_store import list_memories, remember, save_memory
@@ -55,6 +56,7 @@ class FakeVerifier:
             "tok-no-mfa": {"amr": ["pwd"]},
             "tok-wrong-aud": {"aud": "other-audience"},
             "tok-future-iat": {"iat": int((now + timedelta(hours=1)).timestamp())},
+            "tok-stale": {"auth_time": int((now - timedelta(minutes=10)).timestamp())},
         }
         if assertion not in variants:
             raise Exception("bad signature")
@@ -109,6 +111,18 @@ class LiveServer:
         if tenant is not None:
             heads["X-Ranch-Tenant"] = tenant
         req = urllib.request.Request(self.base + path, headers=heads, method="GET")
+        return self._open(req)
+
+    def post(self, path, token="tok-good", tenant=A, headers=None):
+        heads = dict(headers or {})
+        if token is not None:
+            heads["Authorization"] = f"Bearer {token}"
+        if tenant is not None:
+            heads["X-Ranch-Tenant"] = tenant
+        req = urllib.request.Request(self.base + path, data=b"", headers=heads, method="POST")
+        return self._open(req)
+
+    def _open(self, req):
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return resp.status, _hdict(resp.headers), resp.read()
@@ -124,13 +138,14 @@ def _json(raw):
     return json.loads(raw.decode("utf-8"))
 
 
-def _config(store=None, **limits):
+def _config(store=None, sessions=None, **limits):
     users, tenants, memberships = membership_facts()
     return ServiceConfig(
         oidc=OidcConfiguration(audience=AUD, environment="dev"),
         verifier=FakeVerifier(),
         memberships=store or StaticMembershipStore(
             users=tuple(users), tenants=tuple(tenants), memberships=tuple(memberships)),
+        sessions=sessions,
         host="127.0.0.1", port=0, **limits)
 
 
@@ -399,6 +414,74 @@ def test_search_overrun_returns_503_within_budget(monkeypatch):
             assert elapsed < 2.0
     finally:
         release.set()
+
+
+class Clock:
+    def __init__(self):
+        self.now = datetime.now(timezone.utc)
+
+    def __call__(self):
+        return self.now
+
+
+def test_session_issue_use_expire_and_cross_tenant():
+    made = seed("Session pump", "A labeled pump note.")
+    clock = Clock()
+    sessions = MemorySessionStore(clock=clock)
+    with LiveServer(_config(sessions=sessions)) as svc:
+        status, _, raw = svc.post("/v1/session", token="tok-stale", tenant=A)
+        assert status == 401
+        assert _json(raw)["code"] == "oidc_invalid"
+
+        status, _, raw = svc.post("/v1/session", tenant=C)
+        assert status == 403
+        assert _json(raw)["code"] == "tenant_not_authorized"
+
+        status, _, raw = svc.post("/v1/session", tenant=A)
+        assert status == 200
+        body = _json(raw)
+        assert body["token"].startswith(SESSION_PREFIX)
+        assert body["tenant_id"] == A
+        assert body["expires_at"]
+
+        status, _, raw = svc.get("/v1/memory/list", token=body["token"], tenant=A)
+        assert status == 200
+        assert _json(raw)["count"] == 1
+
+        missing_status, _, missing_raw = svc.get(f"/v1/memory/fetch/{made.memory_id}-nope", tenant=A)
+        cross_status, _, cross_raw = svc.get("/v1/memory/list", token=body["token"], tenant=B)
+        assert cross_status == 404
+        assert cross_status == missing_status
+        assert _json(cross_raw)["code"] == _json(missing_raw)["code"] == "memory_not_found"
+        assert _json(cross_raw)["message"] == _json(missing_raw)["message"]
+
+        status, _, raw = svc.get("/v1/memory/list", token=SESSION_PREFIX + "unknown", tenant=A)
+        assert status == 401
+        assert _json(raw)["code"] == "session_invalid"
+
+        clock.now += SESSION_TTL + timedelta(seconds=1)
+        status, _, raw = svc.get("/v1/memory/list", token=body["token"], tenant=A)
+        assert status == 401
+        assert _json(raw)["code"] == "session_invalid"
+
+
+def test_list_excludes_archived_memories():
+    made = save_memory(Memory(module="property", category="maintenance",
+                              title="Old fence note", body="Retired note.",
+                              tenant_id=A, memory_type="event", tags=[],
+                              id="arch-list-1"))
+    archive_dir = memory_store_mod.MEMORIES_DIR / "_archive" / "property"
+    archive_dir.mkdir(parents=True)
+    source = Path(made.path)
+    source.rename(archive_dir / source.name)
+    with LiveServer(_config()) as svc:
+        status, _, raw = svc.get("/v1/memory/list", tenant=A)
+        assert status == 200
+        assert _json(raw)["count"] == 0
+        assert _json(raw)["memories"] == []
+        status, _, raw = svc.get("/v1/memory/fetch/arch-list-1", tenant=A)
+        assert status == 404
+        assert _json(raw)["code"] == "memory_not_found"
 
 
 def test_fetch_ignores_archived_memories():

@@ -13,7 +13,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
-from ..tenancy import Role, Tenant, TenantMembership, User
+from ..tenancy import (
+    Capability,
+    Role,
+    TenancyError,
+    TenancyErrorCode,
+    Tenant,
+    TenantContext,
+    TenantContextResolver,
+    TenantMembership,
+    User,
+    VerifiedPrincipal,
+)
 
 ROLE_BY_NAME = {role.value: role for role in Role}
 
@@ -76,13 +87,12 @@ def _role(name: str) -> Role:
 
 
 class PostgresMembershipStore:
-    """Loads membership facts from the ``ranchos`` tables in migration 001.
+    """Authorizes one OIDC caller through ``ranchos.resolve_api_membership``.
 
-    ``ranchos.users.principal_id`` is a uuid there, while the OIDC adapter
-    emits ``google-oidc:<sub>`` principal ids, and FORCE ROW LEVEL SECURITY on
-    all three tables hides rows from an unscoped snapshot. Until a migration
-    resolves both, this store cannot authorize OIDC callers and is not wired
-    into ``main``.
+    Migration 007 links ``(issuer, subject)`` to ``users.id``. The request
+    path calls that SECURITY DEFINER function for a single row and then
+    ``TenantContextResolver``. ``snapshot`` remains for tests and DEV
+    bootstrap only; it is not the API request path.
 
     `connect` is an injected zero-arg DBAPI connector (psycopg-style); the
     driver import lives with the caller so this module stays stdlib-only.
@@ -123,6 +133,74 @@ class PostgresMembershipStore:
             except Exception:
                 pass
         return users, tenants, memberships
+
+    def resolve_principal(
+        self,
+        *,
+        issuer: str,
+        subject: str,
+        tenant_id: str,
+        principal: VerifiedPrincipal,
+        capability: Capability,
+    ) -> TenantContext:
+        """One-row membership lookup. Denials share one tenancy error."""
+
+        try:
+            conn = self._connect()
+        except Exception as error:
+            raise MembershipStoreError(f"membership database unreachable: {error}") from error
+        try:
+            cursor = conn.cursor()
+            try:
+                cursor.execute(
+                    "SELECT user_id, role, user_status, tenant_status, membership_status "
+                    "FROM ranchos.resolve_api_membership(%s, %s, %s)",
+                    (issuer, subject, tenant_id),
+                )
+                row = cursor.fetchone()
+            finally:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+        except TenancyError:
+            raise
+        except Exception as error:
+            sqlstate = getattr(error, "pgcode", None)
+            if sqlstate in {"42501", "22P02"}:
+                raise TenancyError(
+                    "tenant context is not authorized",
+                    TenancyErrorCode.TENANT_NOT_AUTHORIZED,
+                ) from error
+            raise MembershipStoreError(f"membership query failed: {error}") from error
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+        if row is None:
+            raise TenancyError(
+                "tenant context is not authorized",
+                TenancyErrorCode.TENANT_NOT_AUTHORIZED,
+            )
+        user_id, role, user_status, tenant_status, membership_status = row
+        resolver = TenantContextResolver(
+            environment=principal.environment,
+            users=[User(id=str(user_id), principal_id=principal.id, status=str(user_status))],
+            tenants=[Tenant(
+                id=str(tenant_id), slug=str(tenant_id), display_name=str(tenant_id),
+                status=str(tenant_status),
+            )],
+            memberships=[TenantMembership(
+                tenant_id=str(tenant_id), user_id=str(user_id),
+                role=_role(str(role)), status=str(membership_status),
+            )],
+        )
+        return resolver.resolve(
+            principal=principal,
+            requested_tenant_id=str(tenant_id),
+            capability=capability,
+        )
 
     @staticmethod
     def _rows(conn, sql):

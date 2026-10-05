@@ -29,6 +29,7 @@ MANUAL_LIBRARY_SERVICE_TOKEN = os.environ.get(
     "PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN", ""
 ).strip()
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_PART_REFERENCE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
 def _dashboard_library_required(fn):
@@ -71,6 +72,26 @@ def _safe_title(value: str, fallback: str) -> str:
         return title
     stem = PurePosixPath(fallback).stem.strip()
     return stem[:300] or "Untitled manual"
+
+
+def _document_key(payload: dict, *, document_type: str, title: str, manufacturer: str | None, model_number: str | None) -> str:
+    """Resolve one durable manual identity independently of PDF file/version names."""
+    supplied = " ".join(str(payload.get("document_key") or "").split())
+    if supplied:
+        if len(supplied) > 100:
+            raise ValueError("document_key is too long")
+        return supplied
+
+    # Existing Dashboard callers do not yet supply a key.  Derive a stable,
+    # opaque identity so a revised file with the same logical title appends a
+    # version instead of creating another manual record.
+    identity = "\0".join((
+        document_type,
+        (manufacturer or "").casefold(),
+        (model_number or "").casefold(),
+        title.casefold(),
+    ))
+    return f"dashboard-manual-{hashlib.sha256(identity.encode('utf-8')).hexdigest()[:48]}"
 
 
 def _validate_library_locator(value: object) -> str:
@@ -156,6 +177,49 @@ def _normalize_extraction_chunks(raw: object) -> list[dict]:
     return normalized
 
 
+def _normalize_manual_parts(raw: object) -> list[dict]:
+    """Accept source-cited manual parts without treating diagram labels as OEM numbers."""
+    if raw is None:
+        return []
+    if not isinstance(raw, list) or len(raw) > 500:
+        raise ValueError("parts must be an array with at most 500 entries")
+    normalized: list[dict] = []
+    references: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("Each manual part must be an object")
+        reference_number = str(item.get("reference_number") or "").strip()
+        if not _PART_REFERENCE_RE.fullmatch(reference_number) or reference_number in references:
+            raise ValueError("Each manual part needs a unique diagram reference_number")
+        references.add(reference_number)
+        name = " ".join(str(item.get("name") or "").split())[:300]
+        if not name:
+            raise ValueError("Each manual part needs a name")
+        quantity = item.get("quantity")
+        source_page_number = item.get("source_page_number")
+        if type(quantity) is not int or type(source_page_number) is not int:
+            raise ValueError("Manual part quantity and source_page_number must be integers")
+        if quantity < 1 or source_page_number < 1:
+            raise ValueError("Manual part quantity and source_page_number must be positive")
+        source_excerpt = " ".join(str(item.get("source_excerpt") or "").split())[:500]
+        if not source_excerpt:
+            raise ValueError("Each manual part needs a source_excerpt")
+        # A diagram label is useful for maintenance lookup, but is not evidence
+        # of a manufacturer orderable part number.
+        normalized.append(
+            {
+                "id": str(uuid4()),
+                "reference_number": reference_number,
+                "oem_part_number": "",
+                "name": name,
+                "quantity": quantity,
+                "source_page_number": source_page_number,
+                "source_excerpt": source_excerpt,
+            }
+        )
+    return normalized
+
+
 _MANUAL_SELECT = """
     SELECT m.id AS manual_id, m.asset_id, m.title, m.document_type, m.manufacturer, m.model_number,
            v.id AS version_id, v.version_number, v.source_display_name, v.mime_type,
@@ -223,6 +287,16 @@ def register_handbook_routes(app: Flask) -> None:
         title = _safe_title(str(payload.get("title") or ""), display_name)
         manufacturer = " ".join(str(payload.get("manufacturer") or "").split())[:200] or None
         model_number = " ".join(str(payload.get("model_number") or "").split())[:200] or None
+        try:
+            document_key = _document_key(
+                payload,
+                document_type=document_type,
+                title=title,
+                manufacturer=manufacturer,
+                model_number=model_number,
+            )
+        except ValueError as exc:
+            return validation_error(str(exc), field="document_key")
 
         duplicate = pm_db.execute_one_json(
             _MANUAL_SELECT
@@ -238,19 +312,33 @@ def register_handbook_routes(app: Flask) -> None:
         manual_id, version_id, event_id = str(uuid4()), str(uuid4()), str(uuid4())
         created = pm_db.execute_top_level_one_json(
             """
-            WITH created_manual AS (
+            WITH target_manual AS (
                 INSERT INTO propertymanager.asset_manual
                     (id, asset_id, document_key, title, document_type, manufacturer, model_number, created_by)
                 VALUES (%s, %s, %s, %s, %s, %s, %s, 'dashboard-manual-library')
+                ON CONFLICT (asset_id, document_key) DO UPDATE
+                SET title = EXCLUDED.title,
+                    document_type = EXCLUDED.document_type,
+                    manufacturer = EXCLUDED.manufacturer,
+                    model_number = EXCLUDED.model_number,
+                    updated_at = now()
                 RETURNING id, asset_id, title, document_type, manufacturer, model_number
+            ), previous_version AS (
+                SELECT v.id, v.version_number
+                FROM propertymanager.asset_manual_version v
+                JOIN target_manual m ON m.id = v.manual_id
+                ORDER BY v.version_number DESC
+                LIMIT 1
+                FOR UPDATE
             ), created_version AS (
                 INSERT INTO propertymanager.asset_manual_version
                     (id, manual_id, version_number, source_kind, source_locator, source_display_name,
                      source_sha256, mime_type, ingestion_status, review_status, lifecycle_status,
-                     provenance, created_by)
-                SELECT %s, id, 1, 'pdf', %s, %s, %s, 'application/pdf',
-                       'pending', 'pending', 'draft', %s::jsonb, 'dashboard-manual-library'
-                FROM created_manual
+                     supersedes_version_id, provenance, created_by)
+                SELECT %s, m.id, COALESCE(p.version_number + 1, 1), 'pdf', %s, %s, %s, 'application/pdf',
+                       'pending', 'pending', 'draft', p.id, %s::jsonb, 'dashboard-manual-library'
+                FROM target_manual m
+                LEFT JOIN previous_version p ON true
                 RETURNING id, manual_id, version_number, source_display_name, mime_type,
                           ingestion_status, review_status, lifecycle_status, created_at
             ), created_event AS (
@@ -267,11 +355,11 @@ def register_handbook_routes(app: Flask) -> None:
                        v.id AS version_id, v.version_number, v.source_display_name, v.mime_type,
                        v.ingestion_status, v.review_status, v.lifecycle_status, v.created_at,
                        NULL::timestamptz AS extracted_at, 0 AS task_count
-                FROM created_manual m JOIN created_version v ON v.manual_id = m.id
+                FROM target_manual m JOIN created_version v ON v.manual_id = m.id
             ) result
             """,
             (
-                manual_id, asset_id, f"dashboard-pdf-{source_sha256[:48]}", title, document_type,
+                manual_id, asset_id, document_key, title, document_type,
                 manufacturer, model_number, version_id, locator, display_name, source_sha256,
                 json.dumps({"storage_owner": "dashboard-intelmini", "byte_size": byte_size}), event_id,
             ),
@@ -312,8 +400,10 @@ def register_handbook_routes(app: Flask) -> None:
             return validation_error("JSON object body required")
         try:
             chunks = _normalize_extraction_chunks(payload.get("chunks"))
+            parts = _normalize_manual_parts(payload.get("parts"))
         except ValueError as exc:
-            return validation_error(str(exc), field="chunks")
+            field = "parts" if "part" in str(exc).lower() else "chunks"
+            return validation_error(str(exc), field=field)
         extractor_name = " ".join(str(payload.get("extractor_name") or "").split())[:100]
         extractor_version = " ".join(str(payload.get("extractor_version") or "").split())[:64]
         if not extractor_name or not extractor_version:
@@ -340,12 +430,23 @@ def register_handbook_routes(app: Flask) -> None:
                 chunk["id"], chunk["ordinal"], chunk["page_number"], chunk["section_heading"], chunk["content"],
                 chunk["content_sha256"], json.dumps({"extractor": "local_mac"}),
             ])
+        parts_sql = ", ".join("(%s::uuid, %s, %s, %s, %s, %s, %s, %s::jsonb)" for _ in parts)
+        if not parts_sql:
+            parts_sql = "(NULL::uuid, NULL::varchar, NULL::varchar, NULL::varchar, NULL::integer, NULL::integer, NULL::varchar, NULL::jsonb)"
+        for part in parts:
+            values_params.extend([
+                part["id"], part["reference_number"], part["oem_part_number"], part["name"],
+                part["quantity"], part["source_page_number"], part["source_excerpt"],
+                json.dumps({"part_number_source": "manual_diagram_reference"}),
+            ])
         event_id = str(uuid4())
         actor_id = server_submitter_identity()
         created = pm_db.execute_top_level_one_json(
             f"""
             WITH supplied_chunks (id, chunk_ordinal, page_number, section_heading, content, content_sha256, extraction_metadata) AS (
                 VALUES {values_sql}
+            ), supplied_parts (id, reference_number, oem_part_number, name, quantity, source_page_number, source_excerpt, provenance) AS (
+                VALUES {parts_sql}
             ), extractable_version AS (
                 SELECT v.id, v.manual_id
                 FROM propertymanager.asset_manual m
@@ -361,6 +462,14 @@ def register_handbook_routes(app: Flask) -> None:
                 SELECT c.id, v.id, c.chunk_ordinal, c.page_number, c.section_heading, c.content,
                        c.content_sha256, c.extraction_metadata::jsonb
                 FROM supplied_chunks c CROSS JOIN extractable_version v
+            ), inserted_parts AS (
+                INSERT INTO propertymanager.asset_manual_part
+                    (id, manual_version_id, reference_number, oem_part_number, name, quantity,
+                     source_page_number, source_excerpt, provenance)
+                SELECT p.id, v.id, p.reference_number, p.oem_part_number, p.name, p.quantity,
+                       p.source_page_number, p.source_excerpt, p.provenance
+                FROM supplied_parts p CROSS JOIN extractable_version v
+                WHERE p.id IS NOT NULL
             ), extracted_version AS (
                 UPDATE propertymanager.asset_manual_version v
                 SET ingestion_status = 'extracted', extractor_name = %s, extractor_version = %s

@@ -68,7 +68,7 @@ class WorkRequestTests(unittest.TestCase):
         value.update(overrides)
         return value
 
-    def test_health_redacts_attachment_root_and_reports_only_verified_012(self):
+    def test_health_redacts_attachment_root_and_reports_only_verified_current_migration(self):
         with mock.patch.object(
             self.api, "_probe_postgres_and_schema", return_value=(True, True, True)
         ):
@@ -76,12 +76,12 @@ class WorkRequestTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertEqual(body["schema_version"], "012")
-        self.assertEqual(body["schema_contract_status"], "migration_012_applied")
+        self.assertEqual(body["schema_version"], "015")
+        self.assertEqual(body["schema_contract_status"], "migration_015_applied")
         self.assertNotIn("attachments_root", body)
         self.assertNotIn("storage_path", body)
 
-    def test_health_never_claims_012_without_marker_and_required_objects(self):
+    def test_health_never_claims_current_migration_without_marker_and_required_objects(self):
         complete_objects = {
             "assets_table": "propertymanager.assets",
             "meter_table": "propertymanager.asset_meter",
@@ -106,7 +106,7 @@ class WorkRequestTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         body = response.get_json()
         self.assertIsNone(body["schema_version"])
-        self.assertEqual(body["schema_contract_status"], "migration_012_not_verified")
+        self.assertEqual(body["schema_contract_status"], "migration_015_not_verified")
 
     def test_health_marker_is_read_only_and_parameterized(self):
         complete_objects = {
@@ -129,7 +129,7 @@ class WorkRequestTests(unittest.TestCase):
         marker_sql, marker_params = query.call_args_list[1].args
         self.assertIn("SELECT EXISTS", marker_sql)
         self.assertNotIn("INSERT", marker_sql)
-        self.assertEqual(marker_params, ("012",))
+        self.assertEqual(marker_params, ("015",))
 
     def test_submission_requires_authentication_before_validation(self):
         response = self.client.post("/v1/work-requests", json=self.payload(), headers={"Idempotency-Key": "x"})

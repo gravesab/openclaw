@@ -29,13 +29,17 @@ MIGRATIONS = (
     "010_handbook_ingestion_v1.sql",
     "011_work_request_intake.sql",
     "012_dev_schema_forward_repair.sql",
+    "013_asset_manual_parts.sql",
+    "014_asset_placed_in_service_date.sql",
+    "015_task_schedule_bypass.sql",
 )
+PRE_012_MIGRATIONS = MIGRATIONS[: MIGRATIONS.index("012_dev_schema_forward_repair.sql")]
 REAPPLICABLE_MIGRATIONS = (
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "012"
+EXPECTED_VERSION = "015"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -252,6 +256,12 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             applied.append(filename[:3])
             if filename == "009_maintenance_proposals.sql":
                 self.assertEqual(self._extract_contract(), manifest.snapshots["009"].schema_contract)
+            if filename in {
+                "012_dev_schema_forward_repair.sql",
+                "013_asset_manual_parts.sql",
+                "014_asset_placed_in_service_date.sql",
+            }:
+                self.assertEqual(self._extract_contract(), manifest.snapshots[filename[:3]].schema_contract)
             if filename == "011_work_request_intake.sql":
                 self.assertEqual(
                     self._psql(
@@ -268,10 +278,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                     )
         self.assertEqual(
             applied,
-            ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012"],
+            ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015"],
         )
         self.assertEqual(applied[-1], EXPECTED_VERSION)
-        self.assertEqual(self._extract_contract(), manifest.snapshots["012"].schema_contract)
+        self.assertEqual(self._extract_contract(), manifest.snapshots["015"].schema_contract)
 
         # The 005/006/009 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.
@@ -291,6 +301,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "asset_meter_reading",
                 "asset_manual",
                 "asset_manual_chunk",
+                "asset_manual_part",
                 "asset_manual_state_event",
                 "asset_manual_version",
                 "asset_task_mapping_proposals",
@@ -302,13 +313,14 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "maintenance_task_intake_events",
                 "maintenance_task_parts",
                 "maintenance_task_photos",
+                "maintenance_task_schedule_events",
                 "maintenance_tasks",
                 "schema_migrations",
             },
         )
 
         expected_columns = {
-            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at"},
+            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at", "placed_in_service_date"},
             "asset_meter": {"meter_epoch", "row_version"},
             "asset_meter_reading": {
                 "previous_reading_id",
@@ -336,6 +348,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "meter_interval_unit",
                 "last_done_meter_value",
                 "next_due_meter_value",
+                "deferred_until",
                 "intake_state",
                 "submitted_by",
                 "submitted_at",
@@ -395,6 +408,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             },
             "asset_manual_chunk": {"manual_version_id", "chunk_ordinal", "content", "content_sha256", "search_vector"},
             "asset_manual_state_event": {"manual_version_id", "event_type", "from_state", "to_state", "actor_id"},
+            "asset_manual_part": {
+                "manual_version_id", "reference_number", "oem_part_number", "name", "quantity",
+                "source_page_number", "source_excerpt", "provenance",
+            },
         }
         for table, columns in handbook_columns.items():
             actual = set(
@@ -616,7 +633,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
 
     def test_012_rejects_malformed_text_sha256_atomically(self) -> None:
         self._reset_propertymanager_schema()
-        for filename in MIGRATIONS[:-1]:
+        for filename in PRE_012_MIGRATIONS:
             self._psql((MIGRATION_DIR / filename).read_text())
         self._psql(
             """
@@ -649,7 +666,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
 
     def test_012_preserves_populated_canonical_011_handbook_and_intake(self) -> None:
         self._reset_propertymanager_schema()
-        for filename in MIGRATIONS[:-1]:
+        for filename in PRE_012_MIGRATIONS:
             self._psql((MIGRATION_DIR / filename).read_text())
         self._psql(
             """

@@ -12,6 +12,7 @@
 		9D35B073E35A22AE1F2F7558 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
 		C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
 		CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
+		F8D5B02C3E704914B26D0F81 /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C4A91B2D6F4803A15C9E70 /* LivestockBillOfSale.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -32,6 +33,7 @@
 		B36A1F34997943B0E0F0810E /* LivestockRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockRepository.swift; sourceTree = "<group>"; };
 		B868FD8D507ED4A71444C1CD /* RanchOSLivestockTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSLivestockTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockModels.swift; sourceTree = "<group>"; };
+		E7C4A91B2D6F4803A15C9E70 /* LivestockBillOfSale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockBillOfSale.swift; sourceTree = "<group>"; };
 		FD2F52D32BEAB94A8513033F /* LivestockViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -49,6 +51,7 @@
 			isa = PBXGroup;
 			children = (
 				2A2860A1F261143CB11FF3FE /* Info.plist */,
+				E7C4A91B2D6F4803A15C9E70 /* LivestockBillOfSale.swift */,
 				D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */,
 				B36A1F34997943B0E0F0810E /* LivestockRepository.swift */,
 				FD2F52D32BEAB94A8513033F /* LivestockViews.swift */,
@@ -155,6 +158,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F8D5B02C3E704914B26D0F81 /* LivestockBillOfSale.swift in Sources */,
 				6AD78D1FE6581C440F3F3BD9 /* LivestockModels.swift in Sources */,
 				C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */,
 				CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */,

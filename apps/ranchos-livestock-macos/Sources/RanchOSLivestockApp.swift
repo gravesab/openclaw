@@ -3,12 +3,16 @@ import SwiftUI
 
 @main
 struct RanchOSLivestockApp: App {
-    @State private var store = LivestockStore()
+    private static let records = LivestockDevLoopbackRead.load()
+    @State private var store = LivestockStore(
+        connection: LivestockReadConnection(authorizedProvider: RanchOSLivestockApp.records),
+        liveRecords: RanchOSLivestockApp.records
+    )
 
     var body: some Scene {
-        WindowGroup("Ranch OS Livestock") {
+        WindowGroup("Livestock Management") {
             LivestockRootView(store: store)
-                .task { await store.loadFixtures() }
+                .task { await store.loadAuthorizedRead() }
         }
         .defaultSize(width: 1_250, height: 780)
     }

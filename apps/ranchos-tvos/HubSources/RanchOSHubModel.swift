@@ -1,5 +1,13 @@
 import Foundation
 
+enum RanchOSBuildInfo {
+    static var display: String {
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+        let build = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+        return "V\(version) Build \(build)"
+    }
+}
+
 enum RanchOSModule: String, CaseIterable, Identifiable, Sendable {
     case property
     case livestock
@@ -37,7 +45,7 @@ struct RanchOSHubDashboard: Sendable {
     let tenantDisplayName: String
     let modules: [RanchOSModule]
 
-    static let developmentFixtureBanner = "DEV fixture · Live tenant data is not connected"
+    static let developmentFixtureBanner = "DEV hub · PropertyManager connected; other modules are fixtures"
     static let developmentFixture = RanchOSHubDashboard(
         title: "RanchOS",
         tenantDisplayName: "Ranch OS DEV",
@@ -132,7 +140,7 @@ struct RanchOSPropertyDashboard: Sendable {
         ])
 }
 
-struct RanchOSLivestockSummary: Identifiable, Sendable {
+struct RanchOSLivestockSummary: Identifiable, Sendable, Equatable {
     enum Status: String, Sendable {
         case careDue = "Care due"
         case current = "Current"
@@ -145,7 +153,7 @@ struct RanchOSLivestockSummary: Identifiable, Sendable {
     let status: Status
 }
 
-struct RanchOSLivestockDashboard: Sendable {
+struct RanchOSLivestockDashboard: Sendable, Equatable {
     let ranchName: String
     let herdCount: Int
     let summaries: [RanchOSLivestockSummary]

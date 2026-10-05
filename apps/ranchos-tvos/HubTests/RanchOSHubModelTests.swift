@@ -16,10 +16,10 @@ final class RanchOSHubModelTests: XCTestCase {
         XCTAssertFalse(modules.map(\.title).contains("My Health"))
     }
 
-    func testDevelopmentFixtureMakesTheOfflineBoundaryExplicit() {
+    func testDevelopmentHubMakesThePropertyConnectionAndFixtureBoundaryExplicit() {
         XCTAssertEqual(
             RanchOSHubDashboard.developmentFixtureBanner,
-            "DEV fixture · Live tenant data is not connected")
+            "DEV hub · PropertyManager connected; other modules are fixtures")
     }
 
     func testPropertyFixtureIsReadOnlyPresentationData() {
@@ -57,6 +57,13 @@ final class RanchOSHubModelTests: XCTestCase {
         XCTAssertEqual(fixture.ranchName, "Ranch OS DEV")
         XCTAssertEqual(fixture.summaries.map(\.id), ["monthly-view", "household-ranch", "upcoming-bills"])
         XCTAssertEqual(fixture.summaries.map(\.status), [.ready, .review, .upcoming])
+    }
+
+    func testBuildInfoDisplayAlwaysShowsVersionAndBuild() {
+        let display = RanchOSBuildInfo.display
+
+        XCTAssertTrue(display.hasPrefix("V"), display)
+        XCTAssertTrue(display.contains("Build "), display)
     }
 
     func testCompiledModuleHostSelectsOnlyTheApprovedFixtureModules() {

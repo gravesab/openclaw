@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-EXPECTED_HOST="openclawdev"
+EXPECTED_HOST="openclaw-dev-intel-trial"
 REPO="$HOME/ai/projects/openclaw"
 LOCAL_DIR="$HOME/openclaw-dev-backups"
 

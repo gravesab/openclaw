@@ -31,6 +31,7 @@ MIGRATIONS = (
     "012_dev_schema_forward_repair.sql",
     "013_asset_manual_parts.sql",
     "014_asset_placed_in_service_date.sql",
+    "015_task_schedule_bypass.sql",
 )
 PRE_012_MIGRATIONS = MIGRATIONS[: MIGRATIONS.index("012_dev_schema_forward_repair.sql")]
 REAPPLICABLE_MIGRATIONS = (
@@ -38,7 +39,7 @@ REAPPLICABLE_MIGRATIONS = (
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "014"
+EXPECTED_VERSION = "015"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -255,7 +256,11 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             applied.append(filename[:3])
             if filename == "009_maintenance_proposals.sql":
                 self.assertEqual(self._extract_contract(), manifest.snapshots["009"].schema_contract)
-            if filename in {"012_dev_schema_forward_repair.sql", "013_asset_manual_parts.sql"}:
+            if filename in {
+                "012_dev_schema_forward_repair.sql",
+                "013_asset_manual_parts.sql",
+                "014_asset_placed_in_service_date.sql",
+            }:
                 self.assertEqual(self._extract_contract(), manifest.snapshots[filename[:3]].schema_contract)
             if filename == "011_work_request_intake.sql":
                 self.assertEqual(
@@ -273,10 +278,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                     )
         self.assertEqual(
             applied,
-            ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014"],
+            ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015"],
         )
         self.assertEqual(applied[-1], EXPECTED_VERSION)
-        self.assertEqual(self._extract_contract(), manifest.snapshots["014"].schema_contract)
+        self.assertEqual(self._extract_contract(), manifest.snapshots["015"].schema_contract)
 
         # The 005/006/009 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.
@@ -308,6 +313,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "maintenance_task_intake_events",
                 "maintenance_task_parts",
                 "maintenance_task_photos",
+                "maintenance_task_schedule_events",
                 "maintenance_tasks",
                 "schema_migrations",
             },
@@ -342,6 +348,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "meter_interval_unit",
                 "last_done_meter_value",
                 "next_due_meter_value",
+                "deferred_until",
                 "intake_state",
                 "submitted_by",
                 "submitted_at",

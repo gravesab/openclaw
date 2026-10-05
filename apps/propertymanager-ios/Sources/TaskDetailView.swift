@@ -8,6 +8,8 @@ struct TaskDetailView: View {
     @State private var showCompletionSheet = false
     @State private var showDeleteConfirm = false
     @State private var showEdit = false
+    @State private var bypassAction: TaskBypassAction?
+    @State private var scheduleEvents: [TaskScheduleEvent] = []
 
     private var task: MaintenanceTask? {
         store.tasks.first(where: { $0.id == taskID })
@@ -154,7 +156,15 @@ struct TaskDetailView: View {
                             }
                         }
                         .disabled(store.isCompleting)
+                        TaskBypassMenu(task: task) { action in
+                            bypassAction = action
+                        } label: {
+                            Label("Bypass", systemImage: "arrow.uturn.forward.circle")
+                        }
+                        .disabled(store.isCompleting || store.isBypassing)
                     }
+
+                    TaskScheduleHistorySection(events: scheduleEvents)
 
                     Section {
                         Button(role: .destructive) {
@@ -192,6 +202,13 @@ struct TaskDetailView: View {
                     }
                     .environmentObject(store)
                 }
+                .sheet(item: $bypassAction) { action in
+                    TaskBypassSheet(task: task, initialAction: action) {
+                        Task { await loadScheduleEvents() }
+                    }
+                    .environmentObject(store)
+                }
+                .task(id: taskID) { await loadScheduleEvents() }
                 .confirmationDialog(
                     "Delete \(task.item)?",
                     isPresented: $showDeleteConfirm,
@@ -216,6 +233,17 @@ struct TaskDetailView: View {
                     description: Text("Pull to refresh the task list.")
                 )
             }
+        }
+    }
+
+    @MainActor
+    private func loadScheduleEvents() async {
+        do {
+            scheduleEvents = try await store.client.fetchScheduleEvents(taskID: taskID)
+        } catch {
+            // History is supplementary; the task itself is already on screen.
+            guard !error.isCancellation else { return }
+            scheduleEvents = []
         }
     }
 }

@@ -18,7 +18,9 @@
         "repository_understanding": 5,
         "documentation": 5,
         "speed": 4,
-        "cost": 6
+        "cost": 6,
+        "ranchos_operations": 10,
+        "openclaw_operations": 6
       },
       "allowed_statuses": [
         "production",
@@ -41,7 +43,8 @@
         "debugging": 8,
         "privacy": 7,
         "linux_admin": 6,
-        "low_hallucination": 8
+        "low_hallucination": 8,
+        "ranchos_operations": 6
       },
       "allowed_statuses": [
         "production",
@@ -65,7 +68,8 @@
         "debugging": 10,
         "code_generation": 8,
         "tool_calling": 8,
-        "low_hallucination": 9
+        "low_hallucination": 9,
+        "openclaw_operations": 8
       },
       "allowed_statuses": [
         "production",
@@ -89,7 +93,8 @@
         "debugging": 9,
         "documentation": 8,
         "agent_orchestration": 8,
-        "low_hallucination": 9
+        "low_hallucination": 9,
+        "openclaw_operations": 10
       },
       "allowed_statuses": [
         "production",
@@ -111,7 +116,8 @@
         "debugging": 9,
         "documentation": 7,
         "repository_understanding": 7,
-        "low_hallucination": 8
+        "low_hallucination": 8,
+        "ranchos_operations": 9
       },
       "allowed_statuses": [
         "production",
@@ -134,7 +140,9 @@
         "speed": 9,
         "cost": 8,
         "low_hallucination": 7,
-        "documentation": 5
+        "documentation": 5,
+        "ranchos_operations": 9,
+        "openclaw_operations": 5
       },
       "allowed_statuses": [
         "production",

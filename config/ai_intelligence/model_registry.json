@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-07-23",
+  "updated": "2026-10-03",
   "models": [
     {
       "id": "apple-foundation-models",
@@ -101,6 +101,16 @@
       "privacy_tier": "local",
       "cost_tier": "owned-hardware",
       "notes": "Fast low-resource fallback; not preferred for complex engineering."
+    },
+    {
+      "id": "llama-cpp-qwen3.5-9b",
+      "display_name": "Qwen 3.5 9B (llama.cpp)",
+      "provider": "llama.cpp",
+      "deployment": "local",
+      "status": "evaluation",
+      "privacy_tier": "local",
+      "cost_tier": "owned-hardware",
+      "notes": "Preferred open-source runtime on the M4. Serves the installed Qwen 3.5 9B GGUF through llama.cpp. Apple Intelligence stays first for lightweight private work. Embeddings stay on Nomic. Scorecard numbers are provisional copies of the Qwen 3.5 9B oMLX entry until a llama.cpp RanchOS and OpenClaw benchmark is recorded."
     },
     {
       "id": "omlx-qwen3.5-9b-4bit",

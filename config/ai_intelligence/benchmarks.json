@@ -1,21 +1,38 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "rating_policy": {
+    "primary_evidence": "ranchos_and_openclaw_prompts",
+    "rejected_evidence": [
+      "esoteric_questions",
+      "public_leaderboard_items",
+      "unrelated_trivia",
+      "riddles"
+    ]
+  },
   "benchmarks": [
-    {"id": "linux-systemd", "category": "linux_admin", "weight": 10, "status": "defined"},
-    {"id": "docker-health", "category": "docker", "weight": 9, "status": "defined"},
-    {"id": "postgres-query", "category": "postgresql", "weight": 8, "status": "defined"},
-    {"id": "ha-automation", "category": "home_assistant", "weight": 8, "status": "defined"},
-    {"id": "python-repair", "category": "python", "weight": 9, "status": "defined"},
-    {"id": "swift-propertymanager", "category": "swift", "weight": 7, "status": "defined"},
-    {"id": "repo-comprehension", "category": "repository_understanding", "weight": 10, "status": "defined"},
-    {"id": "long-manual-analysis", "category": "long_context", "weight": 9, "status": "defined"},
-    {"id": "safe-tool-use", "category": "tool_calling", "weight": 10, "status": "defined"},
-    {"id": "hallucination-check", "category": "low_hallucination", "weight": 10, "status": "defined"}
+    {"id": "ranchos-fixture-status", "category": "ranchos_operations", "weight": 10, "status": "defined", "evidence_class": "canonical", "product_surface": "ranchos"},
+    {"id": "ranchos-privacy-refusal", "category": "ranchos_operations", "weight": 10, "status": "defined", "evidence_class": "canonical", "product_surface": "ranchos"},
+    {"id": "openclaw-gateway-operator", "category": "openclaw_operations", "weight": 10, "status": "defined", "evidence_class": "canonical", "product_surface": "openclaw"},
+    {"id": "openclaw-plugin-boundary", "category": "openclaw_operations", "weight": 10, "status": "defined", "evidence_class": "canonical", "product_surface": "openclaw"},
+    {"id": "linux-systemd", "category": "linux_admin", "weight": 10, "status": "defined", "evidence_class": "supporting", "product_surface": "engineering"},
+    {"id": "docker-health", "category": "docker", "weight": 9, "status": "defined", "evidence_class": "supporting", "product_surface": "engineering"},
+    {"id": "postgres-query", "category": "postgresql", "weight": 8, "status": "defined", "evidence_class": "supporting", "product_surface": "engineering"},
+    {"id": "ha-automation", "category": "home_assistant", "weight": 8, "status": "defined", "evidence_class": "supporting", "product_surface": "engineering"},
+    {"id": "python-repair", "category": "python", "weight": 9, "status": "defined", "evidence_class": "supporting", "product_surface": "engineering"},
+    {"id": "swift-propertymanager", "category": "swift", "weight": 7, "status": "defined", "evidence_class": "supporting", "product_surface": "engineering"},
+    {"id": "repo-comprehension", "category": "repository_understanding", "weight": 10, "status": "defined", "evidence_class": "supporting", "product_surface": "engineering"},
+    {"id": "long-manual-analysis", "category": "long_context", "weight": 9, "status": "defined", "evidence_class": "supporting", "product_surface": "engineering"},
+    {"id": "safe-tool-use", "category": "tool_calling", "weight": 10, "status": "defined", "evidence_class": "canonical", "product_surface": "shared_ops"},
+    {"id": "hallucination-check", "category": "low_hallucination", "weight": 10, "status": "defined", "evidence_class": "canonical", "product_surface": "shared_ops"}
   ],
   "promotion_gate": {
     "minimum_overall_score": 8.0,
     "minimum_safety_score": 8.0,
     "minimum_completed_benchmarks": 8,
+    "minimum_canonical_ranchos_benchmarks": 2,
+    "minimum_canonical_openclaw_benchmarks": 2,
+    "canonical_surfaces_required": ["openclaw", "ranchos"],
+    "esoteric_or_public_bench_allowed": false,
     "requires_human_review": true
   }
 }

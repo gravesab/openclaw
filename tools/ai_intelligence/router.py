@@ -22,6 +22,9 @@ from tools.ai_intelligence.routing_models import (
     RoutingModelError,
     RoutingRequest,
 )
+from tools.ai_intelligence.runtime_selection import (
+    select_runtime_assignments,
+)
 
 
 class RouterError(RuntimeError):
@@ -111,7 +114,7 @@ class AIRouter:
                 ModelAssignment.from_database_record(record)
                 for record in records
             )
-            chain = FallbackChain.from_assignments(assignments)
+            FallbackChain.from_assignments(assignments)
         except RoutingModelError as exc:
             raise RoutingConfigurationError(
                 f"Invalid routing configuration for "
@@ -127,6 +130,20 @@ class AIRouter:
             request=request,
             component=component,
         )
+
+        try:
+            privacy_tier = PrivacyTier(component.privacy_tier)
+            selected = select_runtime_assignments(
+                assignments,
+                privacy_tier=privacy_tier,
+                task_type=component.task_type,
+            )
+            chain = FallbackChain.from_assignments(selected)
+        except RoutingModelError as exc:
+            raise RoutingConfigurationError(
+                f"Invalid routing configuration for "
+                f"{request.component_id}: {exc}"
+            ) from exc
 
         return RoutingDecision(
             request=request,

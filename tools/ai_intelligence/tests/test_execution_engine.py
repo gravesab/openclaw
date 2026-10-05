@@ -336,6 +336,53 @@ class ExecutionEngineTests(unittest.TestCase):
         )
         build_omlx_provider.assert_not_called()
 
+    @patch.dict(
+        "os.environ",
+        {"OPENCLAW_LLAMA_CPP_BASE_URL": "http://127.0.0.1:8080/v1"},
+        clear=True,
+    )
+    @patch(
+        "tools.ai_intelligence.database.DatabaseConfig.from_env"
+    )
+    @patch(
+        "tools.ai_intelligence.ollama_provider.build_ollama_provider"
+    )
+    @patch(
+        "tools.ai_intelligence.llama_cpp_provider.build_llama_cpp_provider"
+    )
+    @patch(
+        "tools.ai_intelligence.router.build_router_from_environment"
+    )
+    def test_attaches_llama_cpp_and_an_explicit_cloud_provider(
+        self,
+        build_router: Any,
+        build_llama_cpp_provider: Any,
+        build_ollama_provider: Any,
+        from_env: Any,
+    ) -> None:
+        llama_provider = FakeProvider([response("llama-cpp-primary")])
+        llama_provider.name = "llama.cpp"
+        ollama_provider = FakeProvider([response("ollama-primary")])
+        cloud_provider = FakeProvider([response("cloud-primary")])
+        cloud_provider.name = "cloud"
+        build_router.return_value = FakeRouter()
+        build_llama_cpp_provider.return_value = llama_provider
+        build_ollama_provider.return_value = ollama_provider
+        from_env.return_value = object()
+
+        class AttachedCloud:
+            def provider(self) -> FakeProvider:
+                return cloud_provider
+
+        engine = build_execution_engine_from_environment(
+            cloud_attachment=AttachedCloud()
+        )
+
+        self.assertEqual(
+            engine.provider_registry.providers,
+            (llama_provider, ollama_provider, cloud_provider),
+        )
+
     def test_returns_primary_success(self) -> None:
         routing_request = RoutingRequest(
             component_id="ranchbrain",

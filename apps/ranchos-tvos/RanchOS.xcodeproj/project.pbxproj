@@ -7,37 +7,120 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		01F6B3950B372786480C9AA7 /* RanchVADEVQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402E268F0E0033791191C654 /* RanchVADEVQuery.swift */; };
+		02A7DE82849C359EA47671C6 /* RanchVAAssetGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F729E99881C1B5C531D476 /* RanchVAAssetGraphTests.swift */; };
+		0B6CAAC6A5D932783108710F /* RanchOSLivestockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF5F2E1A92B231CAA8FBBFC /* RanchOSLivestockStore.swift */; };
+		0D22BF4C101CB25EB8168CB3 /* RanchOSLivestockConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */; };
 		0E61120FCE9229A9A00BD0D1 /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
+		1189FA0524BABAB2504106B9 /* RanchOSTV-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 4E1EAD2BBD7236536AED4D8E /* RanchOSTV-Info.plist */; };
 		232C0D73D888423130882D6B /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
+		25F4EFA6FC89E4F75C526334 /* RanchVAWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E195EE535962477DB2A48E5C /* RanchVAWorkspace.swift */; };
+		26F886BA855795AA9A236346 /* RanchVAWeatherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F96BB70E3F765675708CAA /* RanchVAWeatherTests.swift */; };
+		2F5C0B89EE1128E13A14F7A4 /* RanchOSLivestockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF5F2E1A92B231CAA8FBBFC /* RanchOSLivestockStore.swift */; };
+		2F77DC137208C1748A31D250 /* RanchOSMac-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C84C41D7E31B417C8395EF48 /* RanchOSMac-Info.plist */; };
 		37B2FB76EC4C2819D2969DBA /* RanchOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */; };
+		3C4264FFF4E111C2A08BECB1 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
+		3D80157B70E6A494C814A364 /* RanchOSPropertyLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDEBB618C5264B8A47AE065 /* RanchOSPropertyLiveStore.swift */; };
+		40E5BD06B75A2A253538DD0F /* RanchVAAssetGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */; };
+		4517BC1A8B3F5E820108D602 /* RanchVAWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D559F660DC862C2FC22205E /* RanchVAWeather.swift */; };
 		470C65898CA093AE5DA8A254 /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
 		4A6B37C5F34BFD9BE7611950 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
+		4A7D7CE86375E700D37526D6 /* RanchOSPropertyLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDEBB618C5264B8A47AE065 /* RanchOSPropertyLiveStore.swift */; };
+		4A9BC96C4B7D38B9E67B349B /* RanchOSLivestockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF5F2E1A92B231CAA8FBBFC /* RanchOSLivestockStore.swift */; };
+		4B54B580B6F189F70F61473E /* RanchOSLivestockConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */; };
+		4C48FB828E29D734168B2364 /* FixtureDetailBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */; };
+		5029F0FA723EED3FBF4A36D6 /* RanchVAAssetGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */; };
 		517EC06CF4DBA324AB942CA4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
 		53B5820CF13D08C27E6866BC /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
+		5460FE0E2A06EA4677A3A66E /* RanchVAWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D559F660DC862C2FC22205E /* RanchVAWeather.swift */; };
+		57C20A08EEF094408DC60703 /* RanchVADEVQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402E268F0E0033791191C654 /* RanchVADEVQuery.swift */; };
+		58B7E0FDE1127934536490DE /* RanchVADEVQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E551E91162E7243C1548AA07 /* RanchVADEVQueryTests.swift */; };
 		5B11DAE14A7B9B8F4C62C0B6 /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
+		5DC2F10A00BBDF08BB0884B6 /* RanchOSLivestockConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20B13B702C280E25102FA85 /* RanchOSLivestockConnectionTests.swift */; };
+		5E49256CA0A994D9E07CE57E /* RanchOSLivestockBrowserModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */; };
+		616DD5B346FB9D0476E3086E /* RanchVAAssetGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */; };
 		618564DE5DE8C8842183C933 /* RanchOSiOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */; };
+		66CEEE588A1E147372575423 /* LogitechCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */; };
+		6B18AD7A6F5DDE55325D28E7 /* RanchOSLivestockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF5F2E1A92B231CAA8FBBFC /* RanchOSLivestockStore.swift */; };
+		6E9CEF09CB648E6D0BCB4A41 /* RanchOSLivestockConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */; };
+		6EE77312CE3C24F56F03D3F1 /* RanchVADEVQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402E268F0E0033791191C654 /* RanchVADEVQuery.swift */; };
+		6FA76541BD209C8FE7602891 /* RanchVAAssetGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */; };
+		72653610B4D37B03A33090F6 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
+		73B900C8C3E8840EC43C4DBE /* RanchVADEVWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A800F8592481015682150AE /* RanchVADEVWorkspace.swift */; };
+		768EDEF0BC5439F343613E0D /* LogitechCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */; };
+		76CA03ADA0845A503440D341 /* RanchOSTV-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 4E1EAD2BBD7236536AED4D8E /* RanchOSTV-Info.plist */; };
 		7ABE342D35D442172B63444C /* RanchOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */; };
+		7CCE086381714FB3DAD838E9 /* RanchOSLivestockBrowserModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */; };
+		7D48743D0BA74B36EF949A20 /* RanchVADEVWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A800F8592481015682150AE /* RanchVADEVWorkspace.swift */; };
+		7E8E3DCAE7B69E61CFD4A53D /* RanchVAWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E195EE535962477DB2A48E5C /* RanchVAWorkspace.swift */; };
+		850CAA7FC10084CA2D54C502 /* RanchOSLivestockBrowserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C94A9740AE1C2B41C8AD8A3B /* RanchOSLivestockBrowserTests.swift */; };
+		866EF7430D89934BA0F9B45A /* FixtureDetailBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */; };
+		87FAB9F233E0F980AAB95595 /* RanchVADEVQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402E268F0E0033791191C654 /* RanchVADEVQuery.swift */; };
+		8900E7B2ED14FD58D8E4710A /* FixtureDetailBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */; };
 		8A7EBE108BF376552C68B654 /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
 		8AF17A99B07B4D8E547B8E0E /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
 		8F624DC859A59696959F6829 /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
 		90C3BCFA7E0C18A55B992430 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
+		91936F92A0928385E668024E /* RanchVADEVWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A800F8592481015682150AE /* RanchVADEVWorkspace.swift */; };
 		9499C316C9F3C1F528B1B11B /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
+		9E07C3032BED00091BEAE81B /* LogitechCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */; };
+		9EBD52CF88B195301F6781CA /* RanchOSLivestockConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */; };
+		A15D64C9F11BB89AAB079C21 /* RanchOSPropertyLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDEBB618C5264B8A47AE065 /* RanchOSPropertyLiveStore.swift */; };
+		A380297C016D2E0E83A77304 /* FixtureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCCBAB1AFB59D5343A55BC7 /* FixtureSession.swift */; };
 		ABD0006DA9297148C764BC84 /* RanchOSHubModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */; };
+		ACA938EE9AA8E54C66DF81F0 /* RanchOSPropertyLiveStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1397792AF9996A42ECCF0EF7 /* RanchOSPropertyLiveStoreTests.swift */; };
+		B9DDCF4A4C68DEEF967F8BED /* FixtureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCCBAB1AFB59D5343A55BC7 /* FixtureSession.swift */; };
+		BB5F168B30B765E58AEFB853 /* RanchVAWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E195EE535962477DB2A48E5C /* RanchVAWorkspace.swift */; };
+		C04AA63ACF40404740FA2356 /* RanchOSMac-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C84C41D7E31B417C8395EF48 /* RanchOSMac-Info.plist */; };
+		C2D7ED34823DF4947649E0D7 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
+		D0DF4E3DB9718EC1261CFB79 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
 		C63530FD2A422C672ACB6D8A /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
 		C6657E06195C2E952E9F8AB8 /* RanchOSiOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */; };
+		CC5196ACE4FE0D288B2604CD /* RanchOSLivestockStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A19114E28316BE53FC523170 /* RanchOSLivestockStoreTests.swift */; };
+		D00953C51EDEBF52F2238640 /* RanchVAWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D559F660DC862C2FC22205E /* RanchVAWeather.swift */; };
+		D7ACBF6664501986335F46D9 /* RanchOSLivestockBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87911BB80FEF3B27AB49E918 /* RanchOSLivestockBrowserView.swift */; };
+		D91294165D680AA0E909B79A /* RanchOSPropertyLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDEBB618C5264B8A47AE065 /* RanchOSPropertyLiveStore.swift */; };
+		DD470DE88A673C132C1C29E2 /* RanchOSLivestockBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87911BB80FEF3B27AB49E918 /* RanchOSLivestockBrowserView.swift */; };
 		DEFDE9802034BCAC2720FA29 /* RanchOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */; };
+		E03214C1AC2BC782C220DDF8 /* RanchOSLivestockBrowserModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */; };
+		E24311C43D3A1AD7B4E3D40C /* RanchOSLivestockBrowserModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */; };
+		F1A3BB6F2590F679408E6C14 /* RanchVAWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D559F660DC862C2FC22205E /* RanchVAWeather.swift */; };
+		FAC1E6222B6CC22541580297 /* FixtureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCCBAB1AFB59D5343A55BC7 /* FixtureSession.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		0A800F8592481015682150AE /* RanchVADEVWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVADEVWorkspace.swift; sourceTree = "<group>"; };
+		1397792AF9996A42ECCF0EF7 /* RanchOSPropertyLiveStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPropertyLiveStoreTests.swift; sourceTree = "<group>"; };
 		1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSTVHomeView.swift; sourceTree = "<group>"; };
+		25F96BB70E3F765675708CAA /* RanchVAWeatherTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVAWeatherTests.swift; sourceTree = "<group>"; };
+		2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockConnection.swift; sourceTree = "<group>"; };
+		402E268F0E0033791191C654 /* RanchVADEVQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVADEVQuery.swift; sourceTree = "<group>"; };
 		454C7A8A973451ABCEB01A80 /* RanchOSiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		4E1EAD2BBD7236536AED4D8E /* RanchOSTV-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "RanchOSTV-Info.plist"; sourceTree = "<group>"; };
 		571843A754007CC43A96B1D2 /* RanchOSTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		59F729E99881C1B5C531D476 /* RanchVAAssetGraphTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVAAssetGraphTests.swift; sourceTree = "<group>"; };
+		5DF5F2E1A92B231CAA8FBBFC /* RanchOSLivestockStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockStore.swift; sourceTree = "<group>"; };
 		5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "RanchOSiOS-Info.plist"; sourceTree = "<group>"; };
 		613AA46701E775DD8BDC30A4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSApp.swift; sourceTree = "<group>"; };
 		72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSHomeView.swift; sourceTree = "<group>"; };
+		7D559F660DC862C2FC22205E /* RanchVAWeather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVAWeather.swift; sourceTree = "<group>"; };
+		87911BB80FEF3B27AB49E918 /* RanchOSLivestockBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockBrowserView.swift; sourceTree = "<group>"; };
+		8BCCBAB1AFB59D5343A55BC7 /* FixtureSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureSession.swift; sourceTree = "<group>"; };
+		9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVAAssetGraph.swift; sourceTree = "<group>"; };
+		9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInput.swift; sourceTree = "<group>"; };
+		A19114E28316BE53FC523170 /* RanchOSLivestockStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockStoreTests.swift; sourceTree = "<group>"; };
+		A20B13B702C280E25102FA85 /* RanchOSLivestockConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockConnectionTests.swift; sourceTree = "<group>"; };
 		A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSHubModelTests.swift; sourceTree = "<group>"; };
+		AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockBrowserModel.swift; sourceTree = "<group>"; };
 		B980AF6909E06E60BF84C096 /* RanchOSHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogitechCamera.swift; sourceTree = "<group>"; };
+		C84C41D7E31B417C8395EF48 /* RanchOSMac-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "RanchOSMac-Info.plist"; sourceTree = "<group>"; };
+		C94A9740AE1C2B41C8AD8A3B /* RanchOSLivestockBrowserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockBrowserTests.swift; sourceTree = "<group>"; };
+		CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureDetailBrowser.swift; sourceTree = "<group>"; };
+		DDDEBB618C5264B8A47AE065 /* RanchOSPropertyLiveStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPropertyLiveStore.swift; sourceTree = "<group>"; };
+		E195EE535962477DB2A48E5C /* RanchVAWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVAWorkspace.swift; sourceTree = "<group>"; };
+		E551E91162E7243C1548AA07 /* RanchVADEVQueryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVADEVQueryTests.swift; sourceTree = "<group>"; };
 		F4794115307799C91B51792F /* RanchOSMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchOSMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSHubModel.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -51,9 +134,33 @@
 				72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */,
 				FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */,
 				5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */,
+				AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */,
+				87911BB80FEF3B27AB49E918 /* RanchOSLivestockBrowserView.swift */,
+				2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */,
+				5DF5F2E1A92B231CAA8FBBFC /* RanchOSLivestockStore.swift */,
+				C84C41D7E31B417C8395EF48 /* RanchOSMac-Info.plist */,
+				DDDEBB618C5264B8A47AE065 /* RanchOSPropertyLiveStore.swift */,
+				4E1EAD2BBD7236536AED4D8E /* RanchOSTV-Info.plist */,
 				1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */,
+				855848CDC30644B8F6FF73EB /* Jarvis */,
 			);
 			path = HubSources;
+			sourceTree = "<group>";
+		};
+		855848CDC30644B8F6FF73EB /* Jarvis */ = {
+			isa = PBXGroup;
+			children = (
+				CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */,
+				8BCCBAB1AFB59D5343A55BC7 /* FixtureSession.swift */,
+				C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */,
+				9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */,
+				402E268F0E0033791191C654 /* RanchVADEVQuery.swift */,
+				0A800F8592481015682150AE /* RanchVADEVWorkspace.swift */,
+				7D559F660DC862C2FC22205E /* RanchVAWeather.swift */,
+				E195EE535962477DB2A48E5C /* RanchVAWorkspace.swift */,
+				9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */,
+			);
+			path = Jarvis;
 			sourceTree = "<group>";
 		};
 		87B401673D44C3DA826970B8 = {
@@ -69,6 +176,13 @@
 			isa = PBXGroup;
 			children = (
 				A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */,
+				C94A9740AE1C2B41C8AD8A3B /* RanchOSLivestockBrowserTests.swift */,
+				A20B13B702C280E25102FA85 /* RanchOSLivestockConnectionTests.swift */,
+				A19114E28316BE53FC523170 /* RanchOSLivestockStoreTests.swift */,
+				1397792AF9996A42ECCF0EF7 /* RanchOSPropertyLiveStoreTests.swift */,
+				59F729E99881C1B5C531D476 /* RanchVAAssetGraphTests.swift */,
+				E551E91162E7243C1548AA07 /* RanchVADEVQueryTests.swift */,
+				25F96BB70E3F765675708CAA /* RanchVAWeatherTests.swift */,
 			);
 			path = HubTests;
 			sourceTree = "<group>";
@@ -213,6 +327,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				517EC06CF4DBA324AB942CA4 /* Assets.xcassets in Resources */,
+				76CA03ADA0845A503440D341 /* RanchOSTV-Info.plist in Resources */,
 				C6657E06195C2E952E9F8AB8 /* RanchOSiOS-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -222,6 +337,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				4A6B37C5F34BFD9BE7611950 /* Assets.xcassets in Resources */,
+				2F77DC137208C1748A31D250 /* RanchOSMac-Info.plist in Resources */,
 				618564DE5DE8C8842183C933 /* RanchOSiOS-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -231,6 +347,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				90C3BCFA7E0C18A55B992430 /* Assets.xcassets in Resources */,
+				C04AA63ACF40404740FA2356 /* RanchOSMac-Info.plist in Resources */,
+				1189FA0524BABAB2504106B9 /* RanchOSTV-Info.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -241,10 +359,23 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				866EF7430D89934BA0F9B45A /* FixtureDetailBrowser.swift in Sources */,
+				A380297C016D2E0E83A77304 /* FixtureSession.swift in Sources */,
+				768EDEF0BC5439F343613E0D /* LogitechCamera.swift in Sources */,
 				9499C316C9F3C1F528B1B11B /* RanchOSApp.swift in Sources */,
 				37B2FB76EC4C2819D2969DBA /* RanchOSHomeView.swift in Sources */,
 				53B5820CF13D08C27E6866BC /* RanchOSHubModel.swift in Sources */,
+				E24311C43D3A1AD7B4E3D40C /* RanchOSLivestockBrowserModel.swift in Sources */,
+				9EBD52CF88B195301F6781CA /* RanchOSLivestockConnection.swift in Sources */,
+				6B18AD7A6F5DDE55325D28E7 /* RanchOSLivestockStore.swift in Sources */,
+				A15D64C9F11BB89AAB079C21 /* RanchOSPropertyLiveStore.swift in Sources */,
 				8F624DC859A59696959F6829 /* RanchOSTVHomeView.swift in Sources */,
+				40E5BD06B75A2A253538DD0F /* RanchVAAssetGraph.swift in Sources */,
+				87FAB9F233E0F980AAB95595 /* RanchVADEVQuery.swift in Sources */,
+				73B900C8C3E8840EC43C4DBE /* RanchVADEVWorkspace.swift in Sources */,
+				F1A3BB6F2590F679408E6C14 /* RanchVAWeather.swift in Sources */,
+				25F4EFA6FC89E4F75C526334 /* RanchVAWorkspace.swift in Sources */,
+				72653610B4D37B03A33090F6 /* VoiceInput.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -252,10 +383,24 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8900E7B2ED14FD58D8E4710A /* FixtureDetailBrowser.swift in Sources */,
+				B9DDCF4A4C68DEEF967F8BED /* FixtureSession.swift in Sources */,
+				66CEEE588A1E147372575423 /* LogitechCamera.swift in Sources */,
 				470C65898CA093AE5DA8A254 /* RanchOSApp.swift in Sources */,
 				7ABE342D35D442172B63444C /* RanchOSHomeView.swift in Sources */,
 				232C0D73D888423130882D6B /* RanchOSHubModel.swift in Sources */,
+				E03214C1AC2BC782C220DDF8 /* RanchOSLivestockBrowserModel.swift in Sources */,
+				D7ACBF6664501986335F46D9 /* RanchOSLivestockBrowserView.swift in Sources */,
+				6E9CEF09CB648E6D0BCB4A41 /* RanchOSLivestockConnection.swift in Sources */,
+				4A9BC96C4B7D38B9E67B349B /* RanchOSLivestockStore.swift in Sources */,
+				D91294165D680AA0E909B79A /* RanchOSPropertyLiveStore.swift in Sources */,
 				8AF17A99B07B4D8E547B8E0E /* RanchOSTVHomeView.swift in Sources */,
+				5029F0FA723EED3FBF4A36D6 /* RanchVAAssetGraph.swift in Sources */,
+				6EE77312CE3C24F56F03D3F1 /* RanchVADEVQuery.swift in Sources */,
+				91936F92A0928385E668024E /* RanchVADEVWorkspace.swift in Sources */,
+				4517BC1A8B3F5E820108D602 /* RanchVAWeather.swift in Sources */,
+				BB5F168B30B765E58AEFB853 /* RanchVAWorkspace.swift in Sources */,
+				3C4264FFF4E111C2A08BECB1 /* VoiceInput.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -265,6 +410,21 @@
 			files = (
 				C63530FD2A422C672ACB6D8A /* RanchOSHubModel.swift in Sources */,
 				ABD0006DA9297148C764BC84 /* RanchOSHubModelTests.swift in Sources */,
+				7CCE086381714FB3DAD838E9 /* RanchOSLivestockBrowserModel.swift in Sources */,
+				850CAA7FC10084CA2D54C502 /* RanchOSLivestockBrowserTests.swift in Sources */,
+				4B54B580B6F189F70F61473E /* RanchOSLivestockConnection.swift in Sources */,
+				5DC2F10A00BBDF08BB0884B6 /* RanchOSLivestockConnectionTests.swift in Sources */,
+				2F5C0B89EE1128E13A14F7A4 /* RanchOSLivestockStore.swift in Sources */,
+				CC5196ACE4FE0D288B2604CD /* RanchOSLivestockStoreTests.swift in Sources */,
+				4A7D7CE86375E700D37526D6 /* RanchOSPropertyLiveStore.swift in Sources */,
+				ACA938EE9AA8E54C66DF81F0 /* RanchOSPropertyLiveStoreTests.swift in Sources */,
+				616DD5B346FB9D0476E3086E /* RanchVAAssetGraph.swift in Sources */,
+				02A7DE82849C359EA47671C6 /* RanchVAAssetGraphTests.swift in Sources */,
+				01F6B3950B372786480C9AA7 /* RanchVADEVQuery.swift in Sources */,
+				58B7E0FDE1127934536490DE /* RanchVADEVQueryTests.swift in Sources */,
+				D0DF4E3DB9718EC1261CFB79 /* VoiceInput.swift in Sources */,
+				D00953C51EDEBF52F2238640 /* RanchVAWeather.swift in Sources */,
+				26F886BA855795AA9A236346 /* RanchVAWeatherTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -272,10 +432,24 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				4C48FB828E29D734168B2364 /* FixtureDetailBrowser.swift in Sources */,
+				FAC1E6222B6CC22541580297 /* FixtureSession.swift in Sources */,
+				9E07C3032BED00091BEAE81B /* LogitechCamera.swift in Sources */,
 				5B11DAE14A7B9B8F4C62C0B6 /* RanchOSApp.swift in Sources */,
 				DEFDE9802034BCAC2720FA29 /* RanchOSHomeView.swift in Sources */,
 				8A7EBE108BF376552C68B654 /* RanchOSHubModel.swift in Sources */,
+				5E49256CA0A994D9E07CE57E /* RanchOSLivestockBrowserModel.swift in Sources */,
+				DD470DE88A673C132C1C29E2 /* RanchOSLivestockBrowserView.swift in Sources */,
+				0D22BF4C101CB25EB8168CB3 /* RanchOSLivestockConnection.swift in Sources */,
+				0B6CAAC6A5D932783108710F /* RanchOSLivestockStore.swift in Sources */,
+				3D80157B70E6A494C814A364 /* RanchOSPropertyLiveStore.swift in Sources */,
 				0E61120FCE9229A9A00BD0D1 /* RanchOSTVHomeView.swift in Sources */,
+				6FA76541BD209C8FE7602891 /* RanchVAAssetGraph.swift in Sources */,
+				57C20A08EEF094408DC60703 /* RanchVADEVQuery.swift in Sources */,
+				7D48743D0BA74B36EF949A20 /* RanchVADEVWorkspace.swift in Sources */,
+				5460FE0E2A06EA4677A3A66E /* RanchVAWeather.swift in Sources */,
+				7E8E3DCAE7B69E61CFD4A53D /* RanchVAWorkspace.swift in Sources */,
+				C2D7ED34823DF4947649E0D7 /* VoiceInput.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -287,7 +461,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = TVAppIcon;
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "HubSources/RanchOSTV-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -305,7 +480,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "HubSources/RanchOSMac-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -391,7 +567,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = TVAppIcon;
 				ASSETCATALOG_COMPILER_LAUNCHIMAGE_NAME = LaunchImage;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "HubSources/RanchOSTV-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -426,7 +603,8 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				COMBINE_HIDPI_IMAGES = YES;
-				GENERATE_INFOPLIST_FILE = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "HubSources/RanchOSMac-Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

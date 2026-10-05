@@ -346,3 +346,4 @@ tools/voice_lab/*.wav
 
 # Broken and temporary repair copies
 *.broken-before-*
+.aider*

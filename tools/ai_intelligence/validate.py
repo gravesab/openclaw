@@ -30,6 +30,34 @@ KNOWN_STATUSES = PRODUCTION_STATUSES | {
     "disabled",
 }
 
+ALLOWED_EVIDENCE_CLASS = {
+    "canonical",
+    "supporting",
+    "excluded",
+}
+
+CANONICAL_SURFACES = {
+    "openclaw",
+    "ranchos",
+}
+
+ALLOWED_PRODUCT_SURFACES = CANONICAL_SURFACES | {
+    "shared_ops",
+    "engineering",
+}
+
+REJECTED_CANONICAL_SURFACES = {
+    "esoteric",
+    "generic",
+    "public_benchmark",
+    "trivia",
+}
+
+REQUIRED_REJECTED_EVIDENCE = {
+    "esoteric_questions",
+    "public_leaderboard_items",
+}
+
 
 def load(name: str) -> dict[str, Any]:
     path = CONFIG / name
@@ -41,6 +69,85 @@ def load(name: str) -> dict[str, Any]:
         raise AssertionError(f"{name} must contain a JSON object")
 
     return document
+
+
+def validate_rating_policy(
+    scorecard: dict[str, Any],
+    benchmarks_document: dict[str, Any],
+) -> None:
+    policy = scorecard.get("rating_policy")
+    assert isinstance(policy, dict), "Scorecard rating_policy is required"
+    assert policy.get("primary_evidence") == "ranchos_and_openclaw_prompts", (
+        "Scorecard must rate models on RanchOS and OpenClaw prompts"
+    )
+    rejected = set(policy.get("rejected_evidence", []))
+    assert REQUIRED_REJECTED_EVIDENCE <= rejected, (
+        "Scorecard must reject esoteric and public-leaderboard evidence: "
+        f"{REQUIRED_REJECTED_EVIDENCE - rejected}"
+    )
+
+    criteria = scorecard.get("criteria", {})
+    for required_criterion in ("ranchos_operations", "openclaw_operations"):
+        assert required_criterion in criteria, (
+            f"Scorecard is missing {required_criterion}"
+        )
+
+    benchmarks = benchmarks_document.get("benchmarks", [])
+    benchmark_ids = [benchmark.get("id") for benchmark in benchmarks]
+    assert all(benchmark_ids), "Benchmark missing ID"
+    assert len(benchmark_ids) == len(set(benchmark_ids)), (
+        "Duplicate benchmark IDs"
+    )
+
+    gate = benchmarks_document.get("promotion_gate", {})
+    assert gate.get("esoteric_or_public_bench_allowed") is False, (
+        "Promotion must not accept esoteric or public-bench items"
+    )
+    required_surfaces = set(gate.get("canonical_surfaces_required", []))
+    assert required_surfaces == CANONICAL_SURFACES, (
+        "Promotion must require RanchOS and OpenClaw canonical surfaces: "
+        f"{required_surfaces}"
+    )
+    assert gate.get("minimum_canonical_ranchos_benchmarks", 0) >= 2
+    assert gate.get("minimum_canonical_openclaw_benchmarks", 0) >= 2
+
+    canonical_surfaces: set[str] = set()
+    canonical_count = 0
+    for benchmark in benchmarks:
+        evidence_class = benchmark.get("evidence_class", "supporting")
+        assert evidence_class in ALLOWED_EVIDENCE_CLASS, (
+            f"{benchmark.get('id')} has unknown evidence_class "
+            f"{evidence_class!r}"
+        )
+        surface = benchmark.get("product_surface")
+        assert surface in ALLOWED_PRODUCT_SURFACES, (
+            f"{benchmark.get('id')} has unknown product_surface {surface!r}"
+        )
+        if evidence_class == "canonical":
+            assert surface not in REJECTED_CANONICAL_SURFACES, (
+                f"{benchmark.get('id')} cannot be canonical with surface "
+                f"{surface!r}"
+            )
+            assert surface in CANONICAL_SURFACES | {"shared_ops"}, (
+                f"{benchmark.get('id')} canonical evidence must be RanchOS, "
+                "OpenClaw, or shared operator work"
+            )
+            canonical_count += 1
+            if surface in CANONICAL_SURFACES:
+                canonical_surfaces.add(surface)
+        if evidence_class == "excluded":
+            assert surface in REJECTED_CANONICAL_SURFACES, (
+                f"{benchmark.get('id')} excluded evidence must be marked "
+                "esoteric, generic, trivia, or public_benchmark"
+            )
+
+    assert canonical_count >= 4, (
+        "Need at least four canonical RanchOS/OpenClaw operator benchmarks"
+    )
+    assert CANONICAL_SURFACES <= canonical_surfaces, (
+        "Canonical suite must include RanchOS and OpenClaw prompts: "
+        f"{CANONICAL_SURFACES - canonical_surfaces}"
+    )
 
 
 def main() -> int:
@@ -208,25 +315,19 @@ def main() -> int:
             f"{task} has no production-capable candidate"
         )
 
-    benchmarks = documents["benchmarks.json"].get(
-        "benchmarks",
-        []
-    )
-
-    benchmark_ids = [
-        benchmark.get("id")
-        for benchmark in benchmarks
-    ]
-
-    assert all(benchmark_ids), "Benchmark missing ID"
-    assert len(benchmark_ids) == len(set(benchmark_ids)), (
-        "Duplicate benchmark IDs"
+    validate_rating_policy(
+        scorecard,
+        documents["benchmarks.json"],
     )
 
     print("AI Intelligence Layer validation: PASS")
     print(f"Models: {len(registry_ids)}")
     print(f"Routing rules: {len(rules)}")
-    print(f"Benchmarks: {len(benchmarks)}")
+    print(
+        "Benchmarks: "
+        f"{len(documents['benchmarks.json'].get('benchmarks', []))}"
+    )
+    print("Rating policy: ranchos_and_openclaw_prompts")
     print("Routing policy schema: "
           f"{policy.get('schema_version')}")
     print("Production-safe status enforcement: PASS")

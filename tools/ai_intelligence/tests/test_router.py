@@ -50,6 +50,8 @@ def assignment(
     component_id: str = "ranchbrain",
     privacy_tier: str = "local",
     task_type: str = "knowledge",
+    provider: str = "ollama",
+    deployment: str = "local",
 ) -> DeploymentAssignmentRecord:
     return DeploymentAssignmentRecord(
         component_id=component_id,
@@ -60,8 +62,8 @@ def assignment(
         priority=priority,
         model_id=model_id,
         model_name=model_id,
-        provider="ollama",
-        deployment="local",
+        provider=provider,
+        deployment=deployment,
         model_status="active",
         routing_mode="production-safe",
         configuration_source="deployment_map.json",
@@ -227,6 +229,39 @@ class AIRouterTests(unittest.TestCase):
             router.route(
                 RoutingRequest(component_id="ranchbrain")
             )
+
+    def test_local_component_drops_a_cloud_candidate(self) -> None:
+        router = AIRouter(
+            FakeDatabase(
+                stored_component=component(task_type="swift"),
+                assignments=(
+                    assignment(
+                        assignment_type="primary",
+                        priority=1,
+                        model_id="llama-cpp-qwen3.5-9b",
+                        task_type="swift",
+                        provider="llama.cpp",
+                    ),
+                    assignment(
+                        assignment_type="fallback",
+                        priority=1,
+                        model_id="openai-frontier",
+                        task_type="swift",
+                        provider="OpenAI",
+                        deployment="cloud",
+                    ),
+                ),
+            )
+        )
+
+        decision = router.route(
+            RoutingRequest(component_id="ranchbrain")
+        )
+
+        self.assertEqual(
+            decision.candidate_model_ids,
+            ("llama-cpp-qwen3.5-9b",),
+        )
 
     def test_multiple_primary_assignments_are_rejected(self) -> None:
         router = AIRouter(

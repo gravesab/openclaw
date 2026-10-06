@@ -31,28 +31,16 @@
 				<key>NSExceptionRequiresForwardSecrecy</key>
 				<false/>
 			</dict>
+			<key>andrew-m4-pro.local</key>
+			<dict>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+				<key>NSExceptionRequiresForwardSecrecy</key>
+				<false/>
+			</dict>
 		</dict>
 	</dict>
-	<key>UILaunchScreen</key>
-	<dict/>
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-	</array>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>Jarvis transcribes a question on this device when you press Start listening.</string>
-	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Jarvis creates an on-device speech draft for your review before sending.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>Jarvis shows a local camera preview when you start the camera. No video is recorded or uploaded.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>RanchOS reaches the DEV PropertyManager relay on this home network.</string>
 </dict>
 </plist>

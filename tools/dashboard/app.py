@@ -122,6 +122,9 @@ AI_SCORECARD_PATH = OPENCLAW_ROOT / "config/ai_intelligence/scorecard.json"
 AI_MODEL_REGISTRY_PATH = (
     OPENCLAW_ROOT / "config/ai_intelligence/model_registry.json"
 )
+AI_DEPLOYMENT_MAP_PATH = (
+    OPENCLAW_ROOT / "config/ai_intelligence/deployment_map.json"
+)
 AI_MODEL_RUNTIME_ALIASES_PATH = (
     OPENCLAW_ROOT / "config/ai_intelligence/model_runtime_aliases.json"
 )
@@ -1389,6 +1392,35 @@ def load_model_runtime_aliases():
     }
 
 
+def model_process_usage_panel_html() -> str:
+    """Render configured assignments beside the current router selection."""
+
+    from tools.dashboard.model_usage import (
+        build_model_usage,
+        model_usage_panel_html,
+    )
+
+    try:
+        deployment_map = json.loads(
+            AI_DEPLOYMENT_MAP_PATH.read_text(encoding="utf-8")
+        )
+        registry = json.loads(
+            AI_MODEL_REGISTRY_PATH.read_text(encoding="utf-8")
+        )
+        snapshot = build_model_usage(deployment_map, registry)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        return f"""
+        <div class='panel'>
+            <h2>Models by process</h2>
+            <div class='warning-box'>
+                The model assignment view could not be built.<br><br>
+                {html.escape(str(exc)[:160])}
+            </div>
+        </div>
+        """
+    return model_usage_panel_html(snapshot)
+
+
 def ai_routing_telemetry_panel_html(
     *,
     installed_model_names=(),
@@ -1396,8 +1428,9 @@ def ai_routing_telemetry_panel_html(
     report_path = AI_REPORT_DIR / "routing-telemetry-latest.json"
     text_path = AI_REPORT_DIR / "routing-telemetry-latest.txt"
 
+    usage_panel = model_process_usage_panel_html()
     if not report_path.exists():
-        return """
+        return usage_panel + """
         <div class='panel'>
             <h2>AI Routing Telemetry</h2>
             <div class='warning-box'>
@@ -1410,7 +1443,7 @@ def ai_routing_telemetry_panel_html(
     try:
         summary = json.loads(report_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        return f"""
+        return usage_panel + f"""
         <div class='panel'>
             <h2>AI Routing Telemetry</h2>
             <div class='warning-box'>
@@ -1629,7 +1662,7 @@ def ai_routing_telemetry_panel_html(
             "\n".join(text_path.read_text(encoding="utf-8").splitlines()[:12])
         )
 
-    return f"""
+    return usage_panel + f"""
     <div class='panel'>
         <h2>AI Routing Telemetry</h2>
         <div class='status-box'>

@@ -159,10 +159,39 @@ def benchmark_evidence_count(
         if (
             status in completed_statuses
             and has_measured_result
+            and str(entry.get("evidence_class", "supporting")).strip().lower()
+            != "excluded"
         ):
             count += 1
 
     return count
+
+
+def canonical_surfaces_with_evidence(
+    benchmarks: dict[str, Any],
+) -> set[str]:
+    """Return RanchOS/OpenClaw surfaces that have measured canonical evidence."""
+
+    completed_statuses = {
+        "completed",
+        "passed",
+        "failed",
+        "reviewed",
+        "accepted",
+    }
+    surfaces: set[str] = set()
+    for entry in benchmarks.get("benchmarks", []):
+        if not isinstance(entry, dict):
+            continue
+        if str(entry.get("evidence_class", "")).strip().lower() != "canonical":
+            continue
+        surface = str(entry.get("product_surface", "")).strip().lower()
+        if surface not in {"ranchos", "openclaw"}:
+            continue
+        status = str(entry.get("status", "")).strip().lower()
+        if status in completed_statuses:
+            surfaces.add(surface)
+    return surfaces
 
 
 def evaluate() -> dict[str, Any]:
@@ -311,6 +340,10 @@ def evaluate() -> dict[str, Any]:
         "benchmark_evidence_present": (
             evidence_count > 0
         ),
+        "canonical_ranchos_openclaw_evidence": (
+            {"openclaw", "ranchos"}
+            <= canonical_surfaces_with_evidence(benchmarks)
+        ),
     }
 
     ready_for_local_auto = all(
@@ -322,6 +355,7 @@ def evaluate() -> dict[str, Any]:
             gate_results["enough_local_recommendations"],
             gate_results["scores_not_provisional"],
             gate_results["benchmark_evidence_present"],
+            gate_results["canonical_ranchos_openclaw_evidence"],
         )
     )
 

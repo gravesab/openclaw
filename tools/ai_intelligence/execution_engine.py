@@ -293,8 +293,10 @@ class ExecutionEngine:
         )
 
 
-def build_execution_engine_from_environment() -> ExecutionEngine:
-    """Build the production-shaped engine from environment configuration."""
+def build_execution_engine_from_environment(
+    cloud_attachment: "CloudModelAttachment | None" = None,
+) -> ExecutionEngine:
+    """Build the local engine. Pass a cloud attachment only for large problems."""
 
     from tools.ai_intelligence.database import (
         AIIntelligenceDatabase,
@@ -315,6 +317,15 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
     from tools.ai_intelligence.foundation_models_provider import (
         build_foundation_models_provider,
     )
+    from tools.ai_intelligence.llama_cpp_config import (
+        is_llama_cpp_configured,
+    )
+    from tools.ai_intelligence.llama_cpp_provider import (
+        build_llama_cpp_provider,
+    )
+    from tools.ai_intelligence.cloud_attachment import (
+        UnattachedCloudModels,
+    )
     from tools.ai_intelligence.provider_registry import (
         ProviderRegistry,
     )
@@ -328,7 +339,12 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
         providers.append(build_foundation_models_provider())
     if is_omlx_configured():
         providers.append(build_omlx_provider())
+    if is_llama_cpp_configured():
+        providers.append(build_llama_cpp_provider())
     providers.append(build_ollama_provider())
+    cloud_provider = (cloud_attachment or UnattachedCloudModels()).provider()
+    if cloud_provider is not None:
+        providers.append(cloud_provider)
 
     return ExecutionEngine(
         router=build_router_from_environment(),

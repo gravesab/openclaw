@@ -60,6 +60,20 @@ enum RanchOSPropertyAsset: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Property Manager equipment mirrored for DEV. Finance points at these ids;
+/// it does not own the records. Live tenant data resolves the same ids.
+enum RanchOSPropertyEquipment: String, CaseIterable, Identifiable, Sendable {
+    case lawnmower = "lawnmower"
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .lawnmower: "Lawnmower"
+        }
+    }
+}
+
 struct RanchOSPropertySummary: Identifiable, Sendable {
     enum Status: String, Sendable {
         case needsAttention = "Needs attention"

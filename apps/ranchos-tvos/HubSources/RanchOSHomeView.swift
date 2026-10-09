@@ -344,8 +344,17 @@ private struct RanchOSModuleHostView: View {
                 onRevealSidebar: onRevealSidebar,
                 sidebarHidden: sidebarHidden)
         case .finance(let dashboard):
-            RanchOSFinanceModuleView(dashboard: dashboard)
+            financeModuleView(dashboard: dashboard)
         }
+    }
+
+    @ViewBuilder
+    private func financeModuleView(dashboard: RanchOSFinanceDashboard) -> some View {
+#if os(tvOS)
+        RanchOSFinanceModuleView(dashboard: dashboard)
+#else
+        RanchOSFinanceScreen()
+#endif
     }
 }
 

@@ -1,0 +1,12 @@
+Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+09/01/2026,09/03/2026,Weekly groceries,Fresh Fields Market,Groceries,purchase,84.12,Sam Sample
+09/05/2026,09/05/2026,Payment received,Apple Card,Payment,payment,-500.00,Sam Sample
+09/06/2026,09/08/2026,Returned boots,Trail Outfitters,Clothing,refund,-62.10,Sam Sample
+09/07/2026,09/09/2026,Monthly interest,Apple Card,Interest,Credit,14.22,Sam Sample
+09/08/2026,09/10/2026,Balance adjustment,Apple Card,Fees,interest,3.05,Sam Sample
+09/10/2026,09/12/2026,Very long description that wraps
+onto the next line,Hilltop Hardware,Hardware,purchase,22.50,Sam Sample
+09/01/2026,09/03/2026,Weekly groceries,Fresh Fields Market,Groceries,purchase,84.12,Sam Sample
+09/12/2026,09/14/2026,Zero row,Null Shop,Misc,purchase,0.00,Sam Sample
+01/05/2099,01/06/2099,Future row,Future Shop,Misc,purchase,9.99,Sam Sample
+09/13/2026,09/15/2026,Mystery row,Mystery Shop,Misc,barter,11.11,Sam Sample

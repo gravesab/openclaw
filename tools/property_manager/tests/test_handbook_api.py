@@ -305,6 +305,39 @@ class HandbookAPITests(unittest.TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()["field"], "source_locator")
 
+    def test_dashboard_registration_accepts_the_manuals_folder(self):
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[self.asset(), None],
+        ), mock.patch.object(
+            self.api.pm_db,
+            "execute_top_level_one_json",
+            return_value=self.stored_manual(),
+        ):
+            response = self.client.post(
+                "/v1/internal/manual-library/assets/asset-1/manuals",
+                headers=self.dashboard_headers(),
+                json=self.registration_payload(source_locator="dashboard-library://Manuals/polaris-ranger.pdf"),
+            )
+        self.assertEqual(response.status_code, 201, response.get_json())
+
+    def test_dashboard_registration_rejects_library_folders_that_hold_no_manuals(self):
+        for locator in (
+            "dashboard-library://Unsorted/polaris-ranger.pdf",
+            "dashboard-library://Manuals/../Medical/record.pdf",
+        ):
+            with self.subTest(locator=locator), mock.patch.object(
+                self.api.pm_db, "execute_one_json", return_value=self.asset()
+            ):
+                response = self.client.post(
+                    "/v1/internal/manual-library/assets/asset-1/manuals",
+                    headers=self.dashboard_headers(),
+                    json=self.registration_payload(source_locator=locator),
+                )
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.get_json()["field"], "source_locator")
+
     def test_listing_never_exposes_external_locator_or_checksum(self):
         listing = self.stored_manual(
             source_locator="dashboard-library://Assets/polaris-ranger-0123456789ab.pdf",

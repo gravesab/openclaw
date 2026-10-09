@@ -43,7 +43,8 @@ FORMAT = "propertymanager-manual-package"
 FORMAT_VERSION = 1
 SCHEMA = "propertymanager"
 LIBRARY_PREFIX = "dashboard-library://"
-ASSETS_PREFIX = "Assets/"
+# Manuals/ is the manual library; Assets/ is accepted until the shared drive's consolidation moves it.
+MANUAL_LIBRARY_PREFIXES = ("Manuals/", "Assets/")
 VERSION_CHILD_TABLES = ("asset_manual_chunk", "asset_manual_state_event", "asset_manual_part")
 # Manual-derived definition fields. Owner-editable fields stay as the target has them.
 SYNCED_TASK_FIELDS = (
@@ -468,8 +469,8 @@ def _plan_versions(
             plan.add("Blockers", f"{name}: active manual versions are not supported by this tool.")
             continue
         locator = version.get("source_locator") or ""
-        if not locator.startswith(LIBRARY_PREFIX + ASSETS_PREFIX):
-            plan.add("Blockers", f"{name}: PDF location {locator!r} is not in the shared Dashboard library (Assets/).")
+        if not locator.startswith(tuple(LIBRARY_PREFIX + prefix for prefix in MANUAL_LIBRARY_PREFIXES)):
+            plan.add("Blockers", f"{name}: PDF location {locator!r} is not in the shared Dashboard manual library.")
         else:
             relative = locator[len(LIBRARY_PREFIX):]
             digest = pdf_sha256(relative)

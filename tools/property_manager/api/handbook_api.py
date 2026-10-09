@@ -25,6 +25,8 @@ from errors import error_response, validation_error
 MAX_MANUAL_BYTES = 50 * 1024 * 1024
 DOCUMENT_TYPES = {"operator_manual", "service_manual", "parts_manual", "safety_manual", "other"}
 LIBRARY_LOCATOR_PREFIX = "dashboard-library://"
+# Manuals/ is the manual library; Assets/ is accepted until the shared drive's consolidation moves it.
+LIBRARY_MANUAL_FOLDERS = frozenset({"Manuals", "Assets"})
 MANUAL_LIBRARY_SERVICE_TOKEN = os.environ.get(
     "PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN", ""
 ).strip()
@@ -105,7 +107,7 @@ def _validate_library_locator(value: object) -> str:
         or path.is_absolute()
         or ".." in path.parts
         or not path.parts
-        or path.parts[0] != "Assets"
+        or path.parts[0] not in LIBRARY_MANUAL_FOLDERS
         or path.suffix.lower() != ".pdf"
     ):
         raise ValueError("source_locator is invalid")

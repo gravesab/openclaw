@@ -60,40 +60,45 @@ struct LivestockRootView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $destination) {
+                Section {
+                    LivestockIdentityBadge(stamp: .current)
+                        .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
+                        .listRowBackground(Color.clear)
+                }
                 Section("Herds") {
-                    Label(LivestockDestination.overview.label, systemImage: LivestockDestination.overview.icon)
+                    LivestockWrappingLabel(title: LivestockDestination.overview.label, systemImage: LivestockDestination.overview.icon)
                         .tag(LivestockDestination.overview)
                     if store.canEditStoredAnimal {
                         Button {
                             destination = .overview
                             presentingCreateHerd = true
                         } label: {
-                            Label(LivestockDestination.createHerd.label, systemImage: LivestockDestination.createHerd.icon)
+                            LivestockWrappingLabel(title: LivestockDestination.createHerd.label, systemImage: LivestockDestination.createHerd.icon)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel("Create herd")
                     }
-                    Label(LivestockDestination.herdsInactive.label, systemImage: LivestockDestination.herdsInactive.icon)
+                    LivestockWrappingLabel(title: LivestockDestination.herdsInactive.label, systemImage: LivestockDestination.herdsInactive.icon)
                         .tag(LivestockDestination.herdsInactive)
                         .accessibilityLabel("Herds that have been retired")
                 }
                 Section("Livestock") {
-                    Label(LivestockDestination.liveStock.label, systemImage: LivestockDestination.liveStock.icon)
+                    LivestockWrappingLabel(title: LivestockDestination.liveStock.label, systemImage: LivestockDestination.liveStock.icon)
                         .tag(LivestockDestination.liveStock)
                     if store.canEditStoredAnimal {
                         addAnimalRow(.liveStock)
                     }
-                    Label(LivestockDestination.liveStockInactive.label, systemImage: LivestockDestination.liveStockInactive.icon)
+                    LivestockWrappingLabel(title: LivestockDestination.liveStockInactive.label, systemImage: LivestockDestination.liveStockInactive.icon)
                         .tag(LivestockDestination.liveStockInactive)
                         .accessibilityLabel("Livestock retired to a better life")
                 }
                 Section("Pets") {
-                    Label(LivestockDestination.pets.label, systemImage: LivestockDestination.pets.icon)
+                    LivestockWrappingLabel(title: LivestockDestination.pets.label, systemImage: LivestockDestination.pets.icon)
                         .tag(LivestockDestination.pets)
                     if store.canEditStoredAnimal {
                         addAnimalRow(.pets)
                     }
-                    Label(LivestockDestination.petsInactive.label, systemImage: LivestockDestination.petsInactive.icon)
+                    LivestockWrappingLabel(title: LivestockDestination.petsInactive.label, systemImage: LivestockDestination.petsInactive.icon)
                         .tag(LivestockDestination.petsInactive)
                         .accessibilityLabel("Pets retired to a better life")
                 }
@@ -111,23 +116,28 @@ struct LivestockRootView: View {
                     .accessibilityLabel("Appearance color mode")
                 }
             }
+            #if os(iOS)
+            .navigationSplitViewColumnWidth(min: 200, ideal: 320)
+            #else
             .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+            #endif
             .navigationTitle(LivestockBuildStamp.current.name)
-            .safeAreaInset(edge: .top, spacing: 0) {
-                LivestockIdentityBadge(stamp: .current)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-                    .padding(.bottom, 4)
-            }
             .safeAreaInset(edge: .bottom) {
                 Text(store.session.statusFooter)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(12)
+                    .background(.bar)
             }
         } content: {
             destinationContent
+                #if os(iOS)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 360)
+                #else
                 .navigationSplitViewColumnWidth(min: 300, ideal: 360)
+                #endif
         } detail: {
             detailContent
         }
@@ -189,7 +199,7 @@ struct LivestockRootView: View {
             destination = category == .pets ? .pets : .liveStock
             presentingAddAnimal = true
         } label: {
-            Label(category.addLabel, systemImage: "plus")
+            LivestockWrappingLabel(title: category.addLabel, systemImage: "plus")
         }
         .buttonStyle(.plain)
         .accessibilityLabel(category.addLabel)
@@ -269,6 +279,65 @@ struct LivestockRootView: View {
     }
 }
 
+struct LivestockWrappingLabel: View {
+    let title: String
+    let systemImage: String
+    var trailing: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Image(systemName: systemImage)
+                .frame(width: 22)
+                .accessibilityHidden(true)
+            Text(title)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            if let trailing {
+                Text(trailing)
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+extension View {
+    @ViewBuilder
+    func livestockScreenTitle(_ title: String) -> some View {
+        #if os(iOS)
+        self.toolbarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .principal) {
+                    Text(title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(3)
+                        .minimumScaleFactor(0.85)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        #else
+        self.navigationTitle(title)
+        #endif
+    }
+}
+
+struct LivestockWrappingContentStyle: LabeledContentStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            configuration.label
+                .fixedSize(horizontal: false, vertical: true)
+            configuration.content
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
 struct LivestockIdentityBadge: View {
     let stamp: LivestockBuildStamp
 
@@ -285,8 +354,7 @@ struct LivestockIdentityBadge: View {
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(Color(red: 0.09, green: 0.13, blue: 0.10))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .fixedSize(horizontal: false, vertical: true)
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -351,22 +419,17 @@ struct HerdAnimalBrowser: View {
         Button {
             onOpen(destination)
         } label: {
-            HStack(spacing: 12) {
-                Label(destination.label, systemImage: destination.icon)
-                    .foregroundStyle(.primary)
-                Spacer(minLength: 8)
-                Text("\(count)")
-                    .font(.title3.weight(.semibold))
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-            }
+            LivestockWrappingLabel(title: destination.label, systemImage: destination.icon, trailing: "\(count)")
+                .foregroundStyle(.primary)
         }
         .accessibilityLabel("\(destination.label), \(count)")
     }
 
     private func addRow(_ category: AnimalCategory) -> some View {
-        Button(category.addLabel, systemImage: "plus") {
+        Button {
             onAdd?(category)
+        } label: {
+            LivestockWrappingLabel(title: category.addLabel, systemImage: "plus")
         }
         .accessibilityLabel(category.addLabel)
     }
@@ -375,6 +438,11 @@ struct HerdAnimalBrowser: View {
         Group {
             if case .loaded = store.overviewState, let overview = store.overview {
                 List {
+                    Section {
+                        LivestockIdentityBadge(stamp: .current)
+                            .listRowInsets(EdgeInsets(top: 8, leading: 4, bottom: 4, trailing: 4))
+                            .listRowBackground(Color.clear)
+                    }
                     Section("Livestock") {
                         categoryRow(.liveStock, count: overview.currentLivestock)
                         if onAdd != nil {
@@ -435,14 +503,7 @@ struct HerdAnimalBrowser: View {
                 )
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) {
-            LivestockIdentityBadge(stamp: .current)
-                .padding(.horizontal, 16)
-                .padding(.top, 12)
-                .padding(.bottom, 4)
-        }
-        .navigationTitle("Herd overview")
-        .toolbarTitleDisplayMode(.inline)
+        .livestockScreenTitle("Herd overview")
     }
 }
 
@@ -515,8 +576,7 @@ struct ActiveHerdPane: View {
                 Text(status).font(.callout).foregroundStyle(.secondary)
             }
         }
-        .navigationTitle("Herd")
-        .toolbarTitleDisplayMode(.inline)
+        .livestockScreenTitle("Herd")
         .alert("Retire this herd?", isPresented: $confirmingRetire) {
             Button("Proceed", role: .destructive) {
                 guard let selected = herdID else { return }
@@ -551,10 +611,13 @@ struct RetiredHerdsView: View {
                             herdID = herd.id
                         } label: {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(herd.name).font(.headline)
+                                Text(herd.name)
+                                    .font(.headline)
+                                    .fixedSize(horizontal: false, vertical: true)
                                 Text(herd.retiredAt?.formatted(date: .abbreviated, time: .omitted) ?? "Date not recorded")
                                     .font(.subheadline)
                                     .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
@@ -565,8 +628,7 @@ struct RetiredHerdsView: View {
                 }
             }
         }
-        .navigationTitle("Herds that have been retired")
-        .toolbarTitleDisplayMode(.inline)
+        .livestockScreenTitle("Herds that have been retired")
     }
 }
 
@@ -584,10 +646,13 @@ struct RetiredHerdPane: View {
                 LabeledContent("Retired", value: herd.retiredAt?.formatted(date: .abbreviated, time: .omitted) ?? "Date not recorded")
                 Section("Other information") {
                     Text(herd.notes.isEmpty ? "None" : herd.notes)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
-            .navigationTitle(herd.name)
-            .toolbarTitleDisplayMode(.inline)
+            #if os(iOS)
+            .labeledContentStyle(LivestockWrappingContentStyle())
+            #endif
+            .livestockScreenTitle(herd.name)
         } else {
             ContentUnavailableView("Herds that have been retired", systemImage: "archivebox", description: Text("Choose a herd."))
         }
@@ -606,6 +671,19 @@ struct HerdChoiceRow: View {
     }
 
     var body: some View {
+        #if os(iOS)
+        VStack(alignment: .leading, spacing: 8) {
+            Text(animal.displayName)
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+            if showsIdentity {
+                Text("\(animal.speciesDisplay) · \(animal.breedDisplay)")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            herdControl
+        }
+        #else
         HStack(spacing: 12) {
             Text(animal.displayName)
                 .frame(minWidth: 120, alignment: .leading)
@@ -614,22 +692,33 @@ struct HerdChoiceRow: View {
                 Text(animal.breedDisplay).foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            if canEdit {
-                Picker("Active herd", selection: Binding(
-                    get: { animal.herdID },
-                    set: { onChange(animal, $0) }
-                )) {
-                    Text("None").tag(nil as UUID?)
-                    ForEach(choices) { herd in
-                        Text(herd.name).tag(Optional(herd.id))
-                    }
+            herdControl
+        }
+        #endif
+    }
+
+    @ViewBuilder
+    private var herdControl: some View {
+        if canEdit {
+            Picker("Active herd", selection: Binding(
+                get: { animal.herdID },
+                set: { onChange(animal, $0) }
+            )) {
+                Text("None").tag(nil as UUID?)
+                ForEach(choices) { herd in
+                    Text(herd.name).tag(Optional(herd.id))
                 }
-                .labelsHidden()
-                .frame(maxWidth: 220)
-                .accessibilityLabel("Active herd for \(animal.displayName)")
-            } else {
-                Text(animal.herdName ?? "None").foregroundStyle(.secondary)
             }
+            #if os(iOS)
+            .pickerStyle(.menu)
+            #endif
+            .labelsHidden()
+            #if os(macOS)
+            .frame(maxWidth: 220)
+            #endif
+            .accessibilityLabel("Active herd for \(animal.displayName)")
+        } else {
+            Text(animal.herdName ?? "None").foregroundStyle(.secondary)
         }
     }
 }
@@ -643,10 +732,13 @@ struct CreateHerdSheet: View {
     @State private var message: String?
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 18) {
             Text("Create herd").font(.title2.bold())
+                .fixedSize(horizontal: false, vertical: true)
             Text(store.session.isLive ? "Saved in the DEV livestock database." : "Saved in this sample session.")
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Form {
                 TextField("Herd name", text: $name)
                 VStack(alignment: .leading, spacing: 6) {
@@ -660,30 +752,47 @@ struct CreateHerdSheet: View {
             if let message {
                 Label(message, systemImage: "info.circle").foregroundStyle(.secondary)
             }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Create herd") {
-                    let enteredName = name
-                    let enteredNotes = notes
-                    Task {
-                        let cleaned = enteredName.split(whereSeparator: \.isWhitespace).joined(separator: " ")
-                        let result = await store.createHerd(name: cleaned, notes: enteredNotes)
-                        if result.hasPrefix("Herd saved") {
-                            let createdID = store.herds.first { $0.name.caseInsensitiveCompare(cleaned) == .orderedSame }?.id
-                            onCreated(createdID)
-                            dismiss()
-                        } else {
-                            message = result
-                        }
-                    }
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Spacer()
+                    Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                    createHerdButton
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                VStack(alignment: .leading, spacing: 12) {
+                    createHerdButton
+                    Button("Cancel") { dismiss() }
+                }
             }
         }
         .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        #if os(macOS)
         .frame(width: 520)
+        #endif
+        }
+        #if os(iOS)
+        .presentationDetents([.large])
+        #endif
+    }
+
+    private var createHerdButton: some View {
+        Button("Create herd") {
+            let enteredName = name
+            let enteredNotes = notes
+            Task {
+                let cleaned = enteredName.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+                let result = await store.createHerd(name: cleaned, notes: enteredNotes)
+                if result.hasPrefix("Herd saved") {
+                    let createdID = store.herds.first { $0.name.caseInsensitiveCompare(cleaned) == .orderedSame }?.id
+                    onCreated(createdID)
+                    dismiss()
+                } else {
+                    message = result
+                }
+            }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
     }
 }
 
@@ -732,10 +841,13 @@ struct AnimalListView: View {
                         store.selectedAnimalID = animal.id
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(animal.displayName).font(.headline)
+                            Text(animal.displayName)
+                                .font(.headline)
+                                .fixedSize(horizontal: false, vertical: true)
                             Text(rowDetail(animal))
                                 .font(.subheadline)
                                 .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())
@@ -754,8 +866,7 @@ struct AnimalListView: View {
                 )
             }
         }
-        .navigationTitle(destination.label)
-        .toolbarTitleDisplayMode(.inline)
+        .livestockScreenTitle(destination.label)
     }
 
     private func rowDetail(_ animal: Animal) -> String {
@@ -844,8 +955,12 @@ struct AnimalDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(animal.displayName).font(.largeTitle.bold())
-                        Text("\(animal.retirementDisplay) · \(animal.identifierSummary)").foregroundStyle(.secondary)
+                        Text(animal.displayName)
+                            .font(.largeTitle.bold())
+                            .fixedSize(horizontal: false, vertical: true)
+                        Text("\(animal.retirementDisplay) · \(animal.identifierSummary)")
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                         if store.session.isLive {
                             Text(FixturePresentationBoundary.classificationStoredBoundary)
                                 .font(.callout)
@@ -1191,8 +1306,15 @@ struct AnimalDetailView: View {
                     Text(FixturePresentationBoundary.deferredSliceDisclosure)
                         .font(.callout)
                         .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
+                #if os(iOS)
+                .labeledContentStyle(LivestockWrappingContentStyle())
+                .padding(.horizontal, 16)
+                .padding(.vertical, 12)
+                #else
                 .padding(24)
+                #endif
             }
             .onAppear { alignIdentifierChoices(for: animal) }
             .onChange(of: animal.id) { _, _ in alignIdentifierChoices(for: animal) }
@@ -1409,10 +1531,13 @@ struct AddAnimalSheet: View {
     }
 
     var body: some View {
+        ScrollView {
         VStack(alignment: .leading, spacing: 18) {
             Text(category.addLabel).font(.title2.bold())
+                .fixedSize(horizontal: false, vertical: true)
             Text(store.session.isLive ? FixturePresentationBoundary.databaseWriteBoundary : FixturePresentationBoundary.addAnimalBoundary)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
             Form {
                 TextField("Display name", text: $draft.displayName)
                 if category == .pets {
@@ -1458,28 +1583,49 @@ struct AddAnimalSheet: View {
                 }
             }
             .formStyle(.grouped)
-            if let confirmation { Label(confirmation, systemImage: "info.circle").foregroundStyle(.secondary) }
-            HStack {
-                Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(category.addLabel) {
-                    let entered = draft
-                    Task {
-                        switch await store.createAnimal(entered) {
-                        case .created:
-                            onCreated()
-                            dismiss()
-                        case .rejected(let message):
-                            confirmation = message
-                        }
-                    }
+            if let confirmation {
+                Label(confirmation, systemImage: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack {
+                    Spacer()
+                    Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
+                    addAnimalButton
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canSubmit)
+                VStack(alignment: .leading, spacing: 12) {
+                    addAnimalButton
+                    Button("Cancel") { dismiss() }
+                }
             }
         }
         .padding(24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        #if os(macOS)
         .frame(width: 520)
+        #endif
+        }
+        #if os(iOS)
+        .presentationDetents([.large])
+        #endif
+    }
+
+    private var addAnimalButton: some View {
+        Button(category.addLabel) {
+            let entered = draft
+            Task {
+                switch await store.createAnimal(entered) {
+                case .created:
+                    onCreated()
+                    dismiss()
+                case .rejected(let message):
+                    confirmation = message
+                }
+            }
+        }
+        .keyboardShortcut(.defaultAction)
+        .disabled(!canSubmit)
     }
 
     private func petMixField(_ title: String, text: Binding<String>) -> some View {

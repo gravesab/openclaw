@@ -80,7 +80,7 @@ struct LivestockRootView: View {
                 Section("Livestock") {
                     Label(LivestockDestination.liveStock.label, systemImage: LivestockDestination.liveStock.icon)
                         .tag(LivestockDestination.liveStock)
-                    if store.session.isLive, store.canEditStoredAnimal {
+                    if store.canEditStoredAnimal {
                         addAnimalRow(.liveStock)
                     }
                     Label(LivestockDestination.liveStockInactive.label, systemImage: LivestockDestination.liveStockInactive.icon)
@@ -90,7 +90,7 @@ struct LivestockRootView: View {
                 Section("Pets") {
                     Label(LivestockDestination.pets.label, systemImage: LivestockDestination.pets.icon)
                         .tag(LivestockDestination.pets)
-                    if store.session.isLive, store.canEditStoredAnimal {
+                    if store.canEditStoredAnimal {
                         addAnimalRow(.pets)
                     }
                     Label(LivestockDestination.petsInactive.label, systemImage: LivestockDestination.petsInactive.icon)
@@ -219,7 +219,7 @@ struct LivestockRootView: View {
                 status: herdStatus,
                 onChange: requestHerdChange,
                 onOpen: { destination = $0 },
-                onAdd: store.session.isLive && store.canEditStoredAnimal ? { category in
+                onAdd: store.canEditStoredAnimal ? { category in
                     addCategory = category
                     destination = category == .pets ? .pets : .liveStock
                     presentingAddAnimal = true
@@ -1410,7 +1410,7 @@ struct AddAnimalSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(category == .pets ? "Add pet" : category.addLabel).font(.title2.bold())
+            Text(category.addLabel).font(.title2.bold())
             Text(store.session.isLive ? FixturePresentationBoundary.databaseWriteBoundary : FixturePresentationBoundary.addAnimalBoundary)
                 .foregroundStyle(.secondary)
             Form {
@@ -1462,7 +1462,7 @@ struct AddAnimalSheet: View {
             HStack {
                 Spacer()
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(category == .pets ? "Add pet" : category.addLabel) {
+                Button(category.addLabel) {
                     let entered = draft
                     Task {
                         switch await store.createAnimal(entered) {

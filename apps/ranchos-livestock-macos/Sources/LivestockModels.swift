@@ -80,8 +80,8 @@ enum AnimalCategory: String, CaseIterable, Identifiable, Sendable {
     }
     var addLabel: String {
         switch self {
-        case .liveStock: "Add live stock"
-        case .pets: "Add pet"
+        case .liveStock: "Add livestock"
+        case .pets: "Add pets"
         }
     }
     var speciesChoices: [Species] {

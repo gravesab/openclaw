@@ -127,6 +127,35 @@ class LivestockPostgresRecordTests(unittest.TestCase):
         self.assertIn("'USD'", cost)
         self.assertIn("'per_animal'", cost)
 
+    def test_lifecycle_correction_keeps_the_original_event_and_requires_confirmation(self) -> None:
+        seen: list[str] = []
+
+        def runner(sql: str) -> str:
+            seen.append(sql)
+            if "SELECT reason FROM ranchos.livestock_animal_retirements" in sql:
+                return ""
+            if "supersedes_event_id" in sql and "incorrect_time" in sql:
+                return "11111111-2222-4333-8444-555555555581"
+            return ""
+
+        records = LivestockPostgresRecords(runner)
+        animal = "11111111-2222-4333-8444-555555555551"
+        event = "11111111-2222-4333-8444-555555555571"
+        when = "2026-10-08T20:00:00Z"
+        with self.assertRaises(LivestockPostgresError):
+            records.correct_lifecycle(animal, event, when, "incorrect_time", False)
+        self.assertEqual(seen, [])
+        with self.assertRaises(LivestockPostgresError):
+            records.correct_lifecycle(animal, event, when, "sold", True)
+        records.correct_lifecycle(animal, event, when, "incorrect_time", True)
+        correction = next(sql for sql in seen if "incorrect_time" in sql)
+        self.assertIn("target.event_type", correction)
+        self.assertIn("supersedes_event_id", correction)
+        self.assertIn(event, correction)
+        self.assertNotIn("'intake'", correction)
+        with self.assertRaises(LivestockPostgresError):
+            records.correct_lifecycle(animal, event, when, "incorrect_value", True)
+
     def test_cost_accepts_a_negative_correction_and_rejects_zero(self) -> None:
         seen: list[str] = []
 

@@ -478,6 +478,52 @@ struct LivestockReadConnection: Sendable {
         return .recorded(recorded)
     }
 
+    /// Session memory only. The original event stays, and the correction becomes current.
+    func correctFixtureLifecycleEvent(
+        animalID: Animal.ID,
+        eventID: UUID,
+        occurredAt: Date,
+        reason: LivestockLifecycleCorrectionReason,
+        confirmed: Bool
+    ) -> LivestockLifecycleResult {
+        guard case .fixture = session else {
+            return .rejected(FixturePresentationBoundary.lifecycleUnavailableBoundary)
+        }
+        guard fixtureWriteRole.canCorrectLifecycle else {
+            return .rejected(FixturePresentationBoundary.ownerCorrectsLifecycleBoundary)
+        }
+        guard confirmed else {
+            return .rejected(FixturePresentationBoundary.lifecycleCorrectionConfirmationBoundary)
+        }
+        guard let index = animals.firstIndex(where: { $0.id == animalID }) else {
+            return .rejected(FixturePresentationBoundary.lifecycleUnavailableBoundary)
+        }
+        if animals[index].retirementReason != nil {
+            return .rejected("a retired animal cannot receive care, feed, lifecycle, or cost records")
+        }
+        guard let targetIndex = animals[index].lifecycleEvents.firstIndex(where: { $0.id == eventID }) else {
+            return .rejected("lifecycle correction must supersede one matching event")
+        }
+        guard animals[index].lifecycleEvents[targetIndex].isCurrent else {
+            return .rejected(FixturePresentationBoundary.lifecycleAlreadyCorrectedBoundary)
+        }
+        var events = animals[index].lifecycleEvents
+        let target = events[targetIndex]
+        events[targetIndex].isCurrent = false
+        let correction = LivestockLifecycleEvent(
+            id: UUID(),
+            type: target.type,
+            occurredAt: occurredAt,
+            supersedesEventID: target.id,
+            correctionReason: reason,
+            isCurrent: true
+        )
+        events.append(correction)
+        animals[index] = animals[index].replacingLifecycleEvents(events)
+        session = .fixture(animals)
+        return .recorded(correction)
+    }
+
     func assignIdentifier(animalID: Animal.ID, kind: LivestockIdentifierKind, value: String) async -> LivestockIdentifierResult {
         if case .fixture = session {
             return assignFixtureIdentifier(animalID: animalID, kind: kind, value: value)
@@ -729,6 +775,54 @@ struct LivestockReadConnection: Sendable {
             try await liveRecords.recordLifecycle(animalID: animalID, type: type, occurredAt: occurredAt)
             await reloadLiveAnimal(animalID)
             return .recorded(LivestockLifecycleEvent(id: UUID(), type: type, occurredAt: occurredAt))
+        } catch {
+            return .rejected(errorText(error))
+        }
+    }
+
+    func correctLifecycleEvent(
+        animalID: Animal.ID,
+        eventID: UUID,
+        occurredAt: Date,
+        reason: LivestockLifecycleCorrectionReason,
+        confirmed: Bool
+    ) async -> LivestockLifecycleResult {
+        if case .fixture = session {
+            return correctFixtureLifecycleEvent(
+                animalID: animalID,
+                eventID: eventID,
+                occurredAt: occurredAt,
+                reason: reason,
+                confirmed: confirmed
+            )
+        }
+        guard let liveRecords, session.isLive else {
+            return .rejected(FixturePresentationBoundary.lifecycleUnavailableBoundary)
+        }
+        guard fixtureWriteRole.canCorrectLifecycle else {
+            return .rejected(FixturePresentationBoundary.ownerCorrectsLifecycleBoundary)
+        }
+        guard confirmed else {
+            return .rejected(FixturePresentationBoundary.lifecycleCorrectionConfirmationBoundary)
+        }
+        let eventType = animals.first { $0.id == animalID }?.lifecycleEvents.first { $0.id == eventID }?.type ?? .intake
+        do {
+            try await liveRecords.correctLifecycle(
+                animalID: animalID,
+                eventID: eventID,
+                occurredAt: occurredAt,
+                reason: reason
+            )
+            await reloadLiveAnimal(animalID)
+            return .recorded(
+                LivestockLifecycleEvent(
+                    id: eventID,
+                    type: eventType,
+                    occurredAt: occurredAt,
+                    supersedesEventID: eventID,
+                    correctionReason: reason
+                )
+            )
         } catch {
             return .rejected(errorText(error))
         }
@@ -995,6 +1089,13 @@ enum LivestockFixtureWriteRole: Equatable, Sendable {
     var canAssignIdentifier: Bool { canCreateAnimal }
 
     var canRecordLifecycle: Bool { canCreateAnimal }
+
+    var canCorrectLifecycle: Bool {
+        switch self {
+        case .owner: true
+        case .manager, .viewer: false
+        }
+    }
 }
 
 struct LivestockAnimalSaveDraft: Equatable, Sendable {
@@ -1330,8 +1431,18 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
     let token: String
     let tenantID: String
 
+    static func ticketURL() -> URL {
+        #if os(iOS)
+        let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        return support.appendingPathComponent("RanchOSLivestock/dev-read.json")
+        #else
+        return FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(ticketRelativePath)
+        #endif
+    }
+
     static func load(fileURL: URL? = nil, now: Date = Date()) -> LivestockDevLoopbackRead? {
-        let url = fileURL ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(ticketRelativePath)
+        let url = fileURL ?? ticketURL()
         guard
             let data = try? Data(contentsOf: url),
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -1344,7 +1455,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
             !token.isEmpty,
             !tenantID.isEmpty,
             let parsed = URL(string: base),
-            isLoopback(parsed)
+            acceptsDevURL(parsed)
         else {
             return nil
         }
@@ -1358,7 +1469,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         components.path = Self.animalsPath
         components.query = nil
         components.fragment = nil
-        guard let url = components.url, Self.isLoopback(url) else {
+        guard let url = components.url, Self.acceptsDevURL(url) else {
             throw LivestockDevReadError.refused
         }
         var request = URLRequest(url: url)
@@ -1402,6 +1513,21 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
     static func isLoopback(_ url: URL) -> Bool {
         guard url.scheme == "http", let host = url.host?.lowercased() else { return false }
         return host == "127.0.0.1" || host == "localhost"
+    }
+
+    /// The Mac app stays on this machine. The iPhone build may use this Mac's private address.
+    static func acceptsDevURL(_ url: URL) -> Bool {
+        if isLoopback(url) { return true }
+        #if os(iOS)
+        guard url.scheme == "http", let host = url.host else { return false }
+        let parts = host.split(separator: ".").compactMap { Int($0) }
+        guard parts.count == 4, parts.allSatisfy({ (0...255).contains($0) }) else { return false }
+        if parts[0] == 10 { return true }
+        if parts[0] == 192, parts[1] == 168 { return true }
+        if parts[0] == 172, (16...31).contains(parts[1]) { return true }
+        if parts[0] == 100, (64...127).contains(parts[1]) { return true }
+        #endif
+        return false
     }
 
     private static func animal(from row: [String: Any]) throws -> Animal {
@@ -1594,6 +1720,22 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         )
     }
 
+    func correctLifecycle(
+        animalID: Animal.ID,
+        eventID: UUID,
+        occurredAt: Date,
+        reason: LivestockLifecycleCorrectionReason
+    ) async throws {
+        try await post(
+            path: "\(Self.animalsPath)/\(animalID.uuidString)/lifecycle/\(eventID.uuidString)/correct",
+            body: [
+                "occurred_at": Self.stamp.string(from: occurredAt),
+                "reason": reason.rawValue,
+                "confirmed": true,
+            ]
+        )
+    }
+
     @discardableResult
     private func post(path: String, body: [String: Any]) async throws -> [String: Any] {
         guard var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false) else {
@@ -1602,7 +1744,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         components.path = path
         components.query = nil
         components.fragment = nil
-        guard let url = components.url, Self.isLoopback(url) else {
+        guard let url = components.url, Self.acceptsDevURL(url) else {
             throw LivestockDevReadError.refused
         }
         var request = URLRequest(url: url)
@@ -1662,7 +1804,17 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
             else {
                 return nil
             }
-            return LivestockLifecycleEvent(id: id, type: type, occurredAt: occurredAt)
+            let supersedes = (item["supersedes_event_id"] as? String).flatMap(UUID.init(uuidString:))
+            let reason = (item["correction_reason"] as? String).flatMap(LivestockLifecycleCorrectionReason.init(rawValue:))
+            let isCurrent = item["current"] as? Bool ?? true
+            return LivestockLifecycleEvent(
+                id: id,
+                type: type,
+                occurredAt: occurredAt,
+                supersedesEventID: supersedes,
+                correctionReason: reason,
+                isCurrent: isCurrent
+            )
         }
     }
 

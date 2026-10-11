@@ -23,15 +23,34 @@ struct LivestockBuildStamp: Equatable, Sendable {
     var headerDetail: String { "Version \(version) · Build \(build)" }
 
     static var current: LivestockBuildStamp {
-        let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? ""
-        let build = info?["CFBundleVersion"] as? String ?? ""
+        resolved(info: Bundle.main.infoDictionary, bundleIdentifier: Bundle.main.bundleIdentifier)
+    }
+
+    /// DEV and PROD both keep the bundle version and build. The environment comes from the app, not a fixed label.
+    static func resolved(info: [String: Any]?, bundleIdentifier: String?) -> LivestockBuildStamp {
+        let version = text(info?["CFBundleShortVersionString"]) ?? "0.1.0"
+        let build = text(info?["CFBundleVersion"]) ?? "1"
+        let declared = text(info?["LivestockEnvironment"])?.uppercased()
+        let environment: String
+        if let declared, declared == "DEV" || declared == "PROD" {
+            environment = declared
+        } else if bundleIdentifier?.localizedCaseInsensitiveContains(".dev") == true {
+            environment = "DEV"
+        } else {
+            environment = "PROD"
+        }
         return LivestockBuildStamp(
-            name: "Livestock Management",
-            environment: "DEV",
-            version: version.isEmpty ? "0.1.0" : version,
-            build: build.isEmpty ? "1" : build
+            name: "Livestock \(environment)",
+            environment: environment,
+            version: version,
+            build: build
         )
+    }
+
+    private static func text(_ value: Any?) -> String? {
+        guard let value = value as? String else { return nil }
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -522,6 +541,21 @@ enum LivestockLifecycleEventType: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+enum LivestockLifecycleCorrectionReason: String, CaseIterable, Identifiable, Sendable {
+    case incorrectTime = "incorrect_time"
+    case incorrectValue = "incorrect_value"
+    case duplicateEntry = "duplicate_entry"
+
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .incorrectTime: "Incorrect time"
+        case .incorrectValue: "Incorrect value"
+        case .duplicateEntry: "Duplicate entry"
+        }
+    }
+}
+
 enum LivestockCareEventType: String, CaseIterable, Identifiable, Sendable {
     case observation, treatment, surgery, vaccination
     case medicationAdministration = "medication_administration"
@@ -837,8 +871,22 @@ struct LivestockLifecycleEvent: Identifiable, Equatable, Sendable {
     let id: UUID
     let type: LivestockLifecycleEventType
     let occurredAt: Date
+    var supersedesEventID: UUID? = nil
+    var correctionReason: LivestockLifecycleCorrectionReason? = nil
+    var isCurrent: Bool = true
 
     var summary: String { type.label }
+
+    var historyTitle: String {
+        var title = type.label
+        if let correctionReason {
+            title += " · \(correctionReason.label)"
+        }
+        if !isCurrent {
+            title += " · earlier record"
+        }
+        return title
+    }
 }
 
 struct LivestockAnimalIdentifier: Identifiable, Equatable, Sendable {
@@ -1268,6 +1316,9 @@ enum FixturePresentationBoundary {
     static let lifecycleBoundary = "Fixture session only — routine lifecycle events are appended in time order and are not written to a database or disk."
     static let lifecycleUnavailableBoundary = "Lifecycle recording is unavailable on a live or missing read."
     static let viewerCannotRecordLifecycleBoundary = "A viewer cannot record a lifecycle event."
+    static let ownerCorrectsLifecycleBoundary = "Only an owner can correct a lifecycle event."
+    static let lifecycleCorrectionConfirmationBoundary = "A lifecycle correction requires confirmation."
+    static let lifecycleAlreadyCorrectedBoundary = "That lifecycle event already has a correction."
     static let lifecycleOrderBoundary = "Routine lifecycle events must be later than the latest event for this animal."
     static let databaseWriteBoundary = "Saved in the DEV livestock database."
     static let saveConfirmsBoundary = "Save writes what you entered. Saving confirms surgery, vaccination, medication, and cost."

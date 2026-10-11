@@ -22,6 +22,7 @@ LIVESTOCK_RETIREMENT_REASONS = frozenset({"deceased", "processed", "sold"})
 PET_RETIREMENT_REASONS = frozenset({"rehomed", "deceased", "lost"})
 RETIREMENT_REASONS = LIVESTOCK_RETIREMENT_REASONS | PET_RETIREMENT_REASONS
 LIFECYCLE_TYPES = frozenset({"intake", "tagged", "weight_recorded"})
+LIFECYCLE_CORRECTION_REASONS = frozenset({"incorrect_time", "incorrect_value", "duplicate_entry"})
 CARE_TYPES = frozenset({"observation", "treatment", "surgery", "vaccination", "medication_administration"})
 HIGH_IMPACT_CARE = frozenset({"surgery", "vaccination", "medication_administration"})
 INPUT_TYPES = frozenset({"feed", "hay", "mineral", "supplement", "dry_food", "wet_food"})
@@ -460,6 +461,29 @@ class LivestockPostgresRecords:
         if not inserted:
             raise LivestockPostgresError("routine lifecycle events must be later than the latest event for this animal")
 
+    def correct_lifecycle(
+        self,
+        animal_id: str,
+        event_id: str,
+        occurred_at: str,
+        reason: str,
+        confirmed: bool,
+    ) -> None:
+        require_uuid(animal_id)
+        require_uuid(event_id)
+        if not confirmed:
+            raise LivestockPostgresError("a lifecycle correction requires confirmation")
+        if reason not in LIFECYCLE_CORRECTION_REASONS:
+            raise LivestockPostgresError("lifecycle correction reason is not accepted")
+        if not _WHEN.match(occurred_at):
+            raise LivestockPostgresError("lifecycle time is not accepted")
+        self._assert_open_for_records(animal_id)
+        inserted = self._runner(
+            _session(self._lifecycle_correction_sql(animal_id, event_id, occurred_at, reason))
+        ).strip()
+        if not _UUID.match(inserted):
+            raise LivestockPostgresError("lifecycle correction must supersede one matching event")
+
     def _list_sql(self) -> str:
         return """
         SELECT COALESCE(json_agg(animal ORDER BY animal->>'display_name'), '[]'::json)::text
@@ -514,10 +538,16 @@ class LivestockPostgresRecords:
               SELECT COALESCE(json_agg(json_build_object(
                 'id', e.id,
                 'type', e.event_type,
-                'occurred_at', to_char(e.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+                'occurred_at', to_char(e.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+                'supersedes_event_id', e.supersedes_event_id,
+                'correction_reason', e.correction_reason,
+                'current', NOT EXISTS (
+                  SELECT 1 FROM ranchos.livestock_lifecycle_events newer
+                  WHERE newer.tenant_id = e.tenant_id AND newer.supersedes_event_id = e.id
+                )
               ) ORDER BY e.occurred_at, e.id), '[]'::json)
               FROM ranchos.livestock_lifecycle_events e
-              WHERE e.tenant_id = a.tenant_id AND e.animal_id = a.id AND e.supersedes_event_id IS NULL
+              WHERE e.tenant_id = a.tenant_id AND e.animal_id = a.id
             ),
             'care_events', (
               SELECT COALESCE(json_agg(json_build_object(
@@ -779,6 +809,29 @@ class LivestockPostgresRecords:
             AND e.supersedes_event_id IS NULL
             AND e.occurred_at >= {when}::timestamptz
         )
+        RETURNING id::text
+        """
+
+    def _lifecycle_correction_sql(self, animal_id: str, event_id: str, occurred_at: str, reason: str) -> str:
+        when = quote(occurred_at)
+        return f"""
+        INSERT INTO ranchos.livestock_lifecycle_events (
+          tenant_id, id, animal_id, event_type, occurred_at,
+          supersedes_event_id, correction_reason,
+          provenance_source_type, provenance_source_id, provenance_source_version, provenance_observed_at,
+          created_by_user_id
+        )
+        SELECT {quote(TENANT_UUID)}, gen_random_uuid(), target.animal_id, target.event_type, {when}::timestamptz,
+               target.id, {quote(reason)},
+               'ranch_record', gen_random_uuid()::text, 'read-model-v1', CURRENT_TIMESTAMP, {quote(USER_UUID)}
+        FROM ranchos.livestock_lifecycle_events target
+        WHERE target.tenant_id = {quote(TENANT_UUID)}
+          AND target.id = {quote(event_id)}
+          AND target.animal_id = {quote(animal_id)}
+          AND NOT EXISTS (
+            SELECT 1 FROM ranchos.livestock_lifecycle_events newer
+            WHERE newer.tenant_id = target.tenant_id AND newer.supersedes_event_id = target.id
+          )
         RETURNING id::text
         """
 

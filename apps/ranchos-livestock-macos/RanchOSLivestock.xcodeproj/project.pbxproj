@@ -8,11 +8,18 @@
 
 /* Begin PBXBuildFile section */
 		33ECEE1751A8A518AAA2E479 /* LivestockFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */; };
+		445F8030555C56724F790949 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
+		4DFCE36B1BBBC83B21CF4908 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
+		59F8580DDF40D2117B4BB7F1 /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */; };
 		6AD78D1FE6581C440F3F3BD9 /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
+		6FACCCF53DA5210E489A2ABF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
+		94A303A6C73EA22CF26EB8A3 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
+		99694F77C6FDCB0DE9B688ED /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */; };
 		9D35B073E35A22AE1F2F7558 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
+		A23E8840AB52A7D706EB918C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
 		C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
 		CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
-		F8D5B02C3E704914B26D0F81 /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C4A91B2D6F4803A15C9E70 /* LivestockBillOfSale.swift */; };
+		EE92BBF222836B4D1C4E5AC2 /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -29,11 +36,14 @@
 		00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchOSLivestock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockFoundationTests.swift; sourceTree = "<group>"; };
 		2A2860A1F261143CB11FF3FE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		46A88D5E4C54F184977C59CA /* Info-iOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Info-iOS.plist"; sourceTree = "<group>"; };
 		6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockApp.swift; sourceTree = "<group>"; };
+		89955DB67DD5F0FD424A1077 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B36A1F34997943B0E0F0810E /* LivestockRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockRepository.swift; sourceTree = "<group>"; };
 		B868FD8D507ED4A71444C1CD /* RanchOSLivestockTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSLivestockTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockModels.swift; sourceTree = "<group>"; };
-		E7C4A91B2D6F4803A15C9E70 /* LivestockBillOfSale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockBillOfSale.swift; sourceTree = "<group>"; };
+		E880ABF0AA51C2642375F81C /* RanchOSLivestockiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSLivestockiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockBillOfSale.swift; sourceTree = "<group>"; };
 		FD2F52D32BEAB94A8513033F /* LivestockViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -50,8 +60,10 @@
 		E944E450123AAC69A3E4DF1E /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				89955DB67DD5F0FD424A1077 /* Assets.xcassets */,
+				46A88D5E4C54F184977C59CA /* Info-iOS.plist */,
 				2A2860A1F261143CB11FF3FE /* Info.plist */,
-				E7C4A91B2D6F4803A15C9E70 /* LivestockBillOfSale.swift */,
+				EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */,
 				D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */,
 				B36A1F34997943B0E0F0810E /* LivestockRepository.swift */,
 				FD2F52D32BEAB94A8513033F /* LivestockViews.swift */,
@@ -64,6 +76,7 @@
 			isa = PBXGroup;
 			children = (
 				00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */,
+				E880ABF0AA51C2642375F81C /* RanchOSLivestockiOS.app */,
 				B868FD8D507ED4A71444C1CD /* RanchOSLivestockTests.xctest */,
 			);
 			name = Products;
@@ -80,11 +93,30 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		415563B418A6C90A9FC9F325 /* RanchOSLivestockiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A507DB305957BF5E945B8346 /* Build configuration list for PBXNativeTarget "RanchOSLivestockiOS" */;
+			buildPhases = (
+				81A8FE421E94E965AFD81A4E /* Sources */,
+				5A78D993697BCB641CBD25E2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOSLivestockiOS;
+			packageProductDependencies = (
+			);
+			productName = RanchOSLivestockiOS;
+			productReference = E880ABF0AA51C2642375F81C /* RanchOSLivestockiOS.app */;
+			productType = "com.apple.product-type.application";
+		};
 		55761CE9C6F69E36DE5E949C /* RanchOSLivestock */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 2D22F6A85FB600D01984CAC7 /* Build configuration list for PBXNativeTarget "RanchOSLivestock" */;
 			buildPhases = (
 				74A62444987654E76743E077 /* Sources */,
+				CFB59437CC01ED321F47D2BC /* Resources */,
 			);
 			buildRules = (
 			);
@@ -124,6 +156,10 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
+					415563B418A6C90A9FC9F325 = {
+						DevelopmentTeam = ZYJVHJWT3P;
+						ProvisioningStyle = Automatic;
+					};
 					55761CE9C6F69E36DE5E949C = {
 						DevelopmentTeam = ZYJVHJWT3P;
 						ProvisioningStyle = Automatic;
@@ -148,21 +184,53 @@
 			projectRoot = "";
 			targets = (
 				55761CE9C6F69E36DE5E949C /* RanchOSLivestock */,
+				415563B418A6C90A9FC9F325 /* RanchOSLivestockiOS */,
 				8CB561BD755C93AEC63C80F6 /* RanchOSLivestockTests */,
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		5A78D993697BCB641CBD25E2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6FACCCF53DA5210E489A2ABF /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFB59437CC01ED321F47D2BC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A23E8840AB52A7D706EB918C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		74A62444987654E76743E077 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				F8D5B02C3E704914B26D0F81 /* LivestockBillOfSale.swift in Sources */,
+				59F8580DDF40D2117B4BB7F1 /* LivestockBillOfSale.swift in Sources */,
 				6AD78D1FE6581C440F3F3BD9 /* LivestockModels.swift in Sources */,
 				C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */,
 				CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */,
 				9D35B073E35A22AE1F2F7558 /* RanchOSLivestockApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81A8FE421E94E965AFD81A4E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				99694F77C6FDCB0DE9B688ED /* LivestockBillOfSale.swift in Sources */,
+				EE92BBF222836B4D1C4E5AC2 /* LivestockModels.swift in Sources */,
+				445F8030555C56724F790949 /* LivestockRepository.swift in Sources */,
+				94A303A6C73EA22CF26EB8A3 /* LivestockViews.swift in Sources */,
+				4DFCE36B1BBBC83B21CF4908 /* RanchOSLivestockApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -233,11 +301,11 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -266,6 +334,29 @@
 			};
 			name = Debug;
 		};
+		1ADF05D76DEA3B4DDB292FB1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Sources/Info-iOS.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.ios.dev;
+				PRODUCT_NAME = RanchOSLivestock;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		4F72CE9E16FD42FE6E9335E1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -280,6 +371,29 @@
 				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.dev.tests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/RanchOSLivestock.app/Contents/MacOS/RanchOSLivestock";
+			};
+			name = Debug;
+		};
+		6CFD380B4CC2DC19351A718C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Sources/Info-iOS.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.ios.dev;
+				PRODUCT_NAME = RanchOSLivestock;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -375,12 +489,12 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -405,6 +519,15 @@
 			buildConfigurations = (
 				BE6F35D6D626E33409D6B33D /* Debug */,
 				02EB20BD63B2B97B5830F59D /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		A507DB305957BF5E945B8346 /* Build configuration list for PBXNativeTarget "RanchOSLivestockiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6CFD380B4CC2DC19351A718C /* Debug */,
+				1ADF05D76DEA3B4DDB292FB1 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

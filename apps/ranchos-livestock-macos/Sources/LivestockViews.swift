@@ -10,8 +10,8 @@ enum LivestockDestination: String, CaseIterable, Identifiable {
         case .createHerd: "Create herd"
         case .herdsInactive: "Herds that have been retired"
         case .liveStock: AnimalCategory.liveStock.label
-        case .liveStockInactive: "Live stock that have been retired"
-        case .petsInactive: "Pets that have been retired"
+        case .liveStockInactive: "Livestock retired to a better life"
+        case .petsInactive: "Pets retired to a better life"
         case .pets: AnimalCategory.pets.label
         }
     }
@@ -60,7 +60,7 @@ struct LivestockRootView: View {
     var body: some View {
         NavigationSplitView {
             List(selection: $destination) {
-                Section("Livestock Management") {
+                Section("Herds") {
                     Label(LivestockDestination.overview.label, systemImage: LivestockDestination.overview.icon)
                         .tag(LivestockDestination.overview)
                     if store.canEditStoredAnimal {
@@ -71,31 +71,31 @@ struct LivestockRootView: View {
                             Label(LivestockDestination.createHerd.label, systemImage: LivestockDestination.createHerd.icon)
                         }
                         .buttonStyle(.plain)
-                        .padding(.leading, 18)
                         .accessibilityLabel("Create herd")
                     }
                     Label(LivestockDestination.herdsInactive.label, systemImage: LivestockDestination.herdsInactive.icon)
-                        .padding(.leading, 18)
                         .tag(LivestockDestination.herdsInactive)
                         .accessibilityLabel("Herds that have been retired")
+                }
+                Section("Livestock") {
                     Label(LivestockDestination.liveStock.label, systemImage: LivestockDestination.liveStock.icon)
                         .tag(LivestockDestination.liveStock)
                     if store.session.isLive, store.canEditStoredAnimal {
                         addAnimalRow(.liveStock)
                     }
                     Label(LivestockDestination.liveStockInactive.label, systemImage: LivestockDestination.liveStockInactive.icon)
-                        .padding(.leading, 18)
                         .tag(LivestockDestination.liveStockInactive)
-                        .accessibilityLabel("Live stock that have been retired")
+                        .accessibilityLabel("Livestock retired to a better life")
+                }
+                Section("Pets") {
                     Label(LivestockDestination.pets.label, systemImage: LivestockDestination.pets.icon)
                         .tag(LivestockDestination.pets)
                     if store.session.isLive, store.canEditStoredAnimal {
                         addAnimalRow(.pets)
                     }
                     Label(LivestockDestination.petsInactive.label, systemImage: LivestockDestination.petsInactive.icon)
-                        .padding(.leading, 18)
                         .tag(LivestockDestination.petsInactive)
-                        .accessibilityLabel("Pets that have been retired")
+                        .accessibilityLabel("Pets retired to a better life")
                 }
                 Section("This herd") {
                     SessionStatusView(session: store.session)
@@ -112,6 +112,13 @@ struct LivestockRootView: View {
                 }
             }
             .navigationSplitViewColumnWidth(min: 240, ideal: 280)
+            .navigationTitle(LivestockBuildStamp.current.name)
+            .safeAreaInset(edge: .top, spacing: 0) {
+                LivestockIdentityBadge(stamp: .current)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 8)
+                    .padding(.bottom, 4)
+            }
             .safeAreaInset(edge: .bottom) {
                 Text(store.session.statusFooter)
                     .font(.caption)
@@ -123,11 +130,6 @@ struct LivestockRootView: View {
                 .navigationSplitViewColumnWidth(min: 300, ideal: 360)
         } detail: {
             detailContent
-        }
-        .toolbar {
-            ToolbarItem(placement: .principal) {
-                LivestockBuildHeader(stamp: .current)
-            }
         }
         .sheet(isPresented: $presentingAddAnimal) {
             AddAnimalSheet(store: store, category: addCategory) {
@@ -190,7 +192,6 @@ struct LivestockRootView: View {
             Label(category.addLabel, systemImage: "plus")
         }
         .buttonStyle(.plain)
-        .padding(.leading, 18)
         .accessibilityLabel(category.addLabel)
     }
 
@@ -213,7 +214,17 @@ struct LivestockRootView: View {
     @ViewBuilder private var destinationContent: some View {
         switch destination ?? .overview {
         case .overview, .createHerd:
-            HerdAnimalBrowser(store: store, status: herdStatus, onChange: requestHerdChange)
+            HerdAnimalBrowser(
+                store: store,
+                status: herdStatus,
+                onChange: requestHerdChange,
+                onOpen: { destination = $0 },
+                onAdd: store.session.isLive && store.canEditStoredAnimal ? { category in
+                    addCategory = category
+                    destination = category == .pets ? .pets : .liveStock
+                    presentingAddAnimal = true
+                } : nil
+            )
         case .herdsInactive: RetiredHerdsView(store: store, herdID: $retiredHerdID)
         case .liveStock: AnimalListView(store: store, destination: .liveStock)
         case .liveStockInactive: AnimalListView(store: store, destination: .liveStockInactive)
@@ -258,39 +269,30 @@ struct LivestockRootView: View {
     }
 }
 
-struct LivestockBuildHeader: View {
+struct LivestockIdentityBadge: View {
     let stamp: LivestockBuildStamp
 
     var body: some View {
-        HStack(spacing: 0) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(stamp.name)
-                .font(.headline)
-                .padding(.horizontal, 14)
-            headerDivider
-            Text(stamp.environment)
-                .font(.caption.weight(.bold))
-                .padding(.horizontal, 12)
-            headerDivider
-            headerFact("Version", stamp.version)
-            headerDivider
-            headerFact("Build", stamp.build)
+                .font(.caption.weight(.heavy))
+                .tracking(0.4)
+                .padding(.horizontal, 9)
+                .padding(.vertical, 5)
+                .foregroundStyle(.white)
+                .background(Color(red: 0.69, green: 0.51, blue: 0.12), in: Capsule())
+            Text(stamp.headerDetail)
+                .font(.subheadline.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(Color(red: 0.09, green: 0.13, blue: 0.10))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
         }
-        .padding(.vertical, 5)
-        .background(.quaternary, in: Capsule())
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(stamp.name), \(stamp.environment), \(stamp.headerDetail)")
-    }
-
-    private var headerDivider: some View {
-        Divider().frame(height: 22)
-    }
-
-    private func headerFact(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text(label).font(.caption2).foregroundStyle(.secondary)
-            Text(value).font(.callout.monospacedDigit().weight(.semibold))
-        }
-        .padding(.horizontal, 12)
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.96, green: 0.94, blue: 0.86), in: RoundedRectangle(cornerRadius: 14))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(stamp.name), \(stamp.headerDetail)")
     }
 }
 
@@ -327,6 +329,8 @@ struct HerdAnimalBrowser: View {
     @Bindable var store: LivestockStore
     var status: String?
     var onChange: (Animal, UUID?) -> Void
+    var onOpen: (LivestockDestination) -> Void
+    var onAdd: ((AnimalCategory) -> Void)?
 
     private var groups: [HerdSpeciesGroup] {
         let current = store.animals.filter { !$0.isRetired }
@@ -343,42 +347,83 @@ struct HerdAnimalBrowser: View {
         }
     }
 
+    private func categoryRow(_ destination: LivestockDestination, count: Int) -> some View {
+        Button {
+            onOpen(destination)
+        } label: {
+            HStack(spacing: 12) {
+                Label(destination.label, systemImage: destination.icon)
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Text("\(count)")
+                    .font(.title3.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .accessibilityLabel("\(destination.label), \(count)")
+    }
+
+    private func addRow(_ category: AnimalCategory) -> some View {
+        Button(category.addLabel, systemImage: "plus") {
+            onAdd?(category)
+        }
+        .accessibilityLabel(category.addLabel)
+    }
+
     var body: some View {
         Group {
             if case .loaded = store.overviewState, let overview = store.overview {
-                VStack(alignment: .leading, spacing: 12) {
-                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), alignment: .top)], alignment: .leading, spacing: 12) {
-                        OverviewCard(title: "Current livestock", value: "\(overview.currentLivestock)", detail: store.session.isLive ? "from the DEV database" : "sample session", icon: "pawprint")
-                        OverviewCard(title: "Live stock that have been retired", value: "\(overview.retiredLivestock)", detail: store.session.isLive ? "from the DEV database" : "sample session", icon: "archivebox")
-                        OverviewCard(title: "Current pets", value: "\(overview.currentPets)", detail: store.session.isLive ? "from the DEV database" : "sample session", icon: "dog")
-                        OverviewCard(title: "Pets that have been retired", value: "\(overview.retiredPets)", detail: store.session.isLive ? "from the DEV database" : "sample session", icon: "archivebox")
-                        OverviewCard(title: "Total cost", value: LivestockMoney.usd(overview.totalCost), detail: "cannot go below zero", icon: "dollarsign.circle")
+                List {
+                    Section("Livestock") {
+                        categoryRow(.liveStock, count: overview.currentLivestock)
+                        if onAdd != nil {
+                            addRow(.liveStock)
+                        }
+                        categoryRow(.liveStockInactive, count: overview.retiredLivestock)
                     }
-                    .padding(.horizontal, 16)
-                    .padding(.top, 12)
+                    Section("Pets") {
+                        categoryRow(.pets, count: overview.currentPets)
+                        if onAdd != nil {
+                            addRow(.pets)
+                        }
+                        categoryRow(.petsInactive, count: overview.retiredPets)
+                    }
+                    Section {
+                        LabeledContent("Total cost", value: LivestockMoney.usd(overview.totalCost))
+                        Text("cannot go below zero")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                     if let status, !status.isEmpty {
-                        Text(status).font(.callout).foregroundStyle(.secondary).padding(.horizontal, 16)
+                        Section {
+                            Text(status).font(.callout).foregroundStyle(.secondary)
+                        }
                     }
                     if groups.isEmpty {
-                        ContentUnavailableView("No current animals", systemImage: "pawprint", description: Text("Current livestock and pets appear here, grouped by species."))
+                        Section {
+                            Text("Current livestock and pets appear here, grouped by species.")
+                                .foregroundStyle(.secondary)
+                        }
                     } else {
-                        List {
-                            ForEach(groups) { group in
-                                Section(group.id) {
-                                    ForEach(group.animals) { animal in
-                                        HerdChoiceRow(
-                                            animal: animal,
-                                            herds: store.herds.filter { !$0.isRetired },
-                                            showsIdentity: false,
-                                            canEdit: store.canEditStoredAnimal,
-                                            onChange: onChange
-                                        )
-                                    }
+                        ForEach(groups) { group in
+                            Section(group.id) {
+                                ForEach(group.animals) { animal in
+                                    HerdChoiceRow(
+                                        animal: animal,
+                                        herds: store.herds.filter { !$0.isRetired },
+                                        showsIdentity: false,
+                                        canEdit: store.canEditStoredAnimal,
+                                        onChange: onChange
+                                    )
                                 }
                             }
                         }
                     }
                 }
+                #if os(iOS)
+                .listStyle(.insetGrouped)
+                #endif
             } else {
                 FixtureStateView(
                     title: "Herd overview",
@@ -389,6 +434,12 @@ struct HerdAnimalBrowser: View {
                     action: store.session.canOpenFixtureSession ? { Task { await store.loadFixtures() } } : nil
                 )
             }
+        }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            LivestockIdentityBadge(stamp: .current)
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+                .padding(.bottom, 4)
         }
         .navigationTitle("Herd overview")
         .toolbarTitleDisplayMode(.inline)
@@ -671,7 +722,7 @@ struct AnimalListView: View {
                     systemImage: destination.icon,
                     description: Text(
                         destination.showsInactive
-                            ? "These are the \(destination.category == .pets ? "pets" : "live stock") that have been retired, with the date and total cost."
+                            ? "These are the \(destination.category == .pets ? "pets" : "livestock") retired to a better life, with the date and total cost."
                             : "Use \(destination.category?.addLabel ?? "Add") in the left pane."
                     )
                 )
@@ -742,6 +793,10 @@ struct AnimalDetailView: View {
     @State private var pendingRetirement: IdentifierRetirementPrompt?
     @State private var lifecycleType: LivestockLifecycleEventType?
     @State private var occurredAt = Date()
+    @State private var correctingEventID: UUID?
+    @State private var correctionAt = Date()
+    @State private var correctionReason: LivestockLifecycleCorrectionReason?
+    @State private var pendingCorrection: LifecycleCorrectionPrompt?
     @State private var careType: LivestockCareEventType?
     @State private var careAt = Date()
     @State private var careCost = ""
@@ -781,6 +836,8 @@ struct AnimalDetailView: View {
     private var canEditIdentifiers: Bool { store.canEditStoredAnimal }
 
     private var canRecordLifecycle: Bool { store.canEditStoredAnimal }
+
+    private var canCorrectLifecycle: Bool { store.fixtureWriteRole.canCorrectLifecycle && store.canEditStoredAnimal }
 
     var body: some View {
         if let animal {
@@ -924,9 +981,42 @@ struct AnimalDetailView: View {
                         if animal.lifecycleEvents.isEmpty {
                             Text("No routine lifecycle history").foregroundStyle(.secondary)
                         } else {
-                            ForEach(animal.lifecycleEvents) { event in
-                                LabeledContent(event.type.label, value: event.occurredAt.formatted(date: .abbreviated, time: .shortened))
+                            ForEach(animal.lifecycleEvents.sorted { $0.occurredAt < $1.occurredAt }) { event in
+                                LabeledContent(event.historyTitle, value: event.occurredAt.formatted(date: .abbreviated, time: .shortened))
+                                if event.isCurrent, canCorrectLifecycle, animal.retirementReason == nil {
+                                    Button("Correct") {
+                                        correctingEventID = event.id
+                                        correctionAt = event.occurredAt
+                                        correctionReason = nil
+                                    }
+                                }
                             }
+                        }
+                        if let correcting = animal.lifecycleEvents.first(where: { $0.id == correctingEventID }),
+                           correcting.isCurrent,
+                           canCorrectLifecycle,
+                           animal.retirementReason == nil {
+                            Text("Correct \(correcting.type.label). The earlier record stays.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            DatePicker("Corrected time", selection: $correctionAt)
+                            Picker("Reason", selection: $correctionReason) {
+                                Text("Choose a reason").tag(nil as LivestockLifecycleCorrectionReason?)
+                                ForEach(LivestockLifecycleCorrectionReason.allCases) { item in
+                                    Text(item.label).tag(Optional(item))
+                                }
+                            }
+                            Button("Confirm correction") {
+                                guard let reason = correctionReason else { return }
+                                pendingCorrection = LifecycleCorrectionPrompt(
+                                    animalID: animal.id,
+                                    eventID: correcting.id,
+                                    eventLabel: correcting.type.label,
+                                    occurredAt: correctionAt,
+                                    reason: reason
+                                )
+                            }
+                            .disabled(correctionReason == nil)
                         }
                         if canRecordLifecycle, !animal.isRetired {
                             Picker("Event", selection: $lifecycleType) {
@@ -1141,6 +1231,43 @@ struct AnimalDetailView: View {
             } message: {
                 Text(retirementConfirmation(pendingRetirement))
             }
+            .alert(
+                "Correct this \(pendingCorrection?.eventLabel ?? "event")?",
+                isPresented: Binding(
+                    get: { pendingCorrection != nil },
+                    set: { if !$0 { pendingCorrection = nil } }
+                )
+            ) {
+                Button("Proceed") {
+                    guard let pending = pendingCorrection else { return }
+                    pendingCorrection = nil
+                    let animalID = pending.animalID
+                    let eventID = pending.eventID
+                    let occurredAt = pending.occurredAt
+                    let reason = pending.reason
+                    Task {
+                        let result = await store.correctLifecycleEvent(
+                            animalID: animalID,
+                            eventID: eventID,
+                            occurredAt: occurredAt,
+                            reason: reason,
+                            confirmed: true
+                        )
+                        if case .rejected(let text) = result {
+                            message = text
+                        } else {
+                            correctingEventID = nil
+                            correctionReason = nil
+                            message = store.session.isLive
+                                ? FixturePresentationBoundary.databaseWriteBoundary
+                                : "Corrected. The earlier record stays."
+                        }
+                    }
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("The earlier record stays. This correction becomes the current \(pendingCorrection?.eventLabel ?? "event").")
+            }
             .safeAreaInset(edge: .bottom) {
                 if let notice = store.saveNotice, notice.animalID == animalID {
                     Label(notice.message, systemImage: notice.succeeded ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
@@ -1194,6 +1321,16 @@ private extension AnimalDetailView {
         }
         return "Retire \(subject) as \(reason). This cannot be undone. Do you want to proceed, or do you want to cancel?"
     }
+}
+
+private struct LifecycleCorrectionPrompt: Identifiable {
+    let animalID: Animal.ID
+    let eventID: UUID
+    let eventLabel: String
+    let occurredAt: Date
+    let reason: LivestockLifecycleCorrectionReason
+
+    var id: UUID { eventID }
 }
 
 private struct IdentifierRetirementPrompt: Identifiable {

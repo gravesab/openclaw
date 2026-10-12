@@ -378,7 +378,7 @@ struct MacAssetDetailPanel: View {
                         if hasInServiceDate {
                             DatePicker("Date", selection: $inServiceDate, displayedComponents: .date)
                         }
-                        Button(isSavingInService ? "Saving…" : "Save in-service date") {
+                        Button(isSavingInService ? "Saving…" : "Date put into Service") {
                             Task { await saveInServiceDate() }
                         }
                         .disabled(isSavingInService || editedInServiceDate == asset.placedInServiceDate)

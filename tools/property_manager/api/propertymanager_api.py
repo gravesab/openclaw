@@ -404,6 +404,7 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
 
     # One query for all meters: a per-task lookup made GET /tasks exceed client timeouts.
     meters_by_asset = ms.fetch_meter_rows([str(row["asset_id"]) for row in rows if row.get("asset_id")])
+    bypasses_by_task = ts.fetch_last_bypasses(ids)
     today = ts.ranch_today(datetime.now(timezone.utc))
 
     enriched = []
@@ -423,6 +424,9 @@ def enrich_tasks(rows: list[dict]) -> list[dict]:
             if meter_row:
                 current_meter = ms._as_decimal(meter_row.get("current_value"))
             item = ms.enrich_task_meter_fields(item, current_meter)
+        bypass = bypasses_by_task.get(task_id)
+        item["last_bypass_action"] = bypass["action"] if bypass else None
+        item["last_bypassed_at"] = bypass["created_at"] if bypass else None
         item["deferred"] = ts.is_deferred(item.get("deferred_until"), today)
         if item["deferred"]:
             item["due_meter"] = False

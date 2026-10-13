@@ -189,6 +189,62 @@ def apply_schedule_change(
     return updated is not None
 
 
+def fetch_last_bypasses(task_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Latest skip or reschedule per task, only while no completion has followed it."""
+    if not task_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(task_ids))
+    rows = pm_db.execute_json(
+        f"""
+        WITH latest AS (
+            SELECT DISTINCT ON (task_id) task_id, action, created_at
+            FROM propertymanager.maintenance_task_schedule_events
+            WHERE task_id IN ({placeholders})
+            ORDER BY task_id, created_at DESC
+        )
+        SELECT latest.task_id, latest.action, latest.created_at
+        FROM latest
+        JOIN propertymanager.maintenance_tasks t ON t.id = latest.task_id
+        WHERE t.last_done < latest.created_at
+          AND NOT EXISTS (
+              SELECT 1
+              FROM propertymanager.maintenance_completions c
+              WHERE c.task_id = latest.task_id AND c.completed_at >= latest.created_at
+          )
+        """,
+        task_ids,
+    )
+    return {str(row["task_id"]): row for row in rows}
+
+
+def fetch_last_bypasses(task_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """Latest skip or reschedule per task, only while no completion has followed it."""
+    if not task_ids:
+        return {}
+    placeholders = ", ".join(["%s"] * len(task_ids))
+    rows = pm_db.execute_json(
+        f"""
+        WITH latest AS (
+            SELECT DISTINCT ON (task_id) task_id, action, created_at
+            FROM propertymanager.maintenance_task_schedule_events
+            WHERE task_id IN ({placeholders})
+            ORDER BY task_id, created_at DESC
+        )
+        SELECT latest.task_id, latest.action, latest.created_at
+        FROM latest
+        JOIN propertymanager.maintenance_tasks t ON t.id = latest.task_id
+        WHERE t.last_done < latest.created_at
+          AND NOT EXISTS (
+              SELECT 1
+              FROM propertymanager.maintenance_completions c
+              WHERE c.task_id = latest.task_id AND c.completed_at >= latest.created_at
+          )
+        """,
+        task_ids,
+    )
+    return {str(row["task_id"]): row for row in rows}
+
+
 def fetch_schedule_events(task_id: str, *, limit: int = SCHEDULE_EVENT_LIMIT) -> list[dict[str, Any]]:
     return pm_db.execute_json(
         f"""

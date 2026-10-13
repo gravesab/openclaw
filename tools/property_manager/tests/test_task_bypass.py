@@ -280,5 +280,31 @@ class DeferredEnrichmentTests(unittest.TestCase):
         self.assertTrue(released["overdue_meter"])
 
 
+class LastBypassEnrichmentTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.api = _load_app()
+
+    def enrich(self, bypass_rows):
+        row = _task(id="task-1")
+
+        def execute_json(sql, params=None):
+            return bypass_rows if "maintenance_task_schedule_events" in sql else []
+
+        with mock.patch.object(self.api.pm_db, "execute_json", side_effect=execute_json), \
+             mock.patch.object(self.api.ms, "fetch_meter_rows", return_value={}):
+            return self.api.enrich_tasks([row])[0]
+
+    def test_task_reports_a_bypass_that_no_completion_has_followed(self):
+        enriched = self.enrich([{"task_id": "task-1", "action": "skip", "created_at": "2026-10-13T14:00:00+00:00"}])
+        self.assertEqual(enriched["last_bypass_action"], "skip")
+        self.assertEqual(enriched["last_bypassed_at"], "2026-10-13T14:00:00+00:00")
+
+    def test_task_without_an_open_bypass_reports_none(self):
+        enriched = self.enrich([])
+        self.assertIsNone(enriched["last_bypass_action"])
+        self.assertIsNone(enriched["last_bypassed_at"])
+
+
 if __name__ == "__main__":
     unittest.main()

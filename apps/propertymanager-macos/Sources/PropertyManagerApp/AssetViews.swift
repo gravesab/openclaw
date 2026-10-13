@@ -78,6 +78,7 @@ struct MacAssetsPanel: View {
                 }
                 TextField("Search assets or their tasks (any word)...", text: $assetSearchText)
                     .textFieldStyle(.roundedBorder)
+                    .voiceInput($assetSearchText)
                     .padding(.horizontal)
                     .padding(.bottom, 6)
                 HStack(spacing: 0) {
@@ -201,6 +202,7 @@ private struct NewAssetSheet: View {
 
             TextField("Asset name", text: $draft.name)
                 .textFieldStyle(.roundedBorder)
+                .voiceInput($draft.name)
 
             Picker("Category", selection: $draft.category) {
                 ForEach(categoryChoices, id: \.self) { Text($0).tag($0) }
@@ -208,10 +210,13 @@ private struct NewAssetSheet: View {
 
             HStack {
                 TextField("Manufacturer", text: $draft.manufacturer)
+                    .voiceInput($draft.manufacturer)
                 TextField("Model", text: $draft.model)
+                    .voiceInput($draft.model)
             }
             HStack {
                 TextField("Location", text: $draft.location)
+                    .voiceInput($draft.location)
                 Picker("Operating meter", selection: $draft.meterType) {
                     Text("Runtime hours").tag("runtime_hours")
                     Text("Mileage").tag("mileage")
@@ -336,6 +341,7 @@ struct MacAssetDetailPanel: View {
                             .textFieldStyle(.roundedBorder)
                             .font(.title3.bold())
                             .onSubmit { Task { await saveName() } }
+                            .voiceInput($renameText)
                     } else {
                         Text(asset.name).font(.title3.bold())
                     }
@@ -417,6 +423,7 @@ struct MacAssetDetailPanel: View {
                         .disabled(pendingPreview != nil)
                         TextField(entryMode.fieldLabel(for: asset.meter?.meterType), text: $valueText)
                         TextField("Note", text: $note)
+                            .voiceInput($note)
                         if let preview = pendingPreview {
                             if let prev = preview.previousValue, let proposed = preview.proposedValue {
                                 Text("Previous: \(prev) → Proposed: \(proposed)")
@@ -472,7 +479,7 @@ struct MacAssetDetailPanel: View {
                             ForEach(linkedTasks) { task in
                                 VStack(alignment: .leading, spacing: 4) {
                                     HStack(alignment: .firstTextBaseline) {
-                                        Text(TaskTitle.displayItemTitle(item: task.item, group: asset.name))
+                                        Text(TaskTitle.highlightingSafety(TaskTitle.displayItemTitle(item: task.item, group: asset.name)))
                                             .fontWeight(.semibold)
                                         Spacer()
                                         Text(task.origin == .manufacturer ? "Manufacturer" : "Owner-added")

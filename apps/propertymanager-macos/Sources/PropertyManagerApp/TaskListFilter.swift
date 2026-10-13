@@ -38,7 +38,26 @@ extension MaintenanceTask {
         return nextDue < endOfToday
     }
 
+    static let schedulingWindowDays = 14
+
+    /// Lists never show work further out than the two-week scheduling window.
+    /// Meter-only tasks have no real calendar date, so they show only when the meter says due.
+    func isInSchedulingWindow(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        if kind == .workRequest { return true }
+        if dueMeter == true || overdueMeter == true { return true }
+        if scheduleKind == "meter" { return false }
+        guard let windowEnd = calendar.date(
+            byAdding: .day,
+            value: Self.schedulingWindowDays + 1,
+            to: calendar.startOfDay(for: now)
+        ) else {
+            return true
+        }
+        return nextDue < windowEnd
+    }
+
     func matches(_ filter: TaskListFilter, now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard isInSchedulingWindow(now: now, calendar: calendar) else { return false }
         switch filter {
         case .toDo:
             return isToDo(now: now, calendar: calendar)

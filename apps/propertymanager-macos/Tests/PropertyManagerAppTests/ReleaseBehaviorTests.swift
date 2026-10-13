@@ -1,5 +1,26 @@
+import SwiftUI
 import XCTest
 @testable import PropertyManagerApp
+
+final class DictationJoinTests: XCTestCase {
+    func testDictationAddsToWhatIsAlreadyTyped() {
+        XCTAssertEqual(DictationButton.joined("", "Replace the belt"), "Replace the belt")
+        XCTAssertEqual(DictationButton.joined("Checked oil. ", "Replace the belt"), "Checked oil. Replace the belt")
+        XCTAssertEqual(DictationButton.joined("Checked oil", ""), "Checked oil")
+    }
+}
+
+final class SafetyTitleTests: XCTestCase {
+    func testEverySafetyInATitleIsRedAndBold() {
+        let title = TaskTitle.highlightingSafety("Safety Precautions before SAFETY check")
+        let highlighted = title.runs
+            .filter { $0.inlinePresentationIntent == .stronglyEmphasized && $0.foregroundColor == .red }
+            .map { String(title[$0.range].characters) }
+        XCTAssertEqual(highlighted, ["Safety", "SAFETY"])
+        XCTAssertEqual(String(title.characters), "Safety Precautions before SAFETY check")
+        XCTAssertTrue(TaskTitle.highlightingSafety("Replace drive belt").runs.allSatisfy { $0.foregroundColor == nil })
+    }
+}
 
 final class TaskListFilterTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_790_000_000)
@@ -37,7 +58,26 @@ final class TaskListFilterTests: XCTestCase {
         XCTAssertFalse(task(dueInDays: 10, warningDays: 14).matches(.overdue, now: now))
         XCTAssertFalse(task(dueInDays: 40, warningDays: 14).matches(.due, now: now))
         XCTAssertTrue(task(dueInDays: -2).matches(.overdue, now: now))
-        XCTAssertTrue(task(dueInDays: 400).matches(.all, now: now))
+        XCTAssertTrue(task(dueInDays: 10).matches(.all, now: now))
+    }
+
+    func testEveryViewStopsAtTheTwoWeekSchedulingWindow() {
+        for filter in TaskListFilter.allCases {
+            XCTAssertFalse(task(dueInDays: 15, warningDays: 30).matches(filter, now: now), filter.rawValue)
+            XCTAssertFalse(task(dueInDays: 400).matches(filter, now: now), filter.rawValue)
+        }
+        XCTAssertTrue(task(dueInDays: 14).matches(.all, now: now))
+        XCTAssertTrue(task(dueInDays: -90).matches(.all, now: now))
+
+        var meterOnly = task(dueInDays: 0)
+        meterOnly.scheduleKind = "meter"
+        XCTAssertFalse(meterOnly.matches(.all, now: now))
+        meterOnly.dueMeter = true
+        XCTAssertTrue(meterOnly.matches(.all, now: now))
+
+        var workRequest = task(dueInDays: 60)
+        workRequest.kind = .workRequest
+        XCTAssertTrue(workRequest.matches(.all, now: now))
     }
 
     func testSearchCoversPartsVendorsAndNotes() {

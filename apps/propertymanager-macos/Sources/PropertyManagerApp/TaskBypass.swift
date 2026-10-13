@@ -274,7 +274,7 @@ struct TaskBypassSheet: View {
             Text("Bypass task")
                 .font(.title2.weight(.semibold))
             VStack(alignment: .leading, spacing: 4) {
-                Text(task.item)
+                Text(TaskTitle.highlightingSafety(task.item))
                     .font(.headline)
                 Text("Next due: \(DateHelper.isoDate(task.nextDue))")
                     .foregroundStyle(.secondary)
@@ -310,6 +310,7 @@ struct TaskBypassSheet: View {
                     .font(.body)
                     .frame(minHeight: 60)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+                    .voiceInput($note)
             }
 
             if let localError {

@@ -87,6 +87,8 @@ struct PropertyManagerApp: App {
             ContentView(store: store)
                 .frame(minWidth: 1050, minHeight: 720)
                 .preferredColorScheme(AppAppearance.from(storageValue: appearanceRaw).colorScheme)
+                .fullWritingTools()
+                .onAppear { TextChecking.install() }
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         HStack(spacing: 6) {
@@ -242,6 +244,9 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
     /// Civil date (`YYYY-MM-DD`) a meter-scheduled task is held off To Do until.
     var deferredUntil: String? = nil
     var deferred: Bool? = nil
+    /// Set while the latest skip or reschedule has not been followed by a completion.
+    var lastBypassAction: String? = nil
+    var lastBypassedAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, area, item, category, kind, priority, frequency
@@ -252,7 +257,7 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         case manufacturer, sourceManualName, origin, partNumbers, referenceURLs, toolsRequired, parts, photoFileNames
         case manualImport
         case scheduleKind, meterIntervalValue, meterIntervalUnit, nextDueMeterValue, remainingMeter, dueMeter, overdueMeter, assetId
-        case deferredUntil, deferred
+        case deferredUntil, deferred, lastBypassAction, lastBypassedAt
     }
 
     init(
@@ -296,7 +301,9 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         overdueMeter: Bool? = nil,
         assetId: UUID? = nil,
         deferredUntil: String? = nil,
-        deferred: Bool? = nil
+        deferred: Bool? = nil,
+        lastBypassAction: String? = nil,
+        lastBypassedAt: String? = nil
     ) {
         self.id = id
         self.area = area
@@ -339,6 +346,8 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         self.assetId = assetId
         self.deferredUntil = deferredUntil
         self.deferred = deferred
+        self.lastBypassAction = lastBypassAction
+        self.lastBypassedAt = lastBypassedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -391,6 +400,8 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         assetId = try c.decodeIfPresent(UUID.self, forKey: .assetId)
         deferredUntil = try c.decodeIfPresent(String.self, forKey: .deferredUntil)
         deferred = try c.decodeIfPresent(Bool.self, forKey: .deferred)
+        lastBypassAction = try c.decodeIfPresent(String.self, forKey: .lastBypassAction)
+        lastBypassedAt = try c.decodeIfPresent(String.self, forKey: .lastBypassedAt)
     }
 
     /// Keep Mac-only editor fields when an API response omits them.
@@ -437,6 +448,8 @@ final class MaintenanceStore: ObservableObject {
     @Published var categories: [CategoryDefinition] = []
     @Published var selectedTaskID: UUID?
     @Published var statusMessage: String = "Ready"
+    /// Rescheduled tasks stay listed under any filter until the user clicks Refresh, so the new date is visible.
+    @Published private(set) var recentlyBypassedTaskIDs: Set<UUID> = []
     @Published var manualExtractionState: ManualExtractionState = .idle
     @Published var isOnline: Bool = false
     @Published var lastSyncAt: Date?
@@ -1202,7 +1215,10 @@ final class MaintenanceStore: ObservableObject {
             if selectedTaskID == nil || !tasks.contains(where: { $0.id == selectedTaskID }) {
                 selectedTaskID = tasks.first?.id
             }
-            ensureBuiltInCategories()
+            // The server list is authoritative: built-ins removed there must not reappear here.
+            if remoteCategories.isEmpty {
+                ensureBuiltInCategories()
+            }
             writeLocalCacheOnly()
             isOnline = true
             lastSyncAt = Date()
@@ -1366,7 +1382,8 @@ final class MaintenanceStore: ObservableObject {
         lastSyncAt = Date()
         hasLocalChanges = false
         persistSyncState()
-        statusMessage = "Completed · next due \(DateHelper.isoDate(completed.nextDue))"
+        let doneAt = (completed.lastDone ?? Date()).formatted(date: .abbreviated, time: .shortened)
+        statusMessage = "Done \(doneAt) · next due \(DateHelper.isoDate(completed.nextDue))"
 
         switch source {
         case .editor:
@@ -1411,6 +1428,9 @@ final class MaintenanceStore: ObservableObject {
         let local = tasks.first(where: { $0.id == task.id }) ?? task
         let bypassed = updated.mergingEditorFields(from: local)
         acceptServerTask(bypassed)
+        if case .reschedule = submission {
+            recentlyBypassedTaskIDs.insert(bypassed.id)
+        }
         isOnline = true
         lastSyncAt = Date()
         hasLocalChanges = false
@@ -1424,6 +1444,10 @@ final class MaintenanceStore: ObservableObject {
             await publishCalendarTasks([bypassed])
         }
         return nil
+    }
+
+    func clearRecentlyBypassed() {
+        recentlyBypassedTaskIDs.removeAll()
     }
 
     func addTask(category filterCategory: String? = nil, kind: TaskKind = .scheduled) {
@@ -2734,7 +2758,9 @@ struct ContentView: View {
         }
 
         let now = Date()
-        result = result.filter { $0.matches(listFilter, now: now) }
+        result = result.filter {
+            store.recentlyBypassedTaskIDs.contains($0.id) || $0.matches(listFilter, now: now)
+        }
 
         if let selectedCategoryFilter {
             result = result.filter { task in
@@ -2807,7 +2833,10 @@ struct ContentView: View {
                 connectionTestResult: store.connectionTestResult,
                 isTestingConnection: store.isTestingConnection,
                 testConnectionAction: { Task { await store.testConnection() } },
-                refreshAction: { Task { await store.refreshFromServer() } },
+                refreshAction: {
+                    store.clearRecentlyBypassed()
+                    Task { await store.refreshFromServer() }
+                },
                 importManualAction: {
                     store.chooseManualPDFAndImport { drafts, manufacturer in
                         manualDrafts = drafts
@@ -2889,7 +2918,19 @@ struct ContentView: View {
                                         task: task,
                                         groupName: section.name,
                                         assets: store.assets,
-                                        isSelected: task.id == store.selectedTaskID
+                                        isSelected: task.id == store.selectedTaskID,
+                                        onDone: {
+                                            store.selectedTaskID = task.id
+                                            completionRequest = TaskCompletionRequest(
+                                                task: task,
+                                                initialNote: TaskCompletionPolicy.initialNote(resultNotes: task.resultNotes),
+                                                source: .editor
+                                            )
+                                        },
+                                        onBypass: { action in
+                                            store.selectedTaskID = task.id
+                                            bypassRequest = TaskBypassRequest(task: task, action: action)
+                                        }
                                     )
                                     .onTapGesture {
                                         store.selectedTaskID = task.id
@@ -3376,6 +3417,7 @@ struct ConnectionStatusCard: View {
             TextField("http://host:5062", text: $apiBaseURL)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
+                .noWritingTools()
 
             Text("API Key")
                 .font(.caption2)
@@ -3390,6 +3432,7 @@ struct ConnectionStatusCard: View {
             TextField(AppEnvironment.defaultManualLibraryBaseURL, text: $manualLibraryBaseURL)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
+                .noWritingTools()
 
             Text("Operator PIN")
                 .font(.caption2)
@@ -3404,6 +3447,7 @@ struct ConnectionStatusCard: View {
             TextField(PropertyAPIClient.defaultOperatorIdentity, text: $operatorIdentity)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
+                .noWritingTools()
 
             Button(isTestingConnection ? "Testing…" : "Test Connection", action: testConnectionAction)
                 .controlSize(.small)
@@ -3625,6 +3669,7 @@ struct TaskListHeaderView: View {
             HStack {
                 TextField("Search tasks, parts, vendors (any word)...", text: $searchText)
                     .textFieldStyle(.roundedBorder)
+                    .voiceInput($searchText)
                 if !searchText.isEmpty {
                     Button {
                         searchText = ""
@@ -3817,6 +3862,7 @@ struct TaskListHeaderView: View {
                     .foregroundStyle(.secondary)
                 TextField("Category name", text: $newCategoryName)
                     .textFieldStyle(.roundedBorder)
+                    .voiceInput($newCategoryName)
                 HStack {
                     Button("Cancel") { showingAddCategory = false }
                     Spacer()
@@ -3859,6 +3905,8 @@ struct TaskRowView: View {
     let groupName: String
     let assets: [MacRanchAsset]
     let isSelected: Bool
+    var onDone: (() -> Void)?
+    var onBypass: ((TaskBypassAction) -> Void)?
 
     var body: some View {
         let displayTitle = TaskTitle.displayItemTitle(item: task.item, group: groupName)
@@ -3888,7 +3936,7 @@ struct TaskRowView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(displayTitle)
+                    Text(TaskTitle.highlightingSafety(displayTitle))
                         .fontWeight(.semibold)
                         .lineLimit(2)
                 }
@@ -3896,7 +3944,7 @@ struct TaskRowView: View {
                 Text(equipmentSubtitle(for: task))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
 
                 if let badge = task.meterBadge(assets: assets) {
                     Text(badge)
@@ -3904,13 +3952,23 @@ struct TaskRowView: View {
                         .foregroundStyle(task.overdueMeter == true ? Color.red : (task.dueMeter == true ? Color.orange : Color.secondary))
                 }
 
-                                Text("Est. \(task.estimatedMinutes) min  •  Due:\u{00A0}\(DateHelper.isoDate(task.nextDue))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                ViewThatFits(in: .horizontal) {
+                    Text("Est. \(task.estimatedMinutes) min  •  Due:\u{00A0}\(DateHelper.isoDate(task.nextDue))")
+                        .fixedSize()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Est. \(task.estimatedMinutes) min")
+                        Text("Due:\u{00A0}\(DateHelper.isoDate(task.nextDue))")
+                            .fixedSize()
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if task.lastBypassedAt != nil {
+                    Label("Bypassed", systemImage: "arrow.uturn.forward.circle")
+                        .font(.caption2)
+                        .foregroundStyle(.indigo)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -3936,6 +3994,27 @@ struct TaskRowView: View {
                     .background(statusColor.opacity(0.14))
                     .foregroundStyle(statusColor)
                     .clipShape(Capsule())
+
+                if let onDone, TaskBypassPolicy.canBypass(task) {
+                    Button("Done", action: onDone)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.green)
+                        .fixedSize()
+                        .help("Mark this task finished. The server records today's date and time.")
+                }
+
+                if let onBypass, TaskBypassPolicy.canBypass(task) {
+                    TaskBypassMenu(task: task, onSelect: onBypass) {
+                        Text("Bypass")
+                    }
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.indigo)
+                    .fixedSize()
+                    .help("Skip to the next due date or reschedule, without marking the task done.")
+                }
             }
         }
         .padding(12)
@@ -4454,6 +4533,7 @@ struct TaskEditorView: View {
                 LabeledField(title: "Item (Shared)") {
                     TextField("Item", text: $task.item)
                         .textFieldStyle(.roundedBorder)
+                        .voiceInput($task.item)
                 }
 
                 HStack(spacing: 16) {
@@ -4481,6 +4561,7 @@ struct TaskEditorView: View {
                 LabeledField(title: "Description") {
                     TextField("Description", text: $task.taskDescription, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
+                        .voiceInput($task.taskDescription)
                 }
             }
         }
@@ -4594,10 +4675,12 @@ struct TaskEditorView: View {
                         RoundedRectangle(cornerRadius: 10)
                             .stroke(Color.secondary.opacity(0.25))
                     )
+                    .voiceInput($task.responseInstructions)
 
                 LabeledField(title: "Supplies Needed") {
                     TextField("Supplies Needed", text: $task.suppliesNeeded, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
+                        .voiceInput($task.suppliesNeeded)
                 }
 
                 LabeledField(title: "Extra Notes") {
@@ -4612,6 +4695,7 @@ struct TaskEditorView: View {
                                 .stroke(Color.secondary.opacity(0.25))
                         )
                         .accessibilityLabel("Extra Notes")
+                        .voiceInput($task.notes)
                 }
             }
         }
@@ -4636,11 +4720,13 @@ struct TaskEditorView: View {
                     LabeledField(title: "Manufacturer") {
                         TextField("Manufacturer", text: $task.manufacturer)
                             .textFieldStyle(.roundedBorder)
+                            .voiceInput($task.manufacturer)
                     }
                     LabeledField(title: "Source Manual") {
                         HStack {
                             TextField("Manual file name or URL", text: $task.sourceManualName)
                                 .textFieldStyle(.roundedBorder)
+                                .noWritingTools()
                             if let url = ManualSourceLink.url(
                                 provenanceURL: task.manualImport?.provenance.originalURL,
                                 displayName: task.sourceManualName,
@@ -4674,6 +4760,7 @@ struct TaskEditorView: View {
                             HStack(spacing: 8) {
                                 TextField("Part name (e.g. Engine oil)", text: $task.parts[index].name)
                                     .textFieldStyle(.roundedBorder)
+                                    .voiceInput($task.parts[index].name)
                                 Button(role: .destructive) {
                                     task.parts.remove(at: index)
                                 } label: {
@@ -4684,13 +4771,16 @@ struct TaskEditorView: View {
                             HStack(spacing: 8) {
                                 TextField("OEM part number", text: $task.parts[index].oemPartNumber)
                                     .textFieldStyle(.roundedBorder)
+                                    .noWritingTools()
                                 TextField("Part number", text: $task.parts[index].partNumber)
                                     .textFieldStyle(.roundedBorder)
+                                    .noWritingTools()
                             }
 
                             HStack(spacing: 8) {
                                 TextField("Buy URL", text: $task.parts[index].buyURL)
                                     .textFieldStyle(.roundedBorder)
+                                    .noWritingTools()
                                 TextField(
                                     "Cost",
                                     value: $task.parts[index].cost,
@@ -4729,11 +4819,14 @@ struct TaskEditorView: View {
                         HStack(spacing: 8) {
                             TextField("Tool", text: $task.toolsRequired[index].name)
                                 .textFieldStyle(.roundedBorder)
+                                .voiceInput($task.toolsRequired[index].name)
                             TextField("Size", text: $task.toolsRequired[index].size)
                                 .textFieldStyle(.roundedBorder)
+                                .noWritingTools()
                                 .frame(maxWidth: 100)
                             TextField("Notes", text: $task.toolsRequired[index].notes)
                                 .textFieldStyle(.roundedBorder)
+                                .voiceInput($task.toolsRequired[index].notes)
                             Button(role: .destructive) {
                                 task.toolsRequired.remove(at: index)
                             } label: {
@@ -4756,7 +4849,9 @@ struct TaskEditorView: View {
 
         CardView(title: "Response Preview", icon: "eye") {
             VStack(alignment: .leading, spacing: 10) {
-                Text(TaskTitle.displayFullTitle(area: task.area, item: task.item, assetId: task.assetId, assets: assets))
+                Text(TaskTitle.highlightingSafety(
+                    TaskTitle.displayFullTitle(area: task.area, item: task.item, assetId: task.assetId, assets: assets)
+                ))
                     .font(.headline)
                     .fontWeight(.bold)
 
@@ -4838,6 +4933,7 @@ struct TaskEditorView: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .stroke(Color.secondary.opacity(0.25))
                         )
+                        .voiceInput($task.resultNotes)
                 }
             }
         }
@@ -5088,6 +5184,7 @@ struct URLManualImportSheet: View {
 
             TextField("https://manuals.example.com/.../toc.html", text: $urlText)
                 .textFieldStyle(.roundedBorder)
+                .noWritingTools()
                 .disabled(isFetching)
 
             if isFetching || statusMessage.localizedCaseInsensitiveContains("Fetching manual")
@@ -5555,6 +5652,7 @@ struct ManualLibrarySheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Search library PDFs (any word)...", text: $librarySearch)
                     .textFieldStyle(.roundedBorder)
+                    .voiceInput($librarySearch)
                 if !libraryError.isEmpty {
                     Text(libraryError)
                         .font(.caption)

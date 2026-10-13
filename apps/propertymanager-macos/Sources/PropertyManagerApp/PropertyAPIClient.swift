@@ -907,6 +907,8 @@ private struct APITaskDTO: Decodable {
     let assetId: UUID?
     let deferredUntil: String?
     let deferred: Bool?
+    let lastBypassAction: String?
+    let lastBypassedAt: String?
 
     enum CodingKeys: String, CodingKey {
         case id, area, item, kind, priority, frequency, notes, manufacturer, origin, parts, photos
@@ -937,6 +939,8 @@ private struct APITaskDTO: Decodable {
         case assetId = "asset_id"
         case deferredUntil = "deferred_until"
         case deferred
+        case lastBypassAction = "last_bypass_action"
+        case lastBypassedAt = "last_bypassed_at"
     }
 
     init(from decoder: Decoder) throws {
@@ -979,6 +983,8 @@ private struct APITaskDTO: Decodable {
         assetId = try c.decodeIfPresent(UUID.self, forKey: .assetId)
         deferredUntil = try c.decodeIfPresent(String.self, forKey: .deferredUntil)
         deferred = try c.decodeIfPresent(Bool.self, forKey: .deferred)
+        lastBypassAction = try c.decodeIfPresent(String.self, forKey: .lastBypassAction)
+        lastBypassedAt = try c.decodeIfPresent(String.self, forKey: .lastBypassedAt)
     }
 
     private 
@@ -1076,7 +1082,9 @@ private struct APITaskDTO: Decodable {
             overdueMeter: overdueMeter,
             assetId: assetId,
             deferredUntil: deferredUntil,
-            deferred: deferred
+            deferred: deferred,
+            lastBypassAction: lastBypassAction,
+            lastBypassedAt: lastBypassedAt
         )
     }
 

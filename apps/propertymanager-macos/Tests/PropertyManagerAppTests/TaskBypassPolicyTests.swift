@@ -91,6 +91,28 @@ final class TaskBypassPolicyTests: XCTestCase {
         XCTAssertEqual(held.meterBadge(assets: []), "Held until 2026-10-20")
     }
 
+    func testServerTaskKeepsTheBypassedMarkUntilTheNextCompletion() throws {
+        let client = PropertyAPIClient(baseURLString: "http://127.0.0.1:1")
+        let bypassedJSON = """
+        {"id": "4a9f1f5e-3d6b-4b5e-9a51-0d7f8c2a1b10", "area": "Equipment", "item": "Replace drive belt",
+         "category_name": "Equipment", "priority": "Medium", "frequency": "Monthly",
+         "warning_days": 7, "critical_days": 14, "next_due": "2026-11-13T17:00:00+00:00",
+         "last_bypass_action": "skip", "last_bypassed_at": "2026-10-13T14:54:17+00:00"}
+        """
+        let bypassed = try client.decodeTask(Data(bypassedJSON.utf8))
+        XCTAssertEqual(bypassed.lastBypassAction, "skip")
+        XCTAssertEqual(bypassed.lastBypassedAt, "2026-10-13T14:54:17+00:00")
+
+        let saved = try JSONDecoder().decode(MaintenanceTask.self, from: JSONEncoder().encode(bypassed))
+        XCTAssertEqual(saved.lastBypassedAt, bypassed.lastBypassedAt)
+
+        let completedJSON = bypassedJSON.replacingOccurrences(
+            of: "\"last_bypass_action\": \"skip\", \"last_bypassed_at\": \"2026-10-13T14:54:17+00:00\"",
+            with: "\"last_bypass_action\": null, \"last_bypassed_at\": null"
+        )
+        XCTAssertNil(try client.decodeTask(Data(completedJSON.utf8)).lastBypassedAt)
+    }
+
     func testScheduleEventsDecodeServerTimestamps() throws {
         let json = """
         {"id": "9b2d7c1e-5f3a-4e8b-a1c2-3d4e5f607182", "task_id": "4a9f1f5e-3d6b-4b5e-9a51-0d7f8c2a1b10",

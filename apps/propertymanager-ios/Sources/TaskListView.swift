@@ -32,7 +32,6 @@ struct TaskListView: View {
                         TaskRowView(
                             task: task,
                             groupName: section.name,
-                            wasBypassed: store.recentlyBypassedTaskIDs.contains(task.id),
                             onComplete: { completingTask = task },
                             onBypass: { action in
                                 bypassRequest = TaskBypassRequest(task: task, action: action)
@@ -118,7 +117,6 @@ struct TaskListView: View {
 struct TaskRowView: View {
     let task: MaintenanceTask
     let groupName: String
-    var wasBypassed = false
     let onComplete: () -> Void
     let onBypass: (TaskBypassAction) -> Void
 
@@ -128,7 +126,7 @@ struct TaskRowView: View {
             // Whole row navigates to detail; Done stays outside the link.
             NavigationLink(value: task.id) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
+                    Text(TaskTitle.highlightingSafety(title))
                         .font(.headline)
                         .multilineTextAlignment(.leading)
                         .lineLimit(3)
@@ -142,7 +140,7 @@ struct TaskRowView: View {
                     Text(TaskTitle.dueDateLabel(date: task.nextDue))
                         .font(.caption)
                         .foregroundStyle(dueDateColor)
-                    if wasBypassed {
+                    if task.lastBypassedAt != nil {
                         Label("Bypassed", systemImage: "arrow.uturn.forward.circle")
                             .font(.caption2)
                             .foregroundStyle(.indigo)

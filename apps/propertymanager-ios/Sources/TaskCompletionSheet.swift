@@ -119,7 +119,7 @@ struct TaskCompletionSheet: View {
         NavigationStack {
             Form {
                 Section("Task") {
-                    Text(task.item)
+                    Text(TaskTitle.highlightingSafety(task.item))
                     LabeledContent("Completion time", value: "Recorded by the server")
                         .foregroundStyle(.secondary)
                 }
@@ -129,6 +129,7 @@ struct TaskCompletionSheet: View {
                 Section("Note") {
                     TextField("Completion note (optional)", text: $note, axis: .vertical)
                         .lineLimit(2...5)
+                        .voiceInput($note)
                 }
 
                 if let localError {

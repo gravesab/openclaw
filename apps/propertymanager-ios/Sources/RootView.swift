@@ -65,6 +65,7 @@ struct RootView: View {
                 }
             }
         }
+        .fullWritingTools()
         .task {
             await store.refresh()
             await store.refreshAssets()

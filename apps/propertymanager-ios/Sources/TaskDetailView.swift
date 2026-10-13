@@ -37,10 +37,10 @@ struct TaskDetailView: View {
 
                     Section("Task") {
                         LabeledContent("Area", value: task.area)
-                        LabeledContent("Item", value: {
+                        LabeledContent("Item") {
                             let group = TaskTitle.displayAssetName(task: task, assets: store.assets)
-                            return TaskTitle.displayItemTitle(item: task.item, group: group)
-                        }())
+                            Text(TaskTitle.highlightingSafety(TaskTitle.displayItemTitle(item: task.item, group: group)))
+                        }
                         LabeledContent("Category", value: task.categoryName)
                         HStack {
                             Text("Origin")

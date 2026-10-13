@@ -1,5 +1,26 @@
+import SwiftUI
 import XCTest
 @testable import PropertyManager
+
+final class SafetyTitleTests: XCTestCase {
+    func testEverySafetyInATitleIsRedAndBold() {
+        let title = TaskTitle.highlightingSafety("Seat belt safety and Safety Precautions")
+        let highlighted = title.runs
+            .filter { $0.inlinePresentationIntent == .stronglyEmphasized && $0.foregroundColor == .red }
+            .map { String(title[$0.range].characters) }
+        XCTAssertEqual(highlighted, ["safety", "Safety"])
+        XCTAssertEqual(String(title.characters), "Seat belt safety and Safety Precautions")
+        XCTAssertTrue(TaskTitle.highlightingSafety("Replace drive belt").runs.allSatisfy { $0.foregroundColor == nil })
+    }
+}
+
+final class DictationJoinTests: XCTestCase {
+    func testDictationAddsToWhatIsAlreadyTyped() {
+        XCTAssertEqual(DictationButton.joined("", "Replace the belt"), "Replace the belt")
+        XCTAssertEqual(DictationButton.joined("Checked oil. ", "Replace the belt"), "Checked oil. Replace the belt")
+        XCTAssertEqual(DictationButton.joined("Checked oil", ""), "Checked oil")
+    }
+}
 
 final class TaskBypassTests: XCTestCase {
     private let chicago: Calendar = {
@@ -81,7 +102,7 @@ final class TaskBypassTests: XCTestCase {
         XCTAssertEqual(store.filteredTasks.count, 1)
 
         let rescheduled = try task(["next_due": "2099-10-23T17:00:00+00:00"])
-        store.showBypassed(rescheduled)
+        store.showBypassed(rescheduled, keepListed: true)
 
         XCTAssertEqual(store.filteredTasks.map(\.nextDue), [rescheduled.nextDue])
         store.searchText = "pump"
@@ -89,6 +110,43 @@ final class TaskBypassTests: XCTestCase {
         store.searchText = ""
         store.clearRecentlyBypassed()
         XCTAssertTrue(store.filteredTasks.isEmpty)
+    }
+
+    func testListsStopAtTheTwoWeekSchedulingWindow() throws {
+        let now = Date(timeIntervalSince1970: 1_790_000_000)
+        func due(inDays days: Int, _ extra: [String: Any] = [:]) throws -> MaintenanceTask {
+            let date = Calendar.current.date(byAdding: .day, value: days, to: now)!
+            var fields = extra
+            fields["next_due"] = ISO8601DateFormatter().string(from: date)
+            return try task(fields)
+        }
+        XCTAssertTrue(try due(inDays: 14).isInSchedulingWindow(now: now))
+        XCTAssertTrue(try due(inDays: -90).isInSchedulingWindow(now: now))
+        XCTAssertFalse(try due(inDays: 15).isInSchedulingWindow(now: now))
+        XCTAssertFalse(try due(inDays: 0, ["schedule_kind": "meter"]).isInSchedulingWindow(now: now))
+        XCTAssertTrue(try due(inDays: 60, ["schedule_kind": "meter", "due_meter": true]).isInSchedulingWindow(now: now))
+    }
+
+    @MainActor
+    func testSkippedTaskLeavesToDoAndKeepsTheBypassedMark() throws {
+        let store = PropertyStore()
+        store.filter = .toDo
+        store.searchText = ""
+        store.originFilter = .all
+        store.selectedCategory = "All"
+        store.selectedTaskAssetId = nil
+        store.tasks = [try task(["next_due": "2026-10-01T17:00:00Z"])]
+
+        let skipped = try task([
+            "next_due": "2099-11-01T17:00:00+00:00",
+            "last_bypass_action": "skip", "last_bypassed_at": "2026-10-13T14:54:17+00:00",
+        ])
+        store.showBypassed(skipped, keepListed: false)
+
+        XCTAssertTrue(store.filteredTasks.isEmpty)
+        XCTAssertEqual(store.tasks.first?.lastBypassAction, "skip")
+        XCTAssertNotNil(store.tasks.first?.lastBypassedAt)
+        XCTAssertNil(try task([:]).lastBypassedAt)
     }
 
     func testScheduleEventsDecodeServerTimestamps() throws {

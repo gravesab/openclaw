@@ -123,6 +123,9 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
     /// Civil date (`YYYY-MM-DD`) a rescheduled meter task is held until.
     var deferredUntil: String?
     var deferred: Bool?
+    /// Set while the latest skip or reschedule has not been followed by a completion.
+    var lastBypassAction: String?
+    var lastBypassedAt: String?
     var isActive: Bool
     var primaryPartNumber: String?
     var manufacturer: String?
@@ -155,6 +158,8 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         case overdueMeter = "overdue_meter"
         case deferredUntil = "deferred_until"
         case deferred
+        case lastBypassAction = "last_bypass_action"
+        case lastBypassedAt = "last_bypassed_at"
         case isActive = "is_active"
         case primaryPartNumber = "primary_part_number"
         case sourceManualName = "source_manual_name"
@@ -192,6 +197,8 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         overdueMeter = try c.decodeIfPresent(Bool.self, forKey: .overdueMeter)
         deferredUntil = try c.decodeIfPresent(String.self, forKey: .deferredUntil)
         deferred = try c.decodeIfPresent(Bool.self, forKey: .deferred)
+        lastBypassAction = try c.decodeIfPresent(String.self, forKey: .lastBypassAction)
+        lastBypassedAt = try c.decodeIfPresent(String.self, forKey: .lastBypassedAt)
         isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
         primaryPartNumber = try c.decodeIfPresent(String.self, forKey: .primaryPartNumber)
         manufacturer = try c.decodeIfPresent(String.self, forKey: .manufacturer)
@@ -225,6 +232,23 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
             return true
         }
         return nextDue < endOfToday
+    }
+
+    static let schedulingWindowDays = 14
+
+    /// Lists never show work further out than the two-week scheduling window.
+    /// Meter-only tasks have no real calendar date, so they show only when the meter says due.
+    func isInSchedulingWindow(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        if dueMeter == true || overdueMeter == true { return true }
+        if scheduleKind == "meter" { return false }
+        guard let windowEnd = calendar.date(
+            byAdding: .day,
+            value: Self.schedulingWindowDays + 1,
+            to: calendar.startOfDay(for: now)
+        ) else {
+            return true
+        }
+        return nextDue < windowEnd
     }
 
     var requiresMeterOnComplete: Bool {

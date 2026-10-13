@@ -228,7 +228,7 @@ struct TaskBypassSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    Text(task.item)
+                    Text(TaskTitle.highlightingSafety(task.item))
                     LabeledContent("Next due", value: task.nextDue.formatted(date: .abbreviated, time: .omitted))
                     if let trigger = task.nextDueMeterValue {
                         LabeledContent("Due at", value: "\(NSDecimalNumber(decimal: trigger).stringValue) hrs")
@@ -257,6 +257,7 @@ struct TaskBypassSheet: View {
                 Section("Note") {
                     TextField("Why it was bypassed (optional)", text: $note, axis: .vertical)
                         .lineLimit(2...5)
+                        .voiceInput($note)
                 }
 
                 if let localError {

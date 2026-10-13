@@ -48,8 +48,8 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSLocalNetworkUsageDescription: PropertyManager connects to your ranch PropertyManager API on the local network or Tailscale.
-        NSMicrophoneUsageDescription: PropertyManager uses the microphone for on-device work-request dictation and voice meter entry.
-        NSSpeechRecognitionUsageDescription: PropertyManager converts speech to text on this device for work requests and meter readings.
+        NSMicrophoneUsageDescription: PropertyManager uses the microphone so you can dictate into text boxes, work requests, and meter readings. Speech stays on this device.
+        NSSpeechRecognitionUsageDescription: PropertyManager converts your speech to text on this device for text boxes, work requests, and meter readings.
         CFBundleURLTypes:
           - CFBundleURLName: ai.openclaw.propertymanager
             CFBundleURLSchemes:
@@ -78,7 +78,7 @@ targets:
         APP_URL_SCHEME: propertymanager
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "0.2.1"
-        CURRENT_PROJECT_VERSION: "21"
+        CURRENT_PROJECT_VERSION: "25"
         TARGETED_DEVICE_FAMILY: "1,2"
         CODE_SIGN_STYLE: Automatic
         DEVELOPMENT_TEAM: "ZYJVHJWT3P"

@@ -53,13 +53,17 @@ struct TaskEditView: View {
                     ForEach($parts) { $part in
                         VStack(alignment: .leading, spacing: 10) {
                             TextField("Part name", text: $part.name)
+                                .voiceInput($part.name)
                             TextField("Vendor", text: $part.vendor)
+                                .voiceInput($part.vendor)
                             TextField("Part #", text: $part.partNumber)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .noWritingTools()
                             TextField("OEM part #", text: $part.oemPartNumber)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .noWritingTools()
                             TextField("Quantity", text: $part.quantityText)
                                 .keyboardType(.decimalPad)
                             TextField("Cost", text: $part.costText)
@@ -68,8 +72,10 @@ struct TaskEditView: View {
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.URL)
                                 .autocorrectionDisabled()
+                                .noWritingTools()
                             TextField("Part notes", text: $part.notes, axis: .vertical)
                                 .lineLimit(2...5)
+                                .voiceInput($part.notes)
                             Button("Remove part", role: .destructive) {
                                 parts.removeAll { $0.id == part.id }
                             }
@@ -91,13 +97,16 @@ struct TaskEditView: View {
 
                 Section("Primary part fields") {
                     TextField("Vendor", text: $vendor)
+                        .voiceInput($vendor)
                     TextField("Part #", text: $partNumber)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .noWritingTools()
                     TextField("Part URL", text: $partURL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
+                        .noWritingTools()
                     TextField("Part cost", text: $partCostText)
                         .keyboardType(.decimalPad)
                     TextField("Annual cost", text: $annualCostText)
@@ -126,10 +135,13 @@ struct TaskEditView: View {
                     }
                     TextField("Description", text: $taskDescription, axis: .vertical)
                         .lineLimit(3...8)
+                        .voiceInput($taskDescription)
                     TextField("Supplies needed", text: $suppliesNeeded, axis: .vertical)
                         .lineLimit(2...6)
+                        .voiceInput($suppliesNeeded)
                     TextField("Notes", text: $notes, axis: .vertical)
                         .lineLimit(3...8)
+                        .voiceInput($notes)
                 }
 
                 if let localError {

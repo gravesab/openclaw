@@ -97,6 +97,7 @@ final class PropertyStore: ObservableObject {
                     return searchWords.isEmpty
                         || TaskSearch.matches(fields: searchFields(for: task), words: searchWords)
                 }
+                if !task.isInSchedulingWindow() { return false }
                 switch filter {
                 case .toDo:
                     if !task.isToDo() { return false }
@@ -315,7 +316,7 @@ final class PropertyStore: ObservableObject {
 
     func skip(task: MaintenanceTask, note: String) async -> Bool {
         let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
-        return await bypass(task: task) {
+        return await bypass(task: task, keepListed: false) {
             try await $0.skipTask(id: task.id, note: trimmed.isEmpty ? nil : trimmed)
         } status: { updated in
             "Skipped \(updated.item) — next due \(updated.nextDue.formatted(date: .abbreviated, time: .omitted))"
@@ -323,7 +324,7 @@ final class PropertyStore: ObservableObject {
     }
 
     func reschedule(task: MaintenanceTask, body: [String: Any]) async -> Bool {
-        await bypass(task: task) {
+        await bypass(task: task, keepListed: true) {
             try await $0.rescheduleTask(id: task.id, body: body)
         } status: { updated in
             if updated.deferred == true, let held = TaskBypassPolicy.civilDate(updated.deferredUntil) {
@@ -338,6 +339,7 @@ final class PropertyStore: ObservableObject {
 
     private func bypass(
         task: MaintenanceTask,
+        keepListed: Bool,
         request: (PropertyAPIClient) async throws -> MaintenanceTask,
         status: (MaintenanceTask) -> String
     ) async -> Bool {
@@ -346,7 +348,7 @@ final class PropertyStore: ObservableObject {
         defer { isBypassing = false }
         do {
             let updated = try await request(client)
-            showBypassed(updated)
+            showBypassed(updated, keepListed: keepListed)
             statusMessage = status(updated)
             return true
         } catch {
@@ -355,11 +357,14 @@ final class PropertyStore: ObservableObject {
         }
     }
 
-    func showBypassed(_ updated: MaintenanceTask) {
+    /// A skipped task leaves To Do right away; a rescheduled one stays listed until refresh to show its new date.
+    func showBypassed(_ updated: MaintenanceTask, keepListed: Bool) {
         if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
             tasks[index] = updated
         }
-        recentlyBypassedTaskIDs.insert(updated.id)
+        if keepListed {
+            recentlyBypassedTaskIDs.insert(updated.id)
+        }
     }
 
     func clearRecentlyBypassed() {

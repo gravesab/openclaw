@@ -32,6 +32,7 @@ struct TaskListView: View {
                         TaskRowView(
                             task: task,
                             groupName: section.name,
+                            wasBypassed: store.recentlyBypassedTaskIDs.contains(task.id),
                             onComplete: { completingTask = task },
                             onBypass: { action in
                                 bypassRequest = TaskBypassRequest(task: task, action: action)
@@ -58,7 +59,10 @@ struct TaskListView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Filter assets or tasks (any word)"
         )
-        .refreshable { await store.refresh() }
+        .refreshable {
+            store.clearRecentlyBypassed()
+            await store.refresh()
+        }
         .safeAreaInset(edge: .top) {
             Picker("Origin", selection: $store.originFilter) {
                 ForEach(OriginFilter.allCases) { filter in
@@ -114,6 +118,7 @@ struct TaskListView: View {
 struct TaskRowView: View {
     let task: MaintenanceTask
     let groupName: String
+    var wasBypassed = false
     let onComplete: () -> Void
     let onBypass: (TaskBypassAction) -> Void
 
@@ -137,6 +142,11 @@ struct TaskRowView: View {
                     Text(TaskTitle.dueDateLabel(date: task.nextDue))
                         .font(.caption)
                         .foregroundStyle(dueDateColor)
+                    if wasBypassed {
+                        Label("Bypassed. Pull down to refresh the list.", systemImage: "arrow.uturn.forward.circle")
+                            .font(.caption2)
+                            .foregroundStyle(.indigo)
+                    }
                     if let badge = task.runHoursBadge {
                         Text(badge)
                             .font(.caption2)

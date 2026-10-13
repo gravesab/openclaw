@@ -69,6 +69,28 @@ final class TaskBypassTests: XCTestCase {
         XCTAssertTrue(held.runHoursBadge?.hasPrefix("Held until") == true)
     }
 
+    @MainActor
+    func testRescheduledTaskStaysListedWithItsNewDateUntilRefresh() throws {
+        let store = PropertyStore()
+        store.filter = .toDo
+        store.searchText = ""
+        store.originFilter = .all
+        store.selectedCategory = "All"
+        store.selectedTaskAssetId = nil
+        store.tasks = [try task(["next_due": "2026-10-01T17:00:00Z"])]
+        XCTAssertEqual(store.filteredTasks.count, 1)
+
+        let rescheduled = try task(["next_due": "2099-10-23T17:00:00+00:00"])
+        store.showBypassed(rescheduled)
+
+        XCTAssertEqual(store.filteredTasks.map(\.nextDue), [rescheduled.nextDue])
+        store.searchText = "pump"
+        XCTAssertTrue(store.filteredTasks.isEmpty)
+        store.searchText = ""
+        store.clearRecentlyBypassed()
+        XCTAssertTrue(store.filteredTasks.isEmpty)
+    }
+
     func testScheduleEventsDecodeServerTimestamps() throws {
         let json = """
         {"id": "9b2d7c1e-5f3a-4e8b-a1c2-3d4e5f607182", "task_id": "4a9f1f5e-3d6b-4b5e-9a51-0d7f8c2a1b10",

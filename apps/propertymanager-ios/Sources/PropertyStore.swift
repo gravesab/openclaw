@@ -54,6 +54,8 @@ final class PropertyStore: ObservableObject {
     @Published var isCompleting = false
     @Published var isSaving = false
     @Published var isBypassing = false
+    /// Bypassed tasks stay listed under any filter until the next pull-to-refresh, so the new date is visible.
+    @Published private(set) var recentlyBypassedTaskIDs: Set<UUID> = []
     @Published var errorMessage: String?
     @Published var statusMessage: String?
 
@@ -90,6 +92,10 @@ final class PropertyStore: ObservableObject {
                 }
                 if let wanted = originFilter.matches, task.origin != wanted {
                     return false
+                }
+                if recentlyBypassedTaskIDs.contains(task.id) {
+                    return searchWords.isEmpty
+                        || TaskSearch.matches(fields: searchFields(for: task), words: searchWords)
                 }
                 switch filter {
                 case .toDo:
@@ -340,15 +346,24 @@ final class PropertyStore: ObservableObject {
         defer { isBypassing = false }
         do {
             let updated = try await request(client)
-            if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
-                tasks[index] = updated
-            }
+            showBypassed(updated)
             statusMessage = status(updated)
             return true
         } catch {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+
+    func showBypassed(_ updated: MaintenanceTask) {
+        if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
+            tasks[index] = updated
+        }
+        recentlyBypassedTaskIDs.insert(updated.id)
+    }
+
+    func clearRecentlyBypassed() {
+        recentlyBypassedTaskIDs.removeAll()
     }
 
     func saveEdits(taskID: UUID, fields: [String: Any], parts: [[String: Any]]? = nil) async -> Bool {

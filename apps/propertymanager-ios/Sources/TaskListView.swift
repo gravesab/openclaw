@@ -143,7 +143,7 @@ struct TaskRowView: View {
                         .font(.caption)
                         .foregroundStyle(dueDateColor)
                     if wasBypassed {
-                        Label("Bypassed. Pull down to refresh the list.", systemImage: "arrow.uturn.forward.circle")
+                        Label("Bypassed", systemImage: "arrow.uturn.forward.circle")
                             .font(.caption2)
                             .foregroundStyle(.indigo)
                     }

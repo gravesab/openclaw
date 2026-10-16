@@ -1,8 +1,8 @@
 import SwiftUI
-import UIKit
 
 struct RootView: View {
     @EnvironmentObject private var store: PropertyStore
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(PropertyManagerBuildEnvironment.appearanceKey)
     private var appearanceRaw: String = AppAppearance.system.rawValue
 
@@ -21,8 +21,6 @@ struct RootView: View {
                         + PropertyManagerBuildIdentity.version)
 
             HStack(spacing: 8) {
-                QuitAppButton()
-                    .padding(.trailing, 4)
                 Text("Appearance")
                     .font(.caption.bold())
                     .foregroundStyle(.secondary)
@@ -70,6 +68,12 @@ struct RootView: View {
         }
         .fullWritingTools()
         .onAppear { SpellChecking.install() }
+        // Let the system Home gesture suspend the app cleanly: release the mic/session.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                FieldDictation.shared.stop()
+            }
+        }
         .task {
             await store.refresh()
             await store.refreshAssets()
@@ -89,55 +93,6 @@ struct RootView: View {
             }
         } message: {
             Text(store.errorMessage ?? "Unknown error.")
-        }
-    }
-}
-
-/// Mac-style window dots. Only red works: iOS has no minimize or zoom for apps.
-private struct QuitAppButton: View {
-    @State private var isConfirming = false
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Button {
-                isConfirming = true
-            } label: {
-                Circle()
-                    .fill(Color(red: 1.0, green: 0.37, blue: 0.34))
-                    .frame(width: 14, height: 14)
-                    .padding(8)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .padding(-8)
-            .accessibilityLabel("Quit Property Manager")
-            Circle().fill(Color.secondary.opacity(0.35)).frame(width: 14, height: 14)
-            Circle().fill(Color.secondary.opacity(0.35)).frame(width: 14, height: 14)
-        }
-        .accessibilityElement(children: .contain)
-        .confirmationDialog("Quit Property Manager?", isPresented: $isConfirming, titleVisibility: .visible) {
-            Button("Quit", role: .destructive) { quit() }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Saved changes are kept. Open Property Manager again from the Home Screen.")
-        }
-    }
-
-    /// Destroy the scene session so iOS removes the card from the App Switcher.
-    /// Do not call exit() on the happy path: killing the process early leaves a stale snapshot.
-    private func quit() {
-        let scenes = UIApplication.shared.connectedScenes
-        guard let scene = scenes.first(where: { $0.activationState == .foregroundActive })
-            ?? scenes.first
-        else {
-            exit(0)
-            return
-        }
-        let options = UIWindowSceneDestructionRequestOptions()
-        options.windowDismissalAnimation = .standard
-        UIApplication.shared.requestSceneSessionDestruction(scene.session, options: options) { _ in
-            // Destruction failed; ending the process is the only remaining option.
-            exit(0)
         }
     }
 }

@@ -448,8 +448,10 @@ final class MaintenanceStore: ObservableObject {
     @Published var categories: [CategoryDefinition] = []
     @Published var selectedTaskID: UUID?
     @Published var statusMessage: String = "Ready"
-    /// Rescheduled tasks stay listed under any filter until the user clicks Refresh, so the new date is visible.
+    /// Rescheduled tasks inside the two-week window stay listed until Refresh so the new date is visible.
     @Published private(set) var recentlyBypassedTaskIDs: Set<UUID> = []
+    /// Done and Bypass leave the list immediately, even when the next due date is still inside the window.
+    @Published private(set) var recentlyClearedTaskIDs: Set<UUID> = []
     @Published var manualExtractionState: ManualExtractionState = .idle
     @Published var isOnline: Bool = false
     @Published var lastSyncAt: Date?
@@ -1378,6 +1380,8 @@ final class MaintenanceStore: ObservableObject {
         let local = tasks.first(where: { $0.id == task.id }) ?? task
         let completed = updated.mergingEditorFields(from: local)
         acceptServerTask(completed)
+        recentlyBypassedTaskIDs.remove(completed.id)
+        recentlyClearedTaskIDs.insert(completed.id)
         isOnline = true
         lastSyncAt = Date()
         hasLocalChanges = false
@@ -1428,8 +1432,18 @@ final class MaintenanceStore: ObservableObject {
         let local = tasks.first(where: { $0.id == task.id }) ?? task
         let bypassed = updated.mergingEditorFields(from: local)
         acceptServerTask(bypassed)
-        if case .reschedule = submission {
-            recentlyBypassedTaskIDs.insert(bypassed.id)
+        switch submission {
+        case .skip:
+            recentlyBypassedTaskIDs.remove(bypassed.id)
+            recentlyClearedTaskIDs.insert(bypassed.id)
+        case .reschedule:
+            if bypassed.isInSchedulingWindow() {
+                recentlyClearedTaskIDs.remove(bypassed.id)
+                recentlyBypassedTaskIDs.insert(bypassed.id)
+            } else {
+                recentlyBypassedTaskIDs.remove(bypassed.id)
+                recentlyClearedTaskIDs.insert(bypassed.id)
+            }
         }
         isOnline = true
         lastSyncAt = Date()
@@ -1448,6 +1462,7 @@ final class MaintenanceStore: ObservableObject {
 
     func clearRecentlyBypassed() {
         recentlyBypassedTaskIDs.removeAll()
+        recentlyClearedTaskIDs.removeAll()
     }
 
     func addTask(category filterCategory: String? = nil, kind: TaskKind = .scheduled) {
@@ -2759,7 +2774,8 @@ struct ContentView: View {
 
         let now = Date()
         result = result.filter {
-            store.recentlyBypassedTaskIDs.contains($0.id) || $0.matches(listFilter, now: now)
+            if store.recentlyClearedTaskIDs.contains($0.id) { return false }
+            return store.recentlyBypassedTaskIDs.contains($0.id) || $0.matches(listFilter, now: now)
         }
 
         if let selectedCategoryFilter {

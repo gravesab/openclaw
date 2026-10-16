@@ -31,6 +31,10 @@
 	</dict>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Livestock DEV reads and saves animals on this Mac.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Livestock DEV uses the microphone so you can dictate into text fields. Speech stays on this device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Livestock DEV converts speech to text on this device for text fields.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

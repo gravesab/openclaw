@@ -178,8 +178,11 @@ enum LivestockBillOfSale {
         } else {
             for event in animal.lifecycleEvents {
                 let when = event.occurredAt.formatted(date: .abbreviated, time: .shortened)
-                lines.append(Line("\(event.historyTitle): \(when)"))
+                lines.append(Line("\(event.historyTitle): \(when)\(costSuffix(animal.eventCost(event.id)))"))
             }
+        }
+        for row in animal.lifecycleCostByType {
+            lines.append(Line("\(row.label) cost: \(LivestockMoney.usdSigned(row.amount))"))
         }
 
         lines.append(Line("Care", kind: .heading))
@@ -187,8 +190,13 @@ enum LivestockBillOfSale {
             lines.append(Line("No care records"))
         } else {
             for event in animal.careEvents {
-                lines.append(Line("\(event.type.label): \(event.occurredAt.formatted(date: .abbreviated, time: .shortened))"))
+                let when = event.occurredAt.formatted(date: .abbreviated, time: .shortened)
+                let cost = event.isActive ? animal.eventCost(event.id) : nil
+                lines.append(Line("\(event.historyTitle): \(when)\(costSuffix(cost))"))
             }
+        }
+        for row in animal.careCostByType {
+            lines.append(Line("\(row.label) cost: \(LivestockMoney.usdSigned(row.amount))"))
         }
 
         lines.append(Line("Feed", kind: .heading))
@@ -196,12 +204,17 @@ enum LivestockBillOfSale {
             lines.append(Line("No feed consumption"))
         } else {
             for item in animal.consumptions {
-                lines.append(Line("\(item.summary): \(item.observedAt.formatted(date: .abbreviated, time: .shortened))"))
+                let when = item.observedAt.formatted(date: .abbreviated, time: .shortened)
+                let cost = item.isActive ? animal.eventCost(item.id) : nil
+                lines.append(Line("\(item.historyTitle): \(when)\(costSuffix(cost))"))
             }
+        }
+        for row in animal.feedCostByType {
+            lines.append(Line("\(row.label) cost: \(LivestockMoney.usdSigned(row.amount))"))
         }
 
         lines.append(Line("Cost", kind: .heading))
-        let operational = animal.costs.filter { $0.frequency == nil }
+        let operational = animal.activeCosts.filter { $0.frequency == nil && !$0.isEventCost }
         if operational.isEmpty {
             lines.append(Line("No operational costs"))
         } else {
@@ -209,10 +222,10 @@ enum LivestockBillOfSale {
                 lines.append(Line(item.summary))
             }
         }
-        lines.append(Line("Total Cost: \(LivestockMoney.usd(animal.recordedCostTotal))"))
+        lines.append(Line("Total estimated cost: \(LivestockMoney.usd(animal.recordedCostTotal))"))
 
         lines.append(Line("Costs by date", kind: .heading))
-        let days = LivestockCostLedger.days(from: animal.costs)
+        let days = LivestockCostLedger.days(from: animal.activeCosts, label: animal.costLabel)
         if days.isEmpty {
             lines.append(Line("No costs recorded"))
         } else {
@@ -241,5 +254,10 @@ enum LivestockBillOfSale {
 
     private static func day(_ date: Date) -> String {
         date.formatted(date: .abbreviated, time: .omitted)
+    }
+
+    private static func costSuffix(_ cost: Decimal?) -> String {
+        guard let cost else { return "" }
+        return " · \(LivestockMoney.usdSigned(cost))"
     }
 }

@@ -21,6 +21,10 @@ struct LivestockBuildStamp: Equatable, Sendable {
     let build: String
 
     var headerDetail: String { "Version \(version) · Build \(build)" }
+    var isProduction: Bool { environment == "PROD" }
+    /// User-facing store name. PROD drops the DEV prefix; the live ticket and server stay the same.
+    var databaseLabel: String { isProduction ? "livestock database" : "DEV database" }
+    var serverLabel: String { isProduction ? "livestock server" : "livestock DEV server" }
 
     static var current: LivestockBuildStamp {
         resolved(info: Bundle.main.infoDictionary, bundleIdentifier: Bundle.main.bundleIdentifier)
@@ -74,13 +78,13 @@ enum AnimalCategory: String, CaseIterable, Identifiable, Sendable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .liveStock: "Current livestock"
+        case .liveStock: "Current livestock/group"
         case .pets: "Current pets"
         }
     }
     var addLabel: String {
         switch self {
-        case .liveStock: "Add livestock"
+        case .liveStock: "Add livestock/group"
         case .pets: "Add pets"
         }
     }
@@ -406,6 +410,12 @@ enum LivestockCatalog {
         "Savannah Monitor",
     ]
 
+    struct PetBreedMenuChoice: Identifiable, Equatable, Sendable {
+        let value: String
+        let label: String
+        var id: String { value }
+    }
+
     static func petBreeds(for kind: PetKind?) -> [String] {
         switch kind {
         case .dog: dogBreeds
@@ -414,6 +424,18 @@ enum LivestockCatalog {
         case .reptile: reptileBreeds
         case .other, nil: []
         }
+    }
+
+    /// Mixed and a typed breed stay first so a long species list cannot hide them.
+    static func petBreedMenu(for kind: PetKind?) -> [PetBreedMenuChoice] {
+        var menu = [
+            PetBreedMenuChoice(value: "mixed", label: "Mixed"),
+            PetBreedMenuChoice(value: "typed", label: "Type a breed"),
+        ]
+        if let kind, kind != .other {
+            menu.append(contentsOf: petBreeds(for: kind).map { PetBreedMenuChoice(value: $0, label: $0) })
+        }
+        return menu
     }
 
     static func acceptsSpeciesCode(_ code: String) -> Bool {
@@ -554,6 +576,9 @@ enum LivestockLifecycleCorrectionReason: String, CaseIterable, Identifiable, Sen
         case .duplicateEntry: "Duplicate entry"
         }
     }
+
+    /// A cost has no time of its own, so it can only be wrong or a duplicate.
+    static let costChoices: [LivestockLifecycleCorrectionReason] = [.incorrectValue, .duplicateEntry]
 }
 
 enum LivestockCareEventType: String, CaseIterable, Identifiable, Sendable {
@@ -582,12 +607,66 @@ struct LivestockCareEvent: Identifiable, Equatable, Sendable {
     let id: UUID
     let type: LivestockCareEventType
     let occurredAt: Date
+    var itemName: String? = nil
+    var itemKind: String? = nil
+    var supersedesID: UUID? = nil
+    var correctionReason: LivestockLifecycleCorrectionReason? = nil
+    var isCurrent: Bool = true
+
+    var summary: String {
+        var parts = [type.label]
+        if let itemName, !itemName.isEmpty { parts.append(itemName) }
+        if let itemKind, !itemKind.isEmpty { parts.append(itemKind) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// Shown in totals and overviews: the latest correction, unless it removed a duplicate.
+    var isActive: Bool { isCurrent && correctionReason != .duplicateEntry }
+
+    var historyTitle: String {
+        LivestockCorrectionTitle.title(summary, reason: correctionReason, isCurrent: isCurrent)
+    }
+}
+
+enum LivestockCorrectionTitle {
+    static func title(_ base: String, reason: LivestockLifecycleCorrectionReason?, isCurrent: Bool) -> String {
+        var title = base
+        if reason == .duplicateEntry {
+            title += " · removed as a duplicate"
+        } else if let reason {
+            title += " · \(reason.label)"
+        }
+        if !isCurrent {
+            title += " · earlier record"
+        }
+        return title
+    }
+
+    /// Ids of a record and every earlier record it corrected.
+    static func chain(from id: UUID, supersedes: [UUID: UUID]) -> Set<UUID> {
+        var ids: Set<UUID> = [id]
+        var cursor = id
+        while let earlier = supersedes[cursor], ids.insert(earlier).inserted {
+            cursor = earlier
+        }
+        return ids
+    }
 }
 
 enum LivestockInputType: String, CaseIterable, Identifiable, Sendable {
     case feed, hay, mineral, supplement
     case dryFood = "dry_food"
     case wetFood = "wet_food"
+    case pasture
+    case grassHay = "grass_hay"
+    case alfalfaHay = "alfalfa_hay"
+    case corn
+    case cornSilage = "corn_silage"
+    case oats
+    case preparedMeal = "prepared_meal"
+    case browse, scratch
+    case oysterShell = "oyster_shell"
+    case grit, seed, pellets, insects, greens
 
     var id: String { rawValue }
     var label: String {
@@ -598,11 +677,54 @@ enum LivestockInputType: String, CaseIterable, Identifiable, Sendable {
         case .supplement: "Supplement"
         case .dryFood: "Dry food"
         case .wetFood: "Wet food"
+        case .pasture: "Pasture"
+        case .grassHay: "Grass hay"
+        case .alfalfaHay: "Alfalfa hay"
+        case .corn: "Corn"
+        case .cornSilage: "Corn silage"
+        case .oats: "Oats"
+        case .preparedMeal: "Prepared meal"
+        case .browse: "Browse"
+        case .scratch: "Scratch"
+        case .oysterShell: "Oyster shell"
+        case .grit: "Grit"
+        case .seed: "Seed"
+        case .pellets: "Pellets"
+        case .insects: "Insects"
+        case .greens: "Greens"
         }
     }
 
-    static func entryChoices(for species: Species) -> [LivestockInputType] {
-        species == .pet ? [.dryFood, .wetFood, .supplement] : [.feed, .hay, .supplement]
+    /// Usual rations for the species. Cattle, bison, sheep, goats, and horses are offered pasture and hay; pigs and chickens a prepared meal; pets the food for that kind of pet.
+    static func entryChoices(for species: Species, petKind: PetKind? = nil) -> [LivestockInputType] {
+        switch species {
+        case .cattle, .dairyCow, .bison:
+            return [.pasture, .grassHay, .alfalfaHay, .corn, .cornSilage, .preparedMeal, .mineral, .supplement]
+        case .horse:
+            return [.pasture, .grassHay, .alfalfaHay, .oats, .preparedMeal, .mineral, .supplement]
+        case .goat:
+            return [.pasture, .browse, .grassHay, .alfalfaHay, .corn, .preparedMeal, .mineral, .supplement]
+        case .sheep:
+            return [.pasture, .grassHay, .alfalfaHay, .corn, .preparedMeal, .mineral, .supplement]
+        case .pig:
+            return [.preparedMeal, .corn, .pasture, .supplement]
+        case .chicken:
+            return [.preparedMeal, .scratch, .corn, .oysterShell, .grit, .supplement]
+        case .pet:
+            switch petKind {
+            case .bird:
+                return [.seed, .pellets, .preparedMeal, .supplement]
+            case .reptile:
+                return [.insects, .greens, .preparedMeal, .supplement]
+            case .dog, .cat, .other, nil:
+                return [.dryFood, .wetFood, .preparedMeal, .supplement]
+            }
+        }
+    }
+
+    /// Mixed-herd rations. The record belongs to the herd, not copied onto each animal.
+    static var herdChoices: [LivestockInputType] {
+        [.hay, .grassHay, .alfalfaHay, .feed, .pasture, .preparedMeal, .mineral, .supplement, .corn, .cornSilage, .oats]
     }
 }
 
@@ -613,9 +735,24 @@ struct LivestockFeedEntry: Identifiable, Equatable, Sendable {
     var unit: LivestockInputUnit = .lb
     var frequency: LivestockCostFrequency = .daily
     var cost: String = ""
+    var financeReference: String = ""
 
     var hasQuantity: Bool {
         !quantity.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Every feed record carries a whole quantity of 1 or more and a cost greater than zero.
+    static func problem(quantity: String, cost: String, feed: String) -> String? {
+        guard let count = Int(quantity.trimmingCharacters(in: .whitespacesAndNewlines)), count > 0 else {
+            return "\(feed) needs a quantity of 1 or more."
+        }
+        return LivestockMoney.requirement(cost, label: "\(feed) cost", allowZero: false)
+    }
+
+    /// Quantity times the cost of one feeding times how often that feeding happens in a year.
+    var annualFeedCost: Decimal {
+        let count = hasQuantity ? LivestockMoney.signed(quantity) : 1
+        return count * LivestockMoney.signed(cost) * Decimal(frequency.timesPerYear)
     }
 }
 
@@ -636,7 +773,7 @@ struct LivestockCostSummary: Equatable, Sendable {
 }
 
 enum LivestockInputUnit: String, CaseIterable, Identifiable, Sendable {
-    case lb, kg, bale, bag, scoop
+    case lb, kg, bale, bag, scoop, cup, each
 
     var id: String { rawValue }
     var label: String {
@@ -645,18 +782,43 @@ enum LivestockInputUnit: String, CaseIterable, Identifiable, Sendable {
         case .kg: "Kilograms"
         case .bale: "Bale"
         case .bag: "Bag"
-        case .scoop: "Scoops"
+        case .scoop: "Scoop"
+        case .cup: "Cup"
+        case .each: "Each"
         }
     }
 
-    static let entryChoices: [LivestockInputUnit] = [.lb, .kg, .scoop, .bag]
+    static let entryChoices: [LivestockInputUnit] = [.scoop, .cup, .bale, .each, .bag, .lb]
 }
 
 enum LivestockCostFrequency: String, CaseIterable, Identifiable, Sendable {
     case daily, weekly, monthly, quarterly
+    case semiAnnual = "semi_annual"
+    case annual
 
     var id: String { rawValue }
-    var label: String { rawValue.capitalized }
+    var label: String {
+        switch self {
+        case .daily: "Daily"
+        case .weekly: "Weekly"
+        case .monthly: "Monthly"
+        case .quarterly: "Quarterly"
+        case .semiAnnual: "Semi-annual"
+        case .annual: "Annual"
+        }
+    }
+
+    /// How many of these feedings fall in one year.
+    var timesPerYear: Int {
+        switch self {
+        case .daily: 365
+        case .weekly: 52
+        case .monthly: 12
+        case .quarterly: 4
+        case .semiAnnual: 2
+        case .annual: 1
+        }
+    }
 }
 
 struct LivestockConsumption: Identifiable, Equatable, Sendable {
@@ -668,15 +830,139 @@ struct LivestockConsumption: Identifiable, Equatable, Sendable {
     let supplier: String?
     let batch: String?
     var frequency: LivestockCostFrequency? = nil
+    var supersedesID: UUID? = nil
+    var correctionReason: LivestockLifecycleCorrectionReason? = nil
+    var isCurrent: Bool = true
 
     var summary: String {
         let base = "\(inputType.label) \(quantity) \(unit.label)"
         guard let frequency else { return base }
         return "\(base) · \(frequency.label)"
     }
+
+    var isActive: Bool { isCurrent && correctionReason != .duplicateEntry }
+
+    var historyTitle: String {
+        LivestockCorrectionTitle.title(summary, reason: correctionReason, isCurrent: isCurrent)
+    }
+}
+
+struct LivestockSupplierDirectory: Equatable, Codable, Sendable {
+    var names: [String] = []
+    var last: String = ""
+
+    static func cleaned(_ raw: String) -> String {
+        String(raw.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(80))
+    }
+
+    mutating func remember(_ raw: String) {
+        let name = Self.cleaned(raw)
+        guard !name.isEmpty else { return }
+        names.removeAll { $0.caseInsensitiveCompare(name) == .orderedSame }
+        names.append(name)
+        names.sort { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        last = name
+    }
+
+    func merging(animals: [Animal]) -> LivestockSupplierDirectory {
+        var copy = self
+        let recorded = animals.flatMap(\.consumptions).compactMap { item -> (Date, String)? in
+            guard let supplier = item.supplier else { return nil }
+            let name = Self.cleaned(supplier)
+            guard !name.isEmpty else { return nil }
+            return (item.observedAt, name)
+        }.sorted { $0.0 < $1.0 }
+        let keptLast = copy.last
+        for (_, name) in recorded {
+            copy.remember(name)
+        }
+        if !keptLast.isEmpty {
+            copy.last = Self.cleaned(keptLast)
+        }
+        return copy
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> LivestockSupplierDirectory {
+        guard let data = defaults.data(forKey: storageKey),
+              let stored = try? JSONDecoder().decode(LivestockSupplierDirectory.self, from: data) else {
+            return LivestockSupplierDirectory()
+        }
+        return stored
+    }
+
+    func save(defaults: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+
+    static let storageKey = "RanchOSLivestock.feedSuppliers"
+}
+
+enum LivestockWeight {
+    static func decimal(_ text: String) -> Decimal? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: "")
+        guard !trimmed.isEmpty else { return nil }
+        return Decimal(string: trimmed, locale: Locale(identifier: "en_US_POSIX"))
+    }
+
+    static func requirement(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: ",", with: "")
+        guard !trimmed.isEmpty else { return "Enter the weight in pounds." }
+        guard let value = decimal(trimmed), value > 0 else {
+            return "Weight must be a number of pounds greater than zero."
+        }
+        if let dot = trimmed.firstIndex(of: "."), trimmed.distance(from: trimmed.index(after: dot), to: trimmed.endIndex) > 2 {
+            return "Weight must be a number of pounds greater than zero."
+        }
+        return nil
+    }
+
+    static func pounds(_ value: Decimal) -> String {
+        "\(shown(value, maximumFractionDigits: 2)) lb"
+    }
+
+    /// International avoirdupois pound. Display rounds to the nearest hundredth of a kilogram.
+    static func kilogramsText(for text: String) -> String {
+        guard requirement(text) == nil, let pounds = decimal(text) else { return "—" }
+        var kilograms = pounds * Decimal(string: "0.45359237")!
+        var rounded = Decimal()
+        NSDecimalRound(&rounded, &kilograms, 2, .plain)
+        return "\(shown(rounded, maximumFractionDigits: 2)) kg"
+    }
+
+    private static func shown(_ value: Decimal, maximumFractionDigits: Int) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = maximumFractionDigits
+        return formatter.string(from: value as NSDecimalNumber) ?? "\(value)"
+    }
 }
 
 enum LivestockMoney {
+    /// Up to the ten-thousands of dollars and two cent digits. A leading minus is kept for a correction.
+    static func entry(_ raw: String) -> String {
+        let negative = raw.contains("-")
+        var dollars = ""
+        var cents: String?
+        for character in raw {
+            if character.isNumber {
+                if let partial = cents {
+                    if partial.count < 2 { cents = partial + String(character) }
+                } else if dollars.count < 5 {
+                    dollars.append(character)
+                }
+            } else if character == ".", cents == nil {
+                cents = ""
+            }
+        }
+        var result = dollars
+        if let cents { result += "." + cents }
+        if result.isEmpty { return negative ? "-" : "" }
+        return negative ? "-" + result : result
+    }
+
     static func decimal(_ text: String) -> Decimal? {
         var trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         trimmed = trimmed.replacingOccurrences(of: "$", with: "").replacingOccurrences(of: ",", with: "")
@@ -704,6 +990,17 @@ enum LivestockMoney {
 
     static func signed(_ text: String) -> Decimal {
         decimal(text) ?? 0
+    }
+
+    static func plain(_ value: Decimal) -> String? {
+        guard value != 0 else { return nil }
+        let formatter = NumberFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.numberStyle = .decimal
+        formatter.minimumFractionDigits = 0
+        formatter.maximumFractionDigits = 2
+        formatter.usesGroupingSeparator = false
+        return formatter.string(from: NSDecimalNumber(decimal: value))
     }
 
     static func nonzeroText(_ text: String) -> String? {
@@ -771,10 +1068,12 @@ struct LivestockCostBuckets: Equatable, Sendable {
     var weekly: Decimal = 0
     var monthly: Decimal = 0
     var quarterly: Decimal = 0
+    var semiAnnual: Decimal = 0
+    var annual: Decimal = 0
     var other: Decimal = 0
 
     var total: Decimal {
-        let sum = daily + weekly + monthly + quarterly + other
+        let sum = daily + weekly + monthly + quarterly + semiAnnual + annual + other
         return sum < 0 ? 0 : sum
     }
 
@@ -785,6 +1084,8 @@ struct LivestockCostBuckets: Equatable, Sendable {
         case .weekly: copy.weekly += amount
         case .monthly: copy.monthly += amount
         case .quarterly: copy.quarterly += amount
+        case .semiAnnual: copy.semiAnnual += amount
+        case .annual: copy.annual += amount
         case nil: copy.other += amount
         }
         return copy
@@ -796,6 +1097,8 @@ struct LivestockCostBuckets: Equatable, Sendable {
             weekly: weekly + recorded.weekly,
             monthly: monthly + recorded.monthly,
             quarterly: quarterly + recorded.quarterly,
+            semiAnnual: semiAnnual + recorded.semiAnnual,
+            annual: annual + recorded.annual,
             other: other + recorded.other
         )
     }
@@ -808,9 +1111,25 @@ struct LivestockCostAttribution: Identifiable, Equatable, Sendable {
     let recordedAt: Date
     var frequency: LivestockCostFrequency? = nil
     var feedType: LivestockInputType? = nil
+    var lifecycleEventID: UUID? = nil
+    var careEventID: UUID? = nil
+    var consumptionID: UUID? = nil
+    var supersedesID: UUID? = nil
+    var correctionReason: LivestockLifecycleCorrectionReason? = nil
+    var isCurrent: Bool = true
+
+    var isEventCost: Bool { lifecycleEventID != nil || careEventID != nil }
+
+    var linkedRecordID: UUID? { lifecycleEventID ?? careEventID ?? consumptionID }
+
+    /// Counted in totals: the latest correction, unless it removed a duplicate.
+    var isCounted: Bool { isCurrent && correctionReason != .duplicateEntry }
+
+    var basisCode: String = "per_animal"
 
     var summary: String {
-        let money = "\(LivestockMoney.usd(LivestockMoney.nonNegative(amount))) per animal"
+        let unit = basisCode == "per_herd" ? "per herd" : "per animal"
+        let money = "\(LivestockMoney.usd(LivestockMoney.nonNegative(amount))) \(unit)"
         if let financeReference, !financeReference.isEmpty {
             return "\(money) · Finance \(financeReference)"
         }
@@ -824,11 +1143,24 @@ struct LivestockCostAttribution: Identifiable, Equatable, Sendable {
         if let frequency {
             return frequency.label
         }
+        if lifecycleEventID != nil {
+            return "Routine lifecycle"
+        }
+        if careEventID != nil {
+            return "Care"
+        }
         if let financeReference, !financeReference.isEmpty {
             return "Operational · Finance \(financeReference)"
         }
         return "Operational"
     }
+}
+
+struct LivestockTypeCost: Identifiable, Equatable, Sendable {
+    let label: String
+    let amount: Decimal
+
+    var id: String { label }
 }
 
 struct LivestockDatedCost: Identifiable, Equatable, Sendable {
@@ -847,7 +1179,11 @@ struct LivestockCostDay: Identifiable, Equatable, Sendable {
 }
 
 enum LivestockCostLedger {
-    static func days(from costs: [LivestockCostAttribution], calendar: Calendar = .current) -> [LivestockCostDay] {
+    static func days(
+        from costs: [LivestockCostAttribution],
+        label: (LivestockCostAttribution) -> String = \.ledgerLabel,
+        calendar: Calendar = .current
+    ) -> [LivestockCostDay] {
         let grouped = Dictionary(grouping: costs) { calendar.startOfDay(for: $0.recordedAt) }
         return grouped.keys.sorted(by: >).map { day in
             let lines = (grouped[day] ?? []).sorted { lhs, rhs in
@@ -856,7 +1192,7 @@ enum LivestockCostLedger {
             }.map { cost in
                 LivestockDatedCost(
                     id: cost.id,
-                    label: cost.ledgerLabel,
+                    label: label(cost),
                     amount: LivestockMoney.signed(cost.amount),
                     recordedAt: cost.recordedAt
                 )
@@ -871,6 +1207,7 @@ struct LivestockLifecycleEvent: Identifiable, Equatable, Sendable {
     let id: UUID
     let type: LivestockLifecycleEventType
     let occurredAt: Date
+    var weightPounds: Decimal? = nil
     var supersedesEventID: UUID? = nil
     var correctionReason: LivestockLifecycleCorrectionReason? = nil
     var isCurrent: Bool = true
@@ -879,6 +1216,9 @@ struct LivestockLifecycleEvent: Identifiable, Equatable, Sendable {
 
     var historyTitle: String {
         var title = type.label
+        if type == .weightRecorded, let weightPounds {
+            title += " · \(LivestockWeight.pounds(weightPounds))"
+        }
         if let correctionReason {
             title += " · \(correctionReason.label)"
         }
@@ -898,6 +1238,22 @@ struct LivestockAnimalIdentifier: Identifiable, Equatable, Sendable {
 
     var isActive: Bool { retirementReason == nil }
     var summary: String { "\(kind.label) \(value)" }
+}
+
+enum LivestockAnimalSearch {
+    /// Empty query keeps the full list. A query matches display name or an identifier value.
+    static func listed(_ animals: [Animal], query: String) -> [Animal] {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return animals }
+        return animals.filter { matches($0, query: needle) }
+    }
+
+    static func matches(_ animal: Animal, query: String) -> Bool {
+        let needle = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !needle.isEmpty else { return true }
+        if animal.displayName.localizedStandardContains(needle) { return true }
+        return animal.identifiers.contains { $0.value.localizedStandardContains(needle) }
+    }
 }
 
 struct Animal: Identifiable, Equatable, Sendable {
@@ -993,7 +1349,10 @@ struct Animal: Identifiable, Equatable, Sendable {
            !mixBreedOne.isEmpty, !mixBreedTwo.isEmpty {
             return "\(mixBreedOne) × \(mixBreedTwo)"
         }
-        if let recordedBreed, !recordedBreed.isEmpty, recordedBreed != "mixed" {
+        if recordedBreed == "mixed" {
+            return "Mixed"
+        }
+        if let recordedBreed, !recordedBreed.isEmpty {
             return recordedBreed
         }
         return breed?.label ?? "None selected"
@@ -1049,6 +1408,62 @@ struct Animal: Identifiable, Equatable, Sendable {
             herdStartedAt: herdStartedAt,
             retirementReason: reason,
             retiredAt: date,
+            saleAmount: saleAmount,
+            saleOn: saleOn,
+            status: status
+        )
+    }
+
+    func renaming(displayName: String) -> Animal {
+        Animal(
+            id: id,
+            displayName: displayName,
+            species: species,
+            productionType: productionType,
+            breed: breed,
+            identifiers: identifiers,
+            lifecycleEvents: lifecycleEvents,
+            careEvents: careEvents,
+            consumptions: consumptions,
+            costs: costs,
+            recordedBreed: recordedBreed,
+            mixBreedOne: mixBreedOne,
+            mixBreedTwo: mixBreedTwo,
+            petKind: petKind,
+            petSpeciesOther: petSpeciesOther,
+            herdID: herdID,
+            herdName: herdName,
+            herdStartedAt: herdStartedAt,
+            retirementReason: retirementReason,
+            retiredAt: retiredAt,
+            saleAmount: saleAmount,
+            saleOn: saleOn,
+            status: status
+        )
+    }
+
+    func renamingHerd(_ name: String) -> Animal {
+        Animal(
+            id: id,
+            displayName: displayName,
+            species: species,
+            productionType: productionType,
+            breed: breed,
+            identifiers: identifiers,
+            lifecycleEvents: lifecycleEvents,
+            careEvents: careEvents,
+            consumptions: consumptions,
+            costs: costs,
+            recordedBreed: recordedBreed,
+            mixBreedOne: mixBreedOne,
+            mixBreedTwo: mixBreedTwo,
+            petKind: petKind,
+            petSpeciesOther: petSpeciesOther,
+            herdID: herdID,
+            herdName: name,
+            herdStartedAt: herdStartedAt,
+            retirementReason: retirementReason,
+            retiredAt: retiredAt,
             saleAmount: saleAmount,
             saleOn: saleOn,
             status: status
@@ -1198,9 +1613,93 @@ struct Animal: Identifiable, Equatable, Sendable {
     var recordedCostTotal: Decimal { recordedBuckets.total }
 
     var recordedBuckets: LivestockCostBuckets {
-        costs.reduce(into: LivestockCostBuckets()) { buckets, item in
+        activeCosts.reduce(into: LivestockCostBuckets()) { buckets, item in
             buckets = buckets.adding(LivestockMoney.signed(item.amount), frequency: item.frequency)
         }
+    }
+
+    var activeCosts: [LivestockCostAttribution] {
+        let removed = removedRecordIDs
+        return costs.filter { $0.isCounted && !Self.links($0, to: removed) }
+    }
+
+    /// A counted cost whose lifecycle, care, or feed record was removed as a duplicate.
+    func isRemovedWithEvent(_ cost: LivestockCostAttribution) -> Bool {
+        cost.isCounted && Self.links(cost, to: removedRecordIDs)
+    }
+
+    /// Counted costs saved with one lifecycle, care, or feed record or with the earlier records it corrected.
+    func eventCosts(_ recordID: UUID) -> [LivestockCostAttribution] {
+        let ids = LivestockCorrectionTitle.chain(from: recordID, supersedes: recordSupersedes)
+        return activeCosts.filter { Self.links($0, to: ids) }
+    }
+
+    /// Signed sum of `eventCosts`; nil when none were saved.
+    func eventCost(_ recordID: UUID) -> Decimal? {
+        let linked = eventCosts(recordID)
+        guard !linked.isEmpty else { return nil }
+        return linked.reduce(Decimal(0)) { $0 + LivestockMoney.signed($1.amount) }
+    }
+
+    private var recordSupersedes: [UUID: UUID] {
+        var supersedes: [UUID: UUID] = [:]
+        for event in lifecycleEvents { supersedes[event.id] = event.supersedesEventID }
+        for event in careEvents { supersedes[event.id] = event.supersedesID }
+        for item in consumptions { supersedes[item.id] = item.supersedesID }
+        return supersedes
+    }
+
+    private var removedRecordIDs: Set<UUID> {
+        let supersedes = recordSupersedes
+        let duplicates = lifecycleEvents.filter { $0.isCurrent && $0.correctionReason == .duplicateEntry }.map(\.id)
+            + careEvents.filter { $0.isCurrent && $0.correctionReason == .duplicateEntry }.map(\.id)
+            + consumptions.filter { $0.isCurrent && $0.correctionReason == .duplicateEntry }.map(\.id)
+        return duplicates.reduce(into: Set<UUID>()) { removed, id in
+            removed.formUnion(LivestockCorrectionTitle.chain(from: id, supersedes: supersedes))
+        }
+    }
+
+    private static func links(_ cost: LivestockCostAttribution, to ids: Set<UUID>) -> Bool {
+        cost.linkedRecordID.map(ids.contains) ?? false
+    }
+
+    var lifecycleCostByType: [LivestockTypeCost] {
+        LivestockLifecycleEventType.allCases.compactMap { type in
+            let ids = Set(lifecycleEvents.filter { $0.type == type }.map(\.id))
+            return Self.typeCost(type.label, activeCosts.filter { $0.lifecycleEventID.map(ids.contains) == true })
+        }
+    }
+
+    var careCostByType: [LivestockTypeCost] {
+        LivestockCareEventType.allCases.compactMap { type in
+            let ids = Set(careEvents.filter { $0.type == type }.map(\.id))
+            return Self.typeCost(type.label, activeCosts.filter { $0.careEventID.map(ids.contains) == true })
+        }
+    }
+
+    /// Feed costs saved with a feed record; older feed costs without a record count only in the ledger.
+    var feedCostByType: [LivestockTypeCost] {
+        LivestockInputType.allCases.compactMap { type in
+            Self.typeCost(type.label, activeCosts.filter { $0.consumptionID != nil && $0.feedType == type })
+        }
+    }
+
+    func costLabel(_ cost: LivestockCostAttribution) -> String {
+        if let id = cost.lifecycleEventID, let event = lifecycleEvents.first(where: { $0.id == id }) {
+            return "Routine lifecycle · \(event.type.label)"
+        }
+        if let id = cost.careEventID, let event = careEvents.first(where: { $0.id == id }) {
+            return "Care · \(event.type.label)"
+        }
+        if cost.consumptionID != nil {
+            return "Feed · \(cost.ledgerLabel)"
+        }
+        return cost.ledgerLabel
+    }
+
+    static func typeCost(_ label: String, _ linked: [LivestockCostAttribution]) -> LivestockTypeCost? {
+        guard !linked.isEmpty else { return nil }
+        return LivestockTypeCost(label: label, amount: linked.reduce(Decimal(0)) { $0 + LivestockMoney.signed($1.amount) })
     }
 }
 
@@ -1209,8 +1708,104 @@ struct LivestockHerd: Identifiable, Equatable, Hashable, Sendable {
     let name: String
     var notes: String = ""
     var retiredAt: Date? = nil
+    var careEvents: [LivestockCareEvent] = []
+    var consumptions: [LivestockConsumption] = []
+    var costs: [LivestockCostAttribution] = []
 
     var isRetired: Bool { retiredAt != nil }
+
+    func hash(into hasher: inout Hasher) {
+        hasher.combine(id)
+    }
+
+    static func == (lhs: LivestockHerd, rhs: LivestockHerd) -> Bool {
+        lhs.id == rhs.id
+            && lhs.name == rhs.name
+            && lhs.notes == rhs.notes
+            && lhs.retiredAt == rhs.retiredAt
+            && lhs.careEvents == rhs.careEvents
+            && lhs.consumptions == rhs.consumptions
+            && lhs.costs == rhs.costs
+    }
+
+    func renaming(_ name: String) -> LivestockHerd {
+        LivestockHerd(
+            id: id,
+            name: name,
+            notes: notes,
+            retiredAt: retiredAt,
+            careEvents: careEvents,
+            consumptions: consumptions,
+            costs: costs
+        )
+    }
+
+    var recordedCostTotal: Decimal { recordedBuckets.total }
+
+    var recordedBuckets: LivestockCostBuckets {
+        activeCosts.reduce(into: LivestockCostBuckets()) { buckets, item in
+            buckets = buckets.adding(LivestockMoney.signed(item.amount), frequency: item.frequency)
+        }
+    }
+
+    var activeCosts: [LivestockCostAttribution] {
+        let removed = removedRecordIDs
+        return costs.filter { $0.isCounted && $0.linkedRecordID.map { !removed.contains($0) } ?? true }
+    }
+
+    func isRemovedWithEvent(_ cost: LivestockCostAttribution) -> Bool {
+        cost.isCounted && cost.linkedRecordID.map(removedRecordIDs.contains) == true
+    }
+
+    func eventCosts(_ recordID: UUID) -> [LivestockCostAttribution] {
+        let ids = LivestockCorrectionTitle.chain(from: recordID, supersedes: recordSupersedes)
+        return activeCosts.filter { $0.linkedRecordID.map(ids.contains) == true }
+    }
+
+    func eventCost(_ recordID: UUID) -> Decimal? {
+        let linked = eventCosts(recordID)
+        guard !linked.isEmpty else { return nil }
+        return linked.reduce(Decimal(0)) { $0 + LivestockMoney.signed($1.amount) }
+    }
+
+    var careCostByType: [LivestockTypeCost] {
+        LivestockCareEventType.allCases.compactMap { type in
+            let ids = Set(careEvents.filter { $0.type == type }.map(\.id))
+            return Animal.typeCost(type.label, activeCosts.filter { $0.careEventID.map(ids.contains) == true })
+        }
+    }
+
+    var feedCostByType: [LivestockTypeCost] {
+        LivestockInputType.allCases.compactMap { type in
+            Animal.typeCost(type.label, activeCosts.filter { $0.consumptionID != nil && $0.feedType == type })
+        }
+    }
+
+    func costLabel(_ cost: LivestockCostAttribution) -> String {
+        if let id = cost.careEventID, let event = careEvents.first(where: { $0.id == id }) {
+            return "Care · \(event.type.label)"
+        }
+        if cost.consumptionID != nil {
+            return "Feed · \(cost.ledgerLabel)"
+        }
+        return cost.ledgerLabel
+    }
+
+    private var recordSupersedes: [UUID: UUID] {
+        var supersedes: [UUID: UUID] = [:]
+        for event in careEvents { supersedes[event.id] = event.supersedesID }
+        for item in consumptions { supersedes[item.id] = item.supersedesID }
+        return supersedes
+    }
+
+    private var removedRecordIDs: Set<UUID> {
+        let supersedes = recordSupersedes
+        let duplicates = careEvents.filter { $0.isCurrent && $0.correctionReason == .duplicateEntry }.map(\.id)
+            + consumptions.filter { $0.isCurrent && $0.correctionReason == .duplicateEntry }.map(\.id)
+        return duplicates.reduce(into: Set<UUID>()) { removed, id in
+            removed.formUnion(LivestockCorrectionTitle.chain(from: id, supersedes: supersedes))
+        }
+    }
 }
 
 enum HerdSpeciesWarning {
@@ -1231,10 +1826,25 @@ struct HerdAnimalGroup: Identifiable, Equatable, Sendable {
     let petNames: [String]
 }
 
+enum LivestockHerdMenu {
+    static func assignable(_ herds: [LivestockHerd]) -> [LivestockHerd] {
+        herds.filter { !$0.isRetired }.sorted {
+            $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+
+    /// SwiftUI keeps a Picker's current value in the menu even when that value
+    /// is no longer in the option list. Retired herds must not stay selected.
+    static func selection(_ herdID: UUID?, among herds: [LivestockHerd]) -> UUID? {
+        guard let herdID, assignable(herds).contains(where: { $0.id == herdID }) else { return nil }
+        return herdID
+    }
+}
+
 enum HerdGrouping {
     static func groups(animals: [Animal], herds: [LivestockHerd]) -> [HerdAnimalGroup] {
         let current = animals.filter { !$0.isRetired }
-        let ordered = herds.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        let ordered = LivestockHerdMenu.assignable(herds)
         var groups = ordered.map { herd in
             let members = current.filter { $0.herdID == herd.id }
             return HerdAnimalGroup(
@@ -1266,16 +1876,18 @@ struct HerdOverview: Equatable, Sendable {
     let retiredPets: Int
     let totalCost: Decimal
 
-    static func from(animals: [Animal]) -> HerdOverview {
+    static func from(animals: [Animal], herds: [LivestockHerd] = []) -> HerdOverview {
         let livestock = animals.filter { AnimalCategory.liveStock.includes($0.species) }
         let pets = animals.filter { AnimalCategory.pets.includes($0.species) }
+        let animalCost = animals.reduce(Decimal(0)) { $0 + $1.recordedCostTotal }
+        let herdCost = herds.reduce(Decimal(0)) { $0 + $1.recordedCostTotal }
         return HerdOverview(
             animalCount: animals.count,
             currentLivestock: livestock.filter { !$0.isRetired }.count,
             retiredLivestock: livestock.filter(\.isRetired).count,
             currentPets: pets.filter { !$0.isRetired }.count,
             retiredPets: pets.filter(\.isRetired).count,
-            totalCost: animals.reduce(Decimal(0)) { $0 + $1.recordedCostTotal }
+            totalCost: animalCost + herdCost
         )
     }
 }
@@ -1320,7 +1932,7 @@ enum FixturePresentationBoundary {
     static let lifecycleCorrectionConfirmationBoundary = "A lifecycle correction requires confirmation."
     static let lifecycleAlreadyCorrectedBoundary = "That lifecycle event already has a correction."
     static let lifecycleOrderBoundary = "Routine lifecycle events must be later than the latest event for this animal."
-    static let databaseWriteBoundary = "Saved in the DEV livestock database."
+    static var databaseWriteBoundary: String { "Saved in the \(LivestockBuildStamp.current.databaseLabel)." }
     static let saveConfirmsBoundary = "Save writes what you entered. Saving confirms surgery, vaccination, medication, and cost."
     static let saveNeedsEntryBoundary = "Enter an identifier, lifecycle event, care record, feed quantity, or cost, then save."
     static let classificationStoredBoundary = "Species stays as recorded. Production type and breed can be changed."

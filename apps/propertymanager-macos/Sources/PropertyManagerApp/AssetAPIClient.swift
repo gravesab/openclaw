@@ -167,6 +167,20 @@ extension PropertyAPIClient {
         return try decoder.decode(MacRanchAsset.self, from: data)
     }
 
+    /// Sets or clears (`nil`) the host asset this implement/attachment is used with.
+    func updateHostAsset(id: UUID, hostAssetId: UUID?) async throws -> MacRanchAsset {
+        let url = try makeURL("v1/assets/\(id.uuidString)")
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        meterApplyAuth(&request)
+        let value: Any = hostAssetId.map { $0.uuidString.lowercased() } ?? NSNull()
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["host_asset_id": value])
+        let (data, response) = try await Self.sharedSession.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(MacRanchAsset.self, from: data)
+    }
+
     func deactivateAsset(id: UUID) async throws {
         try await patchAsset(id: id, isActive: false)
     }
@@ -237,7 +251,10 @@ private enum MacAssetList {
                 proposedMeter: core.proposedMeter,
                 meterActivatedAt: core.meterActivatedAt,
                 tasks: nil,
-                pmSummary: core.pmSummary
+                pmSummary: core.pmSummary,
+                hostAssetId: nil,
+                host: nil,
+                attachments: nil
             )
         }
     }
@@ -329,6 +346,26 @@ struct MacAssetMeter: Codable, Hashable, Identifiable {
     }
 }
 
+struct MacAssetRef: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+    }
+
+    init(id: UUID, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try MacFlexibleUUID.decode(c, key: .id)
+        name = try c.decode(String.self, forKey: .name)
+    }
+}
+
 struct MacRanchAsset: Identifiable, Codable, Hashable {
     let id: UUID
     var externalId: String
@@ -341,14 +378,18 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
     var pmSummary: MacPMSummary?
     /// Civil date (`yyyy-MM-dd`) the asset was first placed into service.
     var placedInServiceDate: String?
+    var hostAssetId: UUID?
+    var host: MacAssetRef?
+    var attachments: [MacAssetRef]?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, category, meter, tasks
+        case id, name, category, meter, tasks, host, attachments
         case externalId = "external_id"
         case proposedMeter = "proposed_meter"
         case meterActivatedAt = "meter_activated_at"
         case pmSummary = "pm_summary"
         case placedInServiceDate = "placed_in_service_date"
+        case hostAssetId = "host_asset_id"
     }
 
     init(
@@ -361,7 +402,10 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         meterActivatedAt: Date?,
         tasks: [MacAssetTaskSummary]?,
         pmSummary: MacPMSummary?,
-        placedInServiceDate: String? = nil
+        placedInServiceDate: String? = nil,
+        hostAssetId: UUID? = nil,
+        host: MacAssetRef? = nil,
+        attachments: [MacAssetRef]? = nil
     ) {
         self.id = id
         self.externalId = externalId
@@ -373,6 +417,9 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         self.tasks = tasks
         self.pmSummary = pmSummary
         self.placedInServiceDate = placedInServiceDate
+        self.hostAssetId = hostAssetId
+        self.host = host
+        self.attachments = attachments
     }
 
     init(from decoder: Decoder) throws {
@@ -389,6 +436,9 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         placedInServiceDate = MacCivilDate.normalized(
             try? c.decodeIfPresent(String.self, forKey: .placedInServiceDate)
         )
+        hostAssetId = try? MacFlexibleUUID.decode(c, key: .hostAssetId)
+        host = try c.decodeIfPresent(MacAssetRef.self, forKey: .host)
+        attachments = try c.decodeIfPresent([MacAssetRef].self, forKey: .attachments)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -403,6 +453,9 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(tasks, forKey: .tasks)
         try c.encodeIfPresent(pmSummary, forKey: .pmSummary)
         try c.encodeIfPresent(placedInServiceDate, forKey: .placedInServiceDate)
+        try c.encodeIfPresent(hostAssetId, forKey: .hostAssetId)
+        try c.encodeIfPresent(host, forKey: .host)
+        try c.encodeIfPresent(attachments, forKey: .attachments)
     }
 
     var meterNeedsActivation: Bool {

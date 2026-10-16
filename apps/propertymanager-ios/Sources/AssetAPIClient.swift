@@ -62,6 +62,19 @@ extension PropertyAPIClient {
         return try decoder.decode(RanchAsset.self, from: data)
     }
 
+    func updateHostAsset(id: UUID, hostAssetId: UUID?) async throws -> RanchAsset {
+        let url = try makeURL("/assets/\(id.uuidString)", versioned: true)
+        var request = URLRequest(url: url)
+        request.httpMethod = "PATCH"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        applyAuth(to: &request)
+        let value: Any = hostAssetId.map { $0.uuidString.lowercased() } ?? NSNull()
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["host_asset_id": value])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(RanchAsset.self, from: data)
+    }
+
     func fetchMeterReadings(assetId: UUID, limit: Int = 50) async throws -> [MeterReading] {
         let url = try makeURL("/assets/\(assetId.uuidString)/meter-readings?limit=\(limit)", versioned: true)
         let request = authorizedRequest(url: url)

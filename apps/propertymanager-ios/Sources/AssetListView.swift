@@ -73,6 +73,12 @@ struct AssetRowView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(asset.name)
                 .font(.headline)
+            if let hostName = asset.host?.name {
+                Text("Attached to \(hostName)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
             ForEach(matchingTaskTitles.prefix(3), id: \.self) { title in
                 Label(title, systemImage: "magnifyingglass")
                     .font(.caption)

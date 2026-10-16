@@ -158,6 +158,26 @@ struct AssetPMSummary: Codable, Hashable {
     }
 }
 
+struct AssetRef: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+    }
+
+    init(id: UUID, name: String) {
+        self.id = id
+        self.name = name
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try FlexibleUUID.decode(c, key: .id)
+        name = try c.decode(String.self, forKey: .name)
+    }
+}
+
 struct RanchAsset: Identifiable, Codable, Hashable {
     let id: UUID
     var externalId: String
@@ -174,15 +194,19 @@ struct RanchAsset: Identifiable, Codable, Hashable {
     var meterActivatedAt: Date?
     var tasks: [AssetTaskSummary]?
     var pmSummary: AssetPMSummary?
+    var hostAssetId: UUID?
+    var host: AssetRef?
+    var attachments: [AssetRef]?
 
     enum CodingKeys: String, CodingKey {
-        case id, name, manufacturer, model, category, location, aliases, tasks, meter
+        case id, name, manufacturer, model, category, location, aliases, tasks, meter, host, attachments
         case externalId = "external_id"
         case placedInServiceDate = "placed_in_service_date"
         case qrToken = "qr_token"
         case proposedMeter = "proposed_meter"
         case meterActivatedAt = "meter_activated_at"
         case pmSummary = "pm_summary"
+        case hostAssetId = "host_asset_id"
     }
 
     init(from decoder: Decoder) throws {
@@ -202,6 +226,9 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         meterActivatedAt = FlexibleDate.decode(c, key: .meterActivatedAt)
         tasks = try c.decodeIfPresent([AssetTaskSummary].self, forKey: .tasks)
         pmSummary = try c.decodeIfPresent(AssetPMSummary.self, forKey: .pmSummary)
+        hostAssetId = try? FlexibleUUID.decode(c, key: .hostAssetId)
+        host = try c.decodeIfPresent(AssetRef.self, forKey: .host)
+        attachments = try c.decodeIfPresent([AssetRef].self, forKey: .attachments)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -221,6 +248,9 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(meterActivatedAt, forKey: .meterActivatedAt)
         try c.encodeIfPresent(tasks, forKey: .tasks)
         try c.encodeIfPresent(pmSummary, forKey: .pmSummary)
+        try c.encodeIfPresent(hostAssetId, forKey: .hostAssetId)
+        try c.encodeIfPresent(host, forKey: .host)
+        try c.encodeIfPresent(attachments, forKey: .attachments)
     }
 
     var meterNeedsActivation: Bool {

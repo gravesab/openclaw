@@ -18,6 +18,7 @@ from tools.property_manager.db.schema_contract_extractor import PostgresSchemaCo
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 MIGRATION_DIR = REPO_ROOT / "tools" / "property_manager" / "db"
+RANCHOS_FOUNDATION = REPO_ROOT / "ranchbrain_app" / "migrations" / "001_ranch_os_tenancy_foundation.sql"
 MIGRATIONS = (
     "001_initial_schema.sql",
     "002_rich_task_model.sql",
@@ -30,13 +31,15 @@ MIGRATIONS = (
     "011_work_request_intake.sql",
     "012_asset_manual_parts.sql",
     "013_asset_placed_in_service_date.sql",
+    "014_propertymanager_tenancy.sql",
 )
 REAPPLICABLE_MIGRATIONS = (
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "013"
+EXPECTED_VERSION = "014"
+CHAIN_BOOTSTRAP_TENANT = "11111111-1111-4111-8111-111111111111"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -111,6 +114,9 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             cls._wait_until_ready()
             port = _run(["docker", "port", cls.container_id, "5432/tcp"]).stdout.decode().strip()
             cls.database_port = port.rsplit(":", 1)[1]
+            cls._provision_tenancy_roles()
+            cls._apply_ranchos_foundation()
+            cls._seed_chain_bootstrap_tenant()
         except BaseException as setup_error:
             try:
                 cls._remove_verified_container()
@@ -186,6 +192,42 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         raise AssertionError("isolated PostgreSQL did not become ready")
 
     @classmethod
+    def _provision_tenancy_roles(cls) -> None:
+        """Create the DEV tenancy roles migration 014 requires."""
+        cls._psql(
+            "CREATE ROLE ranchos_dev_migrator NOLOGIN;"
+            " CREATE ROLE ranchos_dev_runtime NOLOGIN;"
+            f" GRANT CREATE ON DATABASE {cls.database_name} TO ranchos_dev_migrator;"
+        )
+
+    @classmethod
+    def _apply_ranchos_foundation(cls) -> None:
+        """Apply the shared ranchos tenancy foundation 014 builds on."""
+        cls._psql("SET ROLE ranchos_dev_migrator;\n" + RANCHOS_FOUNDATION.read_text(encoding="utf-8"))
+
+    @classmethod
+    def _seed_chain_bootstrap_tenant(cls) -> None:
+        """Insert the bootstrap ranch 014 attaches pre-tenancy rows to."""
+        cls._psql(
+            "SET ROLE ranchos_dev_migrator;"
+            f" SET ranchos.tenant_id = '{CHAIN_BOOTSTRAP_TENANT}';"
+            " INSERT INTO ranchos.tenants (id, slug, display_name, status)"
+            f" VALUES ('{CHAIN_BOOTSTRAP_TENANT}', 'bootstrap-ranch', 'Bootstrap Ranch', 'active');"
+        )
+
+    @classmethod
+    def _migration_sql(cls, filename: str) -> str:
+        """Render one canonical migration as the DEV migrator would run it."""
+        preamble = "SET ROLE ranchos_dev_migrator;\n"
+        if filename == "014_propertymanager_tenancy.sql":
+            preamble = (
+                "SET ROLE ranchos_dev_migrator;"
+                " SET app.pm_tenancy_014_apply = 'apply-dev-only';"
+                f" SET app.bootstrap_tenant_id = '{CHAIN_BOOTSTRAP_TENANT}';\n"
+            )
+        return preamble + (MIGRATION_DIR / filename).read_text(encoding="utf-8")
+
+    @classmethod
     def _psql(cls, sql: str) -> str:
         cls._prove_container_identity()
         result = _run(
@@ -243,8 +285,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                         (id, area, item, warning_days, critical_days, last_done, next_due, kind)
                        VALUES ('00000000-0000-0000-0000-000000000099', 'Legacy', 'Work request', 0, 0, now(), now(), 'Work Request')"""
                 )
-            migration = (MIGRATION_DIR / filename).read_bytes()
-            self._psql(migration.decode())
+            self._psql(self._migration_sql(filename))
             applied.append(filename[:3])
             if filename == "009_maintenance_proposals.sql":
                 self.assertEqual(self._extract_contract(), manifest.snapshots["009"].schema_contract)
@@ -262,14 +303,19 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                             (id, area, item, warning_days, critical_days, last_done, next_due, kind)
                            VALUES ('00000000-0000-0000-0000-000000000098', 'New', 'Work request', 0, 0, now(), now(), 'Work Request')"""
                     )
-        self.assertEqual(applied, ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013"])
+            if filename == "013_asset_placed_in_service_date.sql":
+                # The 005/006/009 rollout contract explicitly describes these
+                # migrations as idempotent for future hosts. Reapply only that
+                # promised subset, on the pre-tenancy schema it was promised for.
+                for reappliable in REAPPLICABLE_MIGRATIONS:
+                    self._psql(self._migration_sql(reappliable))
+                self.assertEqual(self._extract_contract(), manifest.snapshots["013"].schema_contract)
+        self.assertEqual(
+            applied,
+            ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014"],
+        )
         self.assertEqual(applied[-1], EXPECTED_VERSION)
-        self.assertEqual(self._extract_contract(), manifest.snapshots["013"].schema_contract)
-
-        # The 005/006/009 rollout contract explicitly describes these migrations as
-        # idempotent for future hosts. Reapply only that promised subset.
-        for filename in REAPPLICABLE_MIGRATIONS:
-            self._psql((MIGRATION_DIR / filename).read_text())
+        self.assertEqual(self._extract_contract(), manifest.snapshots["014"].schema_contract)
 
         tables = set(
             self._psql(
@@ -301,8 +347,8 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         )
 
         expected_columns = {
-            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at", "placed_in_service_date"},
-            "asset_meter": {"meter_epoch", "row_version"},
+            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at", "placed_in_service_date", "tenant_id"},
+            "asset_meter": {"meter_epoch", "row_version", "tenant_id"},
             "asset_meter_reading": {
                 "previous_reading_id",
                 "meter_type_at_entry",
@@ -313,9 +359,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "idempotency_key",
                 "meter_epoch",
                 "corrects_reading_id",
+                "tenant_id",
             },
-            "maintenance_completions": {"meter_value_at_completion", "meter_reading_id"},
-            "maintenance_task_parts": {"quantity", "vendor", "notes"},
+            "maintenance_completions": {"meter_value_at_completion", "meter_reading_id", "tenant_id"},
+            "maintenance_task_parts": {"quantity", "vendor", "notes", "tenant_id"},
             "maintenance_tasks": {
                 "kind",
                 "manufacturer",
@@ -337,7 +384,14 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "triage_reason",
                 "converted_task_id",
                 "intake_idempotency_key",
+                "tenant_id",
             },
+            "maintenance_categories": {"tenant_id"},
+            "maintenance_task_photos": {"tenant_id"},
+            "asset_task_mapping_proposals": {"tenant_id"},
+            "maintenance_proposals": {"tenant_id"},
+            "maintenance_attachment_operations": {"tenant_id"},
+            "maintenance_task_intake_events": {"tenant_id"},
         }
         for table, columns in expected_columns.items():
             actual = set(
@@ -363,8 +417,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "asset_meter_reading_correction_reason_check",
                 "asset_meter_reading_status_check",
                 "asset_task_mapping_proposals_status_check",
-                "maintenance_categories_name_key",
-                "maintenance_tasks_area_item_unique",
+                "maintenance_categories_tenant_name_key",
+                "maintenance_tasks_tenant_area_item_key",
+                "assets_tenant_external_id_key",
+                "assets_tenant_qr_token_key",
                 "maintenance_tasks_kind_check",
                 "maintenance_tasks_origin_check",
                 "maintenance_tasks_schedule_kind_check",
@@ -373,16 +429,17 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
         )
 
         handbook_columns = {
-            "asset_manual": {"asset_id", "document_key", "title", "document_type", "created_by"},
+            "asset_manual": {"asset_id", "document_key", "title", "document_type", "created_by", "tenant_id"},
             "asset_manual_version": {
                 "manual_id", "version_number", "source_locator", "source_sha256", "provenance",
                 "ingestion_status", "review_status", "lifecycle_status", "supersedes_version_id",
+                "tenant_id",
             },
-            "asset_manual_chunk": {"manual_version_id", "chunk_ordinal", "content", "content_sha256", "search_vector"},
-            "asset_manual_state_event": {"manual_version_id", "event_type", "from_state", "to_state", "actor_id"},
+            "asset_manual_chunk": {"manual_version_id", "chunk_ordinal", "content", "content_sha256", "search_vector", "tenant_id"},
+            "asset_manual_state_event": {"manual_version_id", "event_type", "from_state", "to_state", "actor_id", "tenant_id"},
             "asset_manual_part": {
                 "manual_version_id", "reference_number", "oem_part_number", "name", "quantity",
-                "source_page_number", "source_excerpt", "provenance",
+                "source_page_number", "source_excerpt", "provenance", "tenant_id",
             },
         }
         for table, columns in handbook_columns.items():
@@ -441,6 +498,8 @@ class MigrationContainerCleanupTests(unittest.TestCase):
             return subprocess.CompletedProcess(args, 0, b"127.0.0.1:54321\n", b"")
         if args[:3] == ["docker", "rm", "--force"]:
             return subprocess.CompletedProcess(args, 0, f"{self.returned_id}\n".encode(), b"")
+        if args[:2] == ["docker", "exec"]:
+            return subprocess.CompletedProcess(args, 0, b"", b"")
         raise AssertionError(f"unexpected command: {args}")
 
     def _setup_patches(self):
@@ -563,7 +622,7 @@ class MigrationContainerCleanupTests(unittest.TestCase):
             self.test_class.tearDownClass()
 
         self.assertEqual(wait.call_count, 1)
-        self.assertEqual(prove.call_count, 2)
+        self.assertEqual(prove.call_count, 5)
         removal = [
             call.args[0]
             for call in run_mock.call_args_list

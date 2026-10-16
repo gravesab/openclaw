@@ -134,10 +134,31 @@ final class LivestockFoundationTests: XCTestCase {
     }
 
     func testBuildStampShowsDevVersionAndBuild() {
-        let stamp = LivestockBuildStamp(name: "Livestock Management", environment: "DEV", version: "0.1.0", build: "1")
-        XCTAssertEqual(stamp.name, "Livestock Management")
-        XCTAssertEqual(stamp.headerDetail, "Version 0.1.0 · Build 1")
-        XCTAssertEqual(LivestockBuildStamp.current.name, "Livestock Management")
+        let dev = LivestockBuildStamp.resolved(
+            info: [
+                "LivestockEnvironment": "DEV",
+                "CFBundleShortVersionString": "0.1.0",
+                "CFBundleVersion": "1",
+            ],
+            bundleIdentifier: "ai.openclaw.ranchos.livestock.dev"
+        )
+        XCTAssertEqual(dev.name, "Livestock DEV")
+        XCTAssertEqual(dev.environment, "DEV")
+        XCTAssertEqual(dev.headerDetail, "Version 0.1.0 · Build 1")
+
+        let prod = LivestockBuildStamp.resolved(
+            info: [
+                "LivestockEnvironment": "PROD",
+                "CFBundleShortVersionString": "1.2.0",
+                "CFBundleVersion": "9",
+            ],
+            bundleIdentifier: "ai.openclaw.ranchos.livestock"
+        )
+        XCTAssertEqual(prod.name, "Livestock PROD")
+        XCTAssertEqual(prod.environment, "PROD")
+        XCTAssertEqual(prod.headerDetail, "Version 1.2.0 · Build 9")
+
+        XCTAssertEqual(LivestockBuildStamp.current.name, "Livestock DEV")
         XCTAssertEqual(LivestockBuildStamp.current.environment, "DEV")
         XCTAssertFalse(LivestockBuildStamp.current.version.isEmpty)
         XCTAssertFalse(LivestockBuildStamp.current.build.isEmpty)
@@ -159,7 +180,7 @@ final class LivestockFoundationTests: XCTestCase {
     func testNavigationKeepsFirstSliceScreensOnly() {
         XCTAssertEqual(
             LivestockDestination.allCases.map(\.label),
-            ["Herd overview", "Create herd", "Herds that have been retired", "Current livestock", "Live stock that have been retired", "Current pets", "Pets that have been retired"]
+            ["Herd overview", "Create herd", "Herds that have been retired", "Current livestock", "Livestock retired to a better life", "Current pets", "Pets retired to a better life"]
         )
         XCTAssertTrue(AnimalCategory.liveStock.includes(.cattle))
         XCTAssertFalse(AnimalCategory.liveStock.includes(.pet))
@@ -687,6 +708,77 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertTrue(live.animals[0].lifecycleEvents.isEmpty)
     }
 
+    @MainActor
+    func testOwnerCanCorrectALifecycleEventAndKeepTheOriginal() async {
+        let owner = LivestockStore()
+        await owner.loadFixtures()
+        let animalID = owner.animals[0].id
+        let intakeAt = Date(timeIntervalSince1970: 1_700_000_000)
+        guard case .recorded(let intake) = owner.recordFixtureLifecycleEvent(animalID: animalID, type: .intake, occurredAt: intakeAt) else {
+            return XCTFail("Owner should record an intake event")
+        }
+        let correctedAt = intakeAt.addingTimeInterval(-3600)
+        guard case .recorded(let correction) = owner.correctFixtureLifecycleEvent(
+            animalID: animalID,
+            eventID: intake.id,
+            occurredAt: correctedAt,
+            reason: .incorrectTime,
+            confirmed: true
+        ) else {
+            return XCTFail("Owner should correct the intake event")
+        }
+        let events = owner.animals[0].lifecycleEvents
+        XCTAssertEqual(events.count, 2)
+        XCTAssertEqual(correction.type, .intake)
+        XCTAssertEqual(correction.correctionReason, .incorrectTime)
+        XCTAssertEqual(correction.supersedesEventID, intake.id)
+        XCTAssertTrue(correction.isCurrent)
+        XCTAssertEqual(events.first { $0.id == intake.id }?.isCurrent, false)
+        XCTAssertEqual(events.first { $0.id == intake.id }?.occurredAt, intakeAt)
+        XCTAssertEqual(
+            owner.correctFixtureLifecycleEvent(
+                animalID: animalID,
+                eventID: intake.id,
+                occurredAt: correctedAt,
+                reason: .duplicateEntry,
+                confirmed: true
+            ),
+            .rejected(FixturePresentationBoundary.lifecycleAlreadyCorrectedBoundary)
+        )
+        XCTAssertEqual(
+            owner.correctFixtureLifecycleEvent(
+                animalID: animalID,
+                eventID: intake.id,
+                occurredAt: correctedAt,
+                reason: .incorrectValue,
+                confirmed: false
+            ),
+            .rejected(FixturePresentationBoundary.lifecycleCorrectionConfirmationBoundary)
+        )
+
+        let manager = LivestockStore(fixtureWriteRole: .manager)
+        await manager.loadFixtures()
+        guard case .recorded(let managerEvent) = manager.recordFixtureLifecycleEvent(
+            animalID: manager.animals[0].id,
+            type: .tagged,
+            occurredAt: intakeAt
+        ) else {
+            return XCTFail("Manager should record a lifecycle event")
+        }
+        XCTAssertEqual(
+            manager.correctFixtureLifecycleEvent(
+                animalID: manager.animals[0].id,
+                eventID: managerEvent.id,
+                occurredAt: correctedAt,
+                reason: .incorrectTime,
+                confirmed: true
+            ),
+            .rejected(FixturePresentationBoundary.ownerCorrectsLifecycleBoundary)
+        )
+        XCTAssertEqual(manager.animals[0].lifecycleEvents.count, 1)
+        XCTAssertTrue(manager.animals[0].lifecycleEvents[0].isCurrent)
+    }
+
     func testDevTicketRejectsNonLoopbackAndDecodesLiveAnimals() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -712,6 +804,7 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertEqual(page.animals.first?.identifierSummary, "Ear tag AST-1")
         XCTAssertFalse(LivestockDevLoopbackRead.isLoopback(URL(string: "https://127.0.0.1/api")!))
         XCTAssertTrue(LivestockDevLoopbackRead.isLoopback(URL(string: "http://127.0.0.1:9/api/ranchos/livestock/v1/animals")!))
+        XCTAssertFalse(LivestockDevLoopbackRead.acceptsDevURL(URL(string: "http://192.168.50.115:9/api")!))
     }
 
     func testCostsGroupByDateNewestDayFirst() {

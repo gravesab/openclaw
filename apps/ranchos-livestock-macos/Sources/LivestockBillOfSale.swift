@@ -1,5 +1,13 @@
-import AppKit
 import CoreText
+#if canImport(AppKit)
+import AppKit
+private typealias LivestockPDFFont = NSFont
+private func livestockPDFBlack() -> NSColor { .black }
+#elseif canImport(UIKit)
+import UIKit
+private typealias LivestockPDFFont = UIFont
+private func livestockPDFBlack() -> UIColor { .black }
+#endif
 
 enum LivestockBillOfSale {
     static func pdfData(for animal: Animal) -> Data {
@@ -19,11 +27,11 @@ enum LivestockBillOfSale {
             pageOpen = true
         }
 
-        func draw(_ text: String, font: NSFont, gap: CGFloat) {
+        func draw(_ text: String, font: LivestockPDFFont, gap: CGFloat) {
             if !pageOpen { startPage() }
             let attributed = NSAttributedString(string: text, attributes: [
                 .font: font,
-                .foregroundColor: NSColor.black,
+                .foregroundColor: livestockPDFBlack(),
             ])
             let framesetter = CTFramesetterCreateWithAttributedString(attributed)
             let suggested = CTFramesetterSuggestFrameSizeWithConstraints(
@@ -49,9 +57,9 @@ enum LivestockBillOfSale {
             cursor = rect.minY - gap
         }
 
-        let title = NSFont.systemFont(ofSize: 22, weight: .semibold)
-        let heading = NSFont.systemFont(ofSize: 13, weight: .semibold)
-        let body = NSFont.systemFont(ofSize: 12)
+        let title = LivestockPDFFont.systemFont(ofSize: 22, weight: .semibold)
+        let heading = LivestockPDFFont.systemFont(ofSize: 13, weight: .semibold)
+        let body = LivestockPDFFont.systemFont(ofSize: 12)
         for line in lines(for: animal) {
             switch line.kind {
             case .title:
@@ -74,11 +82,36 @@ enum LivestockBillOfSale {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             try pdfData(for: animal).write(to: url, options: .atomic)
+            #if os(macOS)
             NSWorkspace.shared.open(url)
+            #else
+            presentShare(url)
+            #endif
         } catch {
+            #if os(macOS)
             NSSound.beep()
+            #endif
         }
     }
+
+    #if os(iOS)
+    private static func presentShare(_ url: URL) {
+        DispatchQueue.main.async {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            guard let root = scenes.flatMap(\.windows).first(where: \.isKeyWindow)?.rootViewController
+                ?? scenes.flatMap(\.windows).first?.rootViewController
+            else { return }
+            var presenter = root
+            while let next = presenter.presentedViewController { presenter = next }
+            let controller = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            if let popover = controller.popoverPresentationController {
+                popover.sourceView = presenter.view
+                popover.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+            }
+            presenter.present(controller, animated: true)
+        }
+    }
+    #endif
 
     static func filename(for animal: Animal) -> String {
         let stem = animal.displayName
@@ -144,7 +177,8 @@ enum LivestockBillOfSale {
             lines.append(Line("No routine lifecycle history"))
         } else {
             for event in animal.lifecycleEvents {
-                lines.append(Line("\(event.type.label): \(event.occurredAt.formatted(date: .abbreviated, time: .shortened))"))
+                let when = event.occurredAt.formatted(date: .abbreviated, time: .shortened)
+                lines.append(Line("\(event.historyTitle): \(when)"))
             }
         }
 

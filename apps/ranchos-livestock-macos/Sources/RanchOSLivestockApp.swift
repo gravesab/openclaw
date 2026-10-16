@@ -10,10 +10,12 @@ struct RanchOSLivestockApp: App {
     )
 
     var body: some Scene {
-        WindowGroup("Livestock Management") {
+        WindowGroup(LivestockBuildStamp.current.name) {
             LivestockRootView(store: store)
                 .task { await store.loadAuthorizedRead() }
         }
+        #if os(macOS)
         .defaultSize(width: 1_250, height: 780)
+        #endif
     }
 }

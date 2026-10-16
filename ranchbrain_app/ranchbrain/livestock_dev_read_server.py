@@ -311,6 +311,14 @@ class _Handler(BaseHTTPRequestHandler):
             elif action == "lifecycle" and len(parts) == len(prefix) + 2:
                 occurred_at = str(body.get("occurred_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
                 server.records.record_lifecycle(animal_id, str(body.get("type", "")), occurred_at)
+            elif action == "lifecycle" and len(parts) == len(prefix) + 4 and parts[-1] == "correct":
+                server.records.correct_lifecycle(
+                    animal_id,
+                    parts[-2],
+                    str(body.get("occurred_at", "")),
+                    str(body.get("reason", "")),
+                    body.get("confirmed") is True,
+                )
             elif action == "care" and len(parts) == len(prefix) + 2:
                 occurred_at = str(body.get("occurred_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
                 server.records.record_care(animal_id, str(body.get("type", "")), occurred_at, body.get("confirmed") is True)

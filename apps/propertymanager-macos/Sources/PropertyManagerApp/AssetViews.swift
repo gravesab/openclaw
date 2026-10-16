@@ -87,6 +87,12 @@ struct MacAssetsPanel: View {
                             let asset = match.asset
                             VStack(alignment: .leading) {
                                 Text(asset.name).font(.headline)
+                                if let hostName = asset.host?.name {
+                                    Text("Attached to \(hostName)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
                                 if !match.matchingTaskTitles.isEmpty {
                                     Text(match.matchingTaskTitles.prefix(3).joined(separator: " • "))
                                         .font(.caption)
@@ -289,6 +295,8 @@ struct MacAssetDetailPanel: View {
     @State private var hasInServiceDate = false
     @State private var inServiceDate = Date()
     @State private var isSavingInService = false
+    @State private var showingHostPicker = false
+    @State private var isSavingHost = false
 
     private var linkedTasks: [MaintenanceTask] {
         store.tasks
@@ -376,6 +384,52 @@ struct MacAssetDetailPanel: View {
                     Text("Another asset already uses this name.")
                         .font(.caption)
                         .foregroundStyle(.red)
+                }
+
+                GroupBox("Attached to") {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let host = asset.host {
+                            Button(host.name) {
+                                store.selectedTaskAssetId = host.id
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.blue)
+                        } else {
+                            Text("None")
+                                .foregroundStyle(.secondary)
+                        }
+                        HStack {
+                            Button("Change…") {
+                                showingHostPicker = true
+                            }
+                            .disabled(isSavingHost)
+                            if asset.host != nil {
+                                Button("Clear", role: .destructive) {
+                                    Task { await saveHost(nil) }
+                                }
+                                .disabled(isSavingHost)
+                            }
+                        }
+                        Text("Use this when an implement is only used with one host asset (for example a rototiller on a tractor).")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+
+                if let attachments = asset.attachments, !attachments.isEmpty {
+                    GroupBox("Attachments") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(attachments) { attachment in
+                                Button(attachment.name) {
+                                    store.selectedTaskAssetId = attachment.id
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.blue)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
 
                 GroupBox("Placed in service") {
@@ -526,11 +580,46 @@ struct MacAssetDetailPanel: View {
         } message: {
             Text("This hides the asset from lists. Meter history is kept and it can be reactivated later from the API or a future Reactivate UI.")
         }
+        .sheet(isPresented: $showingHostPicker) {
+            MacHostAssetPickerSheet(
+                asset: asset,
+                candidates: hostPickerCandidates
+            ) { hostId in
+                showingHostPicker = false
+                Task { await saveHost(hostId) }
+            } onCancel: {
+                showingHostPicker = false
+            }
+        }
         .task(id: asset.id) {
             syncInServiceDate()
             await loadReadings()
         }
         .onChange(of: asset.placedInServiceDate) { _ in syncInServiceDate() }
+    }
+
+    /// Other active assets that can be a host without creating a cycle.
+    private var hostPickerCandidates: [MacRanchAsset] {
+        let descendantIds = MacAssetHostPolicy.descendantIds(of: asset.id, in: store.assets)
+        return store.assets
+            .filter { $0.id != asset.id && !descendantIds.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func saveHost(_ hostId: UUID?) async {
+        isSavingHost = true
+        defer { isSavingHost = false }
+        do {
+            _ = try await store.apiClient.updateHostAsset(id: asset.id, hostAssetId: hostId)
+            await store.refreshAssets()
+            if let hostId, let host = store.assets.first(where: { $0.id == hostId }) {
+                message = "Attached to \(host.name)."
+            } else {
+                message = "Attachment cleared."
+            }
+        } catch {
+            message = error.localizedDescription
+        }
     }
 
     private var editedInServiceDate: String? {
@@ -698,5 +787,71 @@ struct MacAssetDetailPanel: View {
         case "both": return "\(task.frequency.rawValue) + \(meterLabel)"
         default: return task.frequency.rawValue
         }
+    }
+}
+
+enum MacAssetHostPolicy {
+    /// Assets that already point at `root` through any host chain (must not become its host).
+    static func descendantIds(of root: UUID, in assets: [MacRanchAsset]) -> Set<UUID> {
+        var childrenByHost: [UUID: [UUID]] = [:]
+        for asset in assets {
+            guard let hostId = asset.hostAssetId ?? asset.host?.id else { continue }
+            childrenByHost[hostId, default: []].append(asset.id)
+        }
+        var seen: Set<UUID> = []
+        var stack = childrenByHost[root] ?? []
+        while let next = stack.popLast() {
+            if seen.insert(next).inserted {
+                stack.append(contentsOf: childrenByHost[next] ?? [])
+            }
+        }
+        return seen
+    }
+}
+
+struct MacHostAssetPickerSheet: View {
+    let asset: MacRanchAsset
+    let candidates: [MacRanchAsset]
+    var onSelect: (UUID) -> Void
+    var onCancel: () -> Void
+    @State private var searchText = ""
+
+    private var filtered: [MacRanchAsset] {
+        let words = TaskSearch.words(in: searchText)
+        guard !words.isEmpty else { return candidates }
+        return candidates.filter { candidate in
+            TaskSearch.matches(fields: [candidate.name, candidate.category ?? ""], words: words)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Attach \(asset.name) to…")
+                .font(.title3.bold())
+            TextField("Search assets", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .voiceInput($searchText)
+            List(filtered) { candidate in
+                Button {
+                    onSelect(candidate.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(candidate.name)
+                        if let category = candidate.category, !category.isEmpty {
+                            Text(category)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+            HStack {
+                Spacer()
+                Button("Cancel", role: .cancel, action: onCancel)
+            }
+        }
+        .padding()
+        .frame(minWidth: 420, minHeight: 480)
     }
 }

@@ -8,7 +8,7 @@ import re
 from datetime import date, datetime, timezone
 from difflib import SequenceMatcher
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from flask import g, jsonify, request
 
@@ -21,7 +21,7 @@ import meter_schedule as ms
 ASSET_COLUMNS = """
     a.id, a.external_id, a.ranchbrain_guid, a.name, a.manufacturer, a.model,
     a.category, a.location, a.aliases, a.qr_token, a.is_active,
-    a.placed_in_service_date,
+    a.placed_in_service_date, a.host_asset_id,
     a.meter_proposed_type, a.meter_proposed_unit, a.meter_activated_at,
     a.created_at, a.updated_at
 """
@@ -172,7 +172,84 @@ def duplicate_asset_name_response():
     )
 
 
-def enrich_asset(row: dict) -> dict:
+def _normalize_asset_id(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def parse_host_asset_id(value: Any) -> str | None:
+    """Accept a UUID string or null to clear the host link."""
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("host_asset_id must be a UUID string or null")
+    normalized = value.strip()
+    if not normalized:
+        raise ValueError("host_asset_id must be a UUID string or null")
+    try:
+        return str(UUID(normalized))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("host_asset_id must be a UUID string or null") from exc
+
+
+def host_assignment_would_cycle(asset_id: str, host_asset_id: str) -> bool:
+    """True when walking hosts from host_asset_id upward reaches asset_id."""
+    current = host_asset_id
+    seen: set[str] = set()
+    while current:
+        if current == asset_id:
+            return True
+        if current in seen:
+            return True
+        seen.add(current)
+        row = pm_db.execute_one_json(
+            "SELECT host_asset_id FROM propertymanager.assets WHERE id = %s",
+            (current,),
+        )
+        if row is None:
+            return False
+        current = _normalize_asset_id(row.get("host_asset_id"))
+    return False
+
+
+def fetch_host_ref(host_asset_id: str | None) -> dict | None:
+    host_id = _normalize_asset_id(host_asset_id)
+    if host_id is None:
+        return None
+    row = pm_db.execute_one_json(
+        """
+        SELECT id, name
+        FROM propertymanager.assets
+        WHERE id = %s
+        """,
+        (host_id,),
+    )
+    if row is None:
+        return None
+    return {"id": str(row["id"]), "name": row["name"]}
+
+
+def fetch_attachments(asset_id: str) -> list[dict]:
+    rows = pm_db.execute_json(
+        """
+        SELECT id, name
+        FROM propertymanager.assets
+        WHERE is_active = true AND host_asset_id = %s
+        ORDER BY lower(name), name
+        """,
+        (asset_id,),
+    )
+    return [{"id": str(row["id"]), "name": row["name"]} for row in rows]
+
+
+def enrich_asset(
+    row: dict,
+    *,
+    host_by_id: dict[str, dict] | None = None,
+    attachments_by_host: dict[str, list[dict]] | None = None,
+) -> dict:
     item = dict(row)
     placed_in_service_date = item.get("placed_in_service_date")
     if isinstance(placed_in_service_date, (date, datetime)):
@@ -182,6 +259,16 @@ def enrich_asset(row: dict) -> dict:
             else placed_in_service_date.isoformat()
         )
     asset_id = str(item["id"])
+    host_asset_id = _normalize_asset_id(item.get("host_asset_id"))
+    item["host_asset_id"] = host_asset_id
+    if host_by_id is not None:
+        item["host"] = host_by_id.get(host_asset_id) if host_asset_id else None
+    else:
+        item["host"] = fetch_host_ref(host_asset_id)
+    if attachments_by_host is not None:
+        item["attachments"] = list(attachments_by_host.get(asset_id, []))
+    else:
+        item["attachments"] = fetch_attachments(asset_id)
     current = ms._as_decimal(item.get("current_value"))
     tasks = pm_db.execute_json(
         """
@@ -229,6 +316,44 @@ def enrich_asset(row: dict) -> dict:
     return item
 
 
+def _host_maps_for_rows(rows: list[dict]) -> tuple[dict[str, dict], dict[str, list[dict]]]:
+    """Build host refs and attachment lists from the active asset list payload."""
+    name_by_id = {str(row["id"]): row["name"] for row in rows}
+    host_ids = {
+        host_id
+        for row in rows
+        if (host_id := _normalize_asset_id(row.get("host_asset_id"))) is not None
+    }
+    missing_host_ids = sorted(host_ids - set(name_by_id))
+    if missing_host_ids:
+        extras = pm_db.execute_json(
+            """
+            SELECT id, name
+            FROM propertymanager.assets
+            WHERE id = ANY(%s::uuid[])
+            """,
+            (missing_host_ids,),
+        )
+        for row in extras:
+            name_by_id[str(row["id"])] = row["name"]
+    host_by_id = {
+        host_id: {"id": host_id, "name": name_by_id[host_id]}
+        for host_id in host_ids
+        if host_id in name_by_id
+    }
+    attachments_by_host: dict[str, list[dict]] = {}
+    for row in rows:
+        host_id = _normalize_asset_id(row.get("host_asset_id"))
+        if host_id is None:
+            continue
+        attachments_by_host.setdefault(host_id, []).append(
+            {"id": str(row["id"]), "name": row["name"]}
+        )
+    for host_id, attachments in attachments_by_host.items():
+        attachments.sort(key=lambda item: (item["name"].lower(), item["name"]))
+    return host_by_id, attachments_by_host
+
+
 def list_assets():
     rows = pm_db.execute_json(
         f"""
@@ -239,7 +364,17 @@ def list_assets():
         ORDER BY a.category, a.name
         """
     )
-    return jsonify([enrich_asset(r) for r in rows])
+    host_by_id, attachments_by_host = _host_maps_for_rows(rows)
+    return jsonify(
+        [
+            enrich_asset(
+                row,
+                host_by_id=host_by_id,
+                attachments_by_host=attachments_by_host,
+            )
+            for row in rows
+        ]
+    )
 
 
 def asset_detail(asset_id: str):
@@ -351,7 +486,17 @@ def patch_asset(asset_id: str):
     if not isinstance(payload, dict) or not payload:
         return validation_error("JSON object body required")
 
-    allowed = {"name", "manufacturer", "model", "category", "location", "aliases", "is_active", "placed_in_service_date"}
+    allowed = {
+        "name",
+        "manufacturer",
+        "model",
+        "category",
+        "location",
+        "aliases",
+        "is_active",
+        "placed_in_service_date",
+        "host_asset_id",
+    }
     unknown = sorted(set(payload) - allowed)
     if unknown:
         return validation_error(f"Unsupported fields: {', '.join(unknown)}")
@@ -376,6 +521,33 @@ def patch_asset(asset_id: str):
             payload["placed_in_service_date"] = parse_placed_in_service_date(payload["placed_in_service_date"])
         except ValueError as exc:
             return validation_error(str(exc), field="placed_in_service_date")
+
+    if "host_asset_id" in payload:
+        try:
+            host_asset_id = parse_host_asset_id(payload["host_asset_id"])
+        except ValueError as exc:
+            return validation_error(str(exc), field="host_asset_id")
+        if host_asset_id is not None:
+            if host_asset_id == asset_id:
+                return validation_error("An asset cannot be attached to itself", field="host_asset_id")
+            host = pm_db.execute_one_json(
+                """
+                SELECT id, is_active
+                FROM propertymanager.assets
+                WHERE id = %s
+                """,
+                (host_asset_id,),
+            )
+            if host is None:
+                return validation_error("Host asset was not found", field="host_asset_id")
+            if not host.get("is_active"):
+                return validation_error("Host asset must be active", field="host_asset_id")
+            if host_assignment_would_cycle(asset_id, host_asset_id):
+                return validation_error(
+                    "Attaching would create a cycle in the host chain",
+                    field="host_asset_id",
+                )
+        payload["host_asset_id"] = host_asset_id
 
     updates = []
     values = []

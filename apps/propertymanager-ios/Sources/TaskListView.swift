@@ -3,6 +3,7 @@ import SwiftUI
 struct TaskListView: View {
     @EnvironmentObject private var store: PropertyStore
     @State private var completingTask: MaintenanceTask?
+    @State private var bypassRequest: TaskBypassRequest?
     @State private var showManualLibrary = false
 
     var body: some View {
@@ -30,9 +31,19 @@ struct TaskListView: View {
                     ForEach(section.tasks) { task in
                         TaskRowView(
                             task: task,
-                            groupName: section.name
-                        ) {
-                            completingTask = task
+                            groupName: section.name,
+                            onComplete: { completingTask = task },
+                            onBypass: { action in
+                                bypassRequest = TaskBypassRequest(task: task, action: action)
+                            }
+                        )
+                        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                            Button {
+                                bypassRequest = TaskBypassRequest(task: task, action: .skip)
+                            } label: {
+                                Label("Bypass", systemImage: "forward.end")
+                            }
+                            .tint(.indigo)
                         }
                     }
                 }
@@ -47,7 +58,10 @@ struct TaskListView: View {
             placement: .navigationBarDrawer(displayMode: .always),
             prompt: "Filter assets or tasks (any word)"
         )
-        .refreshable { await store.refresh() }
+        .refreshable {
+            store.clearRecentlyBypassed()
+            await store.refresh()
+        }
         .safeAreaInset(edge: .top) {
             Picker("Origin", selection: $store.originFilter) {
                 ForEach(OriginFilter.allCases) { filter in
@@ -82,6 +96,10 @@ struct TaskListView: View {
             }
             .environmentObject(store)
         }
+        .sheet(item: $bypassRequest) { request in
+            TaskBypassSheet(task: request.task, initialAction: request.action)
+                .environmentObject(store)
+        }
         .sheet(isPresented: $showManualLibrary) {
             NavigationStack {
                 ManualLibraryView(initialAssetID: store.selectedTaskAssetId)
@@ -100,6 +118,7 @@ struct TaskRowView: View {
     let task: MaintenanceTask
     let groupName: String
     let onComplete: () -> Void
+    let onBypass: (TaskBypassAction) -> Void
 
     var body: some View {
         let title = TaskTitle.displayItemTitle(item: task.item, group: groupName)
@@ -107,7 +126,7 @@ struct TaskRowView: View {
             // Whole row navigates to detail; Done stays outside the link.
             NavigationLink(value: task.id) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(title)
+                    Text(TaskTitle.highlightingSafety(title))
                         .font(.headline)
                         .multilineTextAlignment(.leading)
                         .lineLimit(3)
@@ -121,6 +140,11 @@ struct TaskRowView: View {
                     Text(TaskTitle.dueDateLabel(date: task.nextDue))
                         .font(.caption)
                         .foregroundStyle(dueDateColor)
+                    if task.lastBypassedAt != nil {
+                        Label("Bypassed", systemImage: "arrow.uturn.forward.circle")
+                            .font(.caption2)
+                            .foregroundStyle(.indigo)
+                    }
                     if let badge = task.runHoursBadge {
                         Text(badge)
                             .font(.caption2)
@@ -145,6 +169,12 @@ struct TaskRowView: View {
                 Button("Done", action: onComplete)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
+                TaskBypassMenu(task: task, onSelect: onBypass) {
+                    Text("Bypass")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.indigo)
             }
             .fixedSize(horizontal: true, vertical: false)
         }

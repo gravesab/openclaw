@@ -53,6 +53,11 @@ final class PropertyStore: ObservableObject {
     @Published var isLoadingAssets = false
     @Published var isCompleting = false
     @Published var isSaving = false
+    @Published var isBypassing = false
+    /// Rescheduled tasks inside the two-week window stay listed until refresh so the new date is visible.
+    @Published private(set) var recentlyBypassedTaskIDs: Set<UUID> = []
+    /// Done and Bypass leave the list immediately, even if the next due date is still inside the window.
+    @Published private(set) var recentlyClearedTaskIDs: Set<UUID> = []
     @Published var errorMessage: String?
     @Published var statusMessage: String?
 
@@ -90,6 +95,14 @@ final class PropertyStore: ObservableObject {
                 if let wanted = originFilter.matches, task.origin != wanted {
                     return false
                 }
+                if recentlyClearedTaskIDs.contains(task.id) {
+                    return false
+                }
+                if recentlyBypassedTaskIDs.contains(task.id) {
+                    return searchWords.isEmpty
+                        || TaskSearch.matches(fields: searchFields(for: task), words: searchWords)
+                }
+                if !task.isInSchedulingWindow() { return false }
                 switch filter {
                 case .toDo:
                     if !task.isToDo() { return false }
@@ -294,9 +307,7 @@ final class PropertyStore: ObservableObject {
                 meterValueAtCompletion: meterValue,
                 confirmCurrentMeter: confirmCurrentMeter
             )
-            if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
-                tasks[index] = updated
-            }
+            showCleared(updated)
             statusMessage = "Marked \(updated.area) / \(updated.item) done"
             await refreshAssets()
             return true
@@ -304,6 +315,79 @@ final class PropertyStore: ObservableObject {
             errorMessage = error.localizedDescription
             return false
         }
+    }
+
+    func skip(task: MaintenanceTask, note: String) async -> Bool {
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        return await bypass(task: task, keepListed: false) {
+            try await $0.skipTask(id: task.id, note: trimmed.isEmpty ? nil : trimmed)
+        } status: { updated in
+            "Skipped \(updated.item) — next due \(updated.nextDue.formatted(date: .abbreviated, time: .omitted))"
+        }
+    }
+
+    func reschedule(task: MaintenanceTask, body: [String: Any]) async -> Bool {
+        // Stay listed only when the new date is still inside the two-week window.
+        await bypass(task: task, keepListed: nil) {
+            try await $0.rescheduleTask(id: task.id, body: body)
+        } status: { updated in
+            if updated.deferred == true, let held = TaskBypassPolicy.civilDate(updated.deferredUntil) {
+                return "Rescheduled \(updated.item) — held until \(held.formatted(date: .abbreviated, time: .omitted))"
+            }
+            if body["next_due_meter_value"] != nil, let trigger = updated.nextDueMeterValue {
+                return "Rescheduled \(updated.item) — due at \(NSDecimalNumber(decimal: trigger).stringValue) hrs"
+            }
+            return "Rescheduled \(updated.item) to \(updated.nextDue.formatted(date: .abbreviated, time: .omitted))"
+        }
+    }
+
+    private func bypass(
+        task: MaintenanceTask,
+        keepListed: Bool?,
+        request: (PropertyAPIClient) async throws -> MaintenanceTask,
+        status: (MaintenanceTask) -> String
+    ) async -> Bool {
+        isBypassing = true
+        errorMessage = nil
+        defer { isBypassing = false }
+        do {
+            let updated = try await request(client)
+            let listed = keepListed ?? updated.isInSchedulingWindow()
+            showBypassed(updated, keepListed: listed)
+            statusMessage = status(updated)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
+    /// Done or Bypass: leave the list right away.
+    func showCleared(_ updated: MaintenanceTask) {
+        if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
+            tasks[index] = updated
+        }
+        recentlyBypassedTaskIDs.remove(updated.id)
+        recentlyClearedTaskIDs.insert(updated.id)
+    }
+
+    /// Reschedule inside the window keeps the row; outside the window clears it.
+    func showBypassed(_ updated: MaintenanceTask, keepListed: Bool) {
+        if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
+            tasks[index] = updated
+        }
+        if keepListed {
+            recentlyClearedTaskIDs.remove(updated.id)
+            recentlyBypassedTaskIDs.insert(updated.id)
+        } else {
+            recentlyBypassedTaskIDs.remove(updated.id)
+            recentlyClearedTaskIDs.insert(updated.id)
+        }
+    }
+
+    func clearRecentlyBypassed() {
+        recentlyBypassedTaskIDs.removeAll()
+        recentlyClearedTaskIDs.removeAll()
     }
 
     func saveEdits(taskID: UUID, fields: [String: Any], parts: [[String: Any]]? = nil) async -> Bool {

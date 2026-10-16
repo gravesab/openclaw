@@ -120,6 +120,12 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
     var remainingMeter: Decimal?
     var dueMeter: Bool?
     var overdueMeter: Bool?
+    /// Civil date (`YYYY-MM-DD`) a rescheduled meter task is held until.
+    var deferredUntil: String?
+    var deferred: Bool?
+    /// Set while the latest skip or reschedule has not been followed by a completion.
+    var lastBypassAction: String?
+    var lastBypassedAt: String?
     var isActive: Bool
     var primaryPartNumber: String?
     var manufacturer: String?
@@ -150,6 +156,10 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         case remainingMeter = "remaining_meter"
         case dueMeter = "due_meter"
         case overdueMeter = "overdue_meter"
+        case deferredUntil = "deferred_until"
+        case deferred
+        case lastBypassAction = "last_bypass_action"
+        case lastBypassedAt = "last_bypassed_at"
         case isActive = "is_active"
         case primaryPartNumber = "primary_part_number"
         case sourceManualName = "source_manual_name"
@@ -185,6 +195,10 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         remainingMeter = FlexibleDecimal.decodeDecimal(c, key: .remainingMeter)
         dueMeter = try c.decodeIfPresent(Bool.self, forKey: .dueMeter)
         overdueMeter = try c.decodeIfPresent(Bool.self, forKey: .overdueMeter)
+        deferredUntil = try c.decodeIfPresent(String.self, forKey: .deferredUntil)
+        deferred = try c.decodeIfPresent(Bool.self, forKey: .deferred)
+        lastBypassAction = try c.decodeIfPresent(String.self, forKey: .lastBypassAction)
+        lastBypassedAt = try c.decodeIfPresent(String.self, forKey: .lastBypassedAt)
         isActive = try c.decodeIfPresent(Bool.self, forKey: .isActive) ?? true
         primaryPartNumber = try c.decodeIfPresent(String.self, forKey: .primaryPartNumber)
         manufacturer = try c.decodeIfPresent(String.self, forKey: .manufacturer)
@@ -220,6 +234,27 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         return nextDue < endOfToday
     }
 
+    static let schedulingWindowDays = 14
+
+    /// Lists never show work further out than the two-week scheduling window.
+    /// Meter-only tasks have no real calendar date, so they show only when the meter says due.
+    /// A meter hold uses the hold date for the window check.
+    func isInSchedulingWindow(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard let windowEnd = calendar.date(
+            byAdding: .day,
+            value: Self.schedulingWindowDays + 1,
+            to: calendar.startOfDay(for: now)
+        ) else {
+            return true
+        }
+        if deferred == true, let held = TaskBypassPolicy.civilDate(deferredUntil, calendar: calendar) {
+            return held < windowEnd
+        }
+        if dueMeter == true || overdueMeter == true { return true }
+        if scheduleKind == "meter" { return false }
+        return nextDue < windowEnd
+    }
+
     var requiresMeterOnComplete: Bool {
         scheduleKind == "meter" || scheduleKind == "both"
     }
@@ -247,6 +282,9 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
     }
 
     var runHoursBadge: String? {
+        if deferred == true, let held = TaskBypassPolicy.civilDate(deferredUntil) {
+            return "Held until \(held.formatted(date: .abbreviated, time: .omitted))"
+        }
         if overdueMeter == true { return "Overdue" }
         if dueMeter == true { return "Due now" }
         if let rem = remainingMeter, rem > 0 {

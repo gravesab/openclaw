@@ -74,9 +74,9 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>PropertyManager connects to your ranch PropertyManager API on the local network or Tailscale.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>PropertyManager uses the microphone for on-device work-request dictation and voice meter entry.</string>
+	<string>PropertyManager uses the microphone so you can dictate into text boxes, work requests, and meter readings. Speech stays on this device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>PropertyManager converts speech to text on this device for work requests and meter readings.</string>
+	<string>PropertyManager converts your speech to text on this device for text boxes, work requests, and meter readings.</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UISupportedInterfaceOrientations</key>

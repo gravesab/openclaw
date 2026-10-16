@@ -224,7 +224,7 @@ struct AssetDetailView: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(task.item)
+                                Text(TaskTitle.highlightingSafety(task.item))
                                     .foregroundStyle(.primary)
                                 if let badge = task.runHoursBadge {
                                     Text(badge)

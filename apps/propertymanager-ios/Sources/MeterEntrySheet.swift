@@ -92,6 +92,7 @@ struct MeterEntrySheet: View {
                     TextField(entryMode.fieldLabel(for: asset.meter?.meterType), text: $valueText)
                         .keyboardType(.decimalPad)
                     TextField("Note (optional)", text: $note)
+                        .voiceInput($note)
                 }
                 if let preview = pendingPreview {
                     Section("Lower reading confirmation") {

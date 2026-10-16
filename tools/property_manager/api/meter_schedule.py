@@ -914,6 +914,7 @@ def apply_task_completion_transaction(
                    next_due = %s,
                    last_done_meter_value = %s,
                    next_due_meter_value = %s,
+                   deferred_until = NULL,
                    result_notes = COALESCE(%s, result_notes),
                    updated_at = now()
                FROM inserted_completion completion

@@ -95,6 +95,9 @@ def create_mcp_server(repository_factory: Callable[[], PropertyManagerReadReposi
                 meter_due = bool(current is not None and trigger is not None and Decimal(str(current)) == Decimal(str(trigger)))
             except (InvalidOperation, ValueError):
                 meter_overdue = meter_due = False
+            deferred_until = task.get("deferred_until")
+            if deferred_until and today.isoformat() < str(deferred_until)[:10]:
+                meter_overdue = meter_due = False
             include = (calendar_overdue or meter_overdue) if overdue else (calendar_due or meter_due)
             if include:
                 result.append({**task, "calendar_due": calendar_due, "calendar_overdue": calendar_overdue, "meter_due": meter_due, "meter_overdue": meter_overdue})

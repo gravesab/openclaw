@@ -25,6 +25,7 @@ struct SettingsView: View {
                     .keyboardType(.URL)
                     .autocorrectionDisabled()
                     .textContentType(.URL)
+                    .noWritingTools()
 
                 Text("Use your Intel Mini Tailscale or LAN address, for example http://100.85.36.72:5062")
                     .font(.footnote)
@@ -39,6 +40,7 @@ struct SettingsView: View {
                     .keyboardType(.URL)
                     .autocorrectionDisabled()
                     .textContentType(.URL)
+                    .noWritingTools()
                 Text("Stores uploaded manuals and serves them for Extract, for example http://100.85.188.74:5051")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
@@ -58,6 +60,7 @@ struct SettingsView: View {
                 TextField("Operator identity", text: $store.operatorIdentity)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .noWritingTools()
                 Text("Paste the API key here on the phone. Do not put secrets in Xcode.")
                     .font(.caption)
                     .foregroundStyle(.secondary)

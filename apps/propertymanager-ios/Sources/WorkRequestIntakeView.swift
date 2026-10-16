@@ -59,6 +59,7 @@ struct WorkRequestIntakeView: View {
                     }
                 }
                 TextField("Area or location", text: $draft.area)
+                    .voiceInput($draft.area)
             }
             Section("Photos") {
                 PhotosPicker("Add photos", selection: $photoItems, maxSelectionCount: 5, matching: .images)
@@ -68,11 +69,14 @@ struct WorkRequestIntakeView: View {
                 ForEach($draft.materials) { $material in
                     VStack(alignment: .leading) {
                         TextField("Name", text: $material.name)
+                            .voiceInput($material.name)
                         HStack {
                             TextField("Quantity", text: $material.quantity).keyboardType(.decimalPad)
                             TextField("Unit", text: $material.unit)
+                                .voiceInput($material.unit)
                         }
                         TextField("Note", text: $material.note)
+                            .voiceInput($material.note)
                     }
                 }
                 Button("Add material") { draft.materials.append(.manualEntry()) }

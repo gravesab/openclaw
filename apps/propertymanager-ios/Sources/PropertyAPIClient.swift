@@ -198,6 +198,34 @@ final class PropertyAPIClient {
         return try decoder.decode(MaintenanceTask.self, from: data)
     }
 
+    func skipTask(id: UUID, note: String?) async throws -> MaintenanceTask {
+        var body: [String: Any] = [:]
+        if let note { body["note"] = note }
+        return try await postTaskSchedule(id: id, path: "skip", body: body)
+    }
+
+    func rescheduleTask(id: UUID, body: [String: Any]) async throws -> MaintenanceTask {
+        try await postTaskSchedule(id: id, path: "reschedule", body: body)
+    }
+
+    private func postTaskSchedule(id: UUID, path: String, body: [String: Any]) async throws -> MaintenanceTask {
+        let url = try makeURL("/tasks/\(id.uuidString)/\(path)")
+        var request = authorizedRequest(url: url, method: "POST")
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(MaintenanceTask.self, from: data)
+    }
+
+    func fetchScheduleEvents(taskID: UUID) async throws -> [TaskScheduleEvent] {
+        let url = try makeURL("/tasks/\(taskID.uuidString)")
+        let request = authorizedRequest(url: url)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(TaskScheduleEventsBody.self, from: data).scheduleEvents
+    }
+
     func uploadWorkRequestPhoto(_ jpeg: Data, idempotencyKey: String) async throws -> String {
         let issueURL = try makeURL("/v1/work-requests/attachments")
         var issue = authorizedRequest(url: issueURL, method: "POST")
@@ -235,6 +263,17 @@ struct APIErrorBody: Codable {
     var message: String?
     var error: String?
     var field: String?
+}
+
+private struct TaskScheduleEventsBody: Decodable {
+    let scheduleEvents: [TaskScheduleEvent]
+
+    enum CodingKeys: String, CodingKey { case scheduleEvents = "schedule_events" }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        scheduleEvents = try c.decodeIfPresent([TaskScheduleEvent].self, forKey: .scheduleEvents) ?? []
+    }
 }
 
 private struct WorkRequestAttachmentIssue: Codable {

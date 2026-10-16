@@ -18,7 +18,7 @@ from __future__ import annotations
 from typing import Any, Protocol
 from uuid import UUID
 
-from tools.property_manager.tenancy import (
+from ranchbrain_app.ranchbrain.tenancy import (
     Capability,
     TenancyError,
     TenancyErrorCode,
@@ -69,7 +69,7 @@ class TenantSession:
         privileges = cursor.fetchone()
         if privileges is None or privileges[0] or privileges[1]:
             raise TenancyError("tenant sessions refuse privileged database roles")
-        principal_id = str(UUID(str(self._context.principal.id)))
+        principal_id = str(UUID(str(self._context.principal_id)))
         tenant_id = str(UUID(str(self._context.tenant_id)))
         environment = self._context.environment.strip()
         if not environment:
@@ -108,17 +108,17 @@ class TenantSession:
 
 
 def _read_row(session: TenantSession, query: str, parameters: tuple[object, ...]) -> tuple[object, ...] | None:
-    require_capability(session.context, Capability.READ)
+    require_capability(session.context, Capability.PROPERTY_READ)
     return session._fetchone(query, parameters)
 
 
 def _read_rows(session: TenantSession, query: str, parameters: tuple[object, ...]) -> list[tuple[object, ...]]:
-    require_capability(session.context, Capability.READ)
+    require_capability(session.context, Capability.PROPERTY_READ)
     return session._fetchall(query, parameters)
 
 
 def _write(session: TenantSession, query: str, parameters: tuple[object, ...]) -> None:
-    require_capability(session.context, Capability.WRITE)
+    require_capability(session.context, Capability.PROPERTY_WRITE)
     session._execute(query, parameters)
 
 
@@ -158,7 +158,7 @@ def list_assets(session: TenantSession) -> list[tuple[object, ...]]:
 
 def update_asset_name(session: TenantSession, *, asset_id: str, name: str) -> int:
     """Rename an asset of the session tenant. Returns rows matched."""
-    require_capability(session.context, Capability.WRITE)
+    require_capability(session.context, Capability.PROPERTY_WRITE)
     row = session._fetchone(
         "UPDATE propertymanager.assets SET name = %s WHERE tenant_id = %s AND id = %s RETURNING id",
         (name, session.context.tenant_id, asset_id),
@@ -171,7 +171,7 @@ def delete_asset(session: TenantSession, *, asset_id: str) -> int:
 
     Owner-only: the tenancy contract reserves delete and archive for owners.
     """
-    require_capability(session.context, Capability.ADMIN)
+    require_capability(session.context, Capability.PROPERTY_ADMIN)
     row = session._fetchone(
         "DELETE FROM propertymanager.assets WHERE tenant_id = %s AND id = %s RETURNING id",
         (session.context.tenant_id, asset_id),

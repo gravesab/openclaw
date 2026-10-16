@@ -55,6 +55,9 @@ class Capability(str, Enum):
     FINANCE_SOURCE_WRITE = "finance.source.write"
     FINANCE_INTERPRETATION_WRITE = "finance.interpretation.write"
     FINANCE_INTERPRETATION_CORRECT = "finance.interpretation.correct"
+    PROPERTY_READ = "property.read"
+    PROPERTY_WRITE = "property.write"
+    PROPERTY_ADMIN = "property.admin"
 
 
 ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = {
@@ -72,6 +75,9 @@ ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = {
             Capability.FINANCE_SOURCE_WRITE,
             Capability.FINANCE_INTERPRETATION_WRITE,
             Capability.FINANCE_INTERPRETATION_CORRECT,
+            Capability.PROPERTY_READ,
+            Capability.PROPERTY_WRITE,
+            Capability.PROPERTY_ADMIN,
         }
     ),
     Role.MANAGER: frozenset(
@@ -86,6 +92,8 @@ ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = {
             Capability.FINANCE_CHART_WRITE,
             Capability.FINANCE_SOURCE_WRITE,
             Capability.FINANCE_INTERPRETATION_WRITE,
+            Capability.PROPERTY_READ,
+            Capability.PROPERTY_WRITE,
         }
     ),
     Role.VIEWER: frozenset(
@@ -94,6 +102,7 @@ ROLE_CAPABILITIES: dict[Role, frozenset[Capability]] = {
             Capability.LIVESTOCK_READ,
             Capability.TV_TODAY_READ,
             Capability.FINANCE_READ,
+            Capability.PROPERTY_READ,
         }
     ),
 }
@@ -237,12 +246,7 @@ class TenantContextResolver:
             raise TenancyError("tenant membership is ambiguous", TenancyErrorCode.TENANT_CONTEXT_INVALID)
         membership = matches[0]
         if capability not in ROLE_CAPABILITIES[membership.role]:
-            code = (
-                TenancyErrorCode.LIVESTOCK_READ_FORBIDDEN
-                if capability is Capability.LIVESTOCK_READ
-                else TenancyErrorCode.CAPABILITY_FORBIDDEN
-            )
-            raise TenancyError("membership lacks the requested capability", code)
+            raise TenancyError("membership lacks the requested capability", _forbidden_code(capability))
 
         return TenantContext(
             tenant_id=tenant.id,
@@ -252,3 +256,76 @@ class TenantContextResolver:
             environment=principal.environment,
             correlation_id=principal.correlation_id,
         )
+
+
+def _forbidden_code(capability: Capability) -> TenancyErrorCode:
+    if capability is Capability.LIVESTOCK_READ:
+        return TenancyErrorCode.LIVESTOCK_READ_FORBIDDEN
+    return TenancyErrorCode.CAPABILITY_FORBIDDEN
+
+
+def require_capability(context: TenantContext, capability: Capability) -> None:
+    """Fail closed unless the session role grants the capability.
+
+    The same session object authorizes a property call and a livestock or
+    finance check: every application family calls this one helper.
+    """
+
+    if not isinstance(context, TenantContext):
+        raise TenancyError("capability check requires a tenant context")
+    if capability not in ROLE_CAPABILITIES.get(context.role, frozenset()):
+        raise TenancyError(
+            f"role {context.role.value} is not granted {capability.value}",
+            _forbidden_code(capability),
+        )
+
+
+def open_session(
+    *,
+    principal: VerifiedPrincipal,
+    user_id: str,
+    memberships: Iterable[TenantMembership],
+    environment: str,
+    requested_tenant_id: str | None = None,
+    now: datetime | None = None,
+) -> TenantContext:
+    """Open the one ranch session for a verified principal.
+
+    Single sign-on: one sign-in plus that principal's memberships yields one
+    session, and every application authorizes against that same object. One
+    active membership needs no ranch choice; more than one requires an
+    explicit ``requested_tenant_id``. Missing, suspended, or revoked
+    membership denies access. Nothing here creates a user or a membership.
+    """
+
+    current_time = now or datetime.now(timezone.utc)
+    if principal.environment != environment or not principal.is_active_at(current_time):
+        raise TenancyError("principal is not active in this environment")
+    active = [m for m in memberships if m.user_id == user_id and m.status == "active"]
+    if not active:
+        raise TenancyError("no active membership for this principal", TenancyErrorCode.TENANT_NOT_AUTHORIZED)
+    if requested_tenant_id is None or not str(requested_tenant_id).strip():
+        if len({m.tenant_id for m in active}) != 1:
+            raise TenancyError("an explicit tenant selection is required")
+        if len(active) != 1:
+            raise TenancyError("tenant membership is ambiguous", TenancyErrorCode.TENANT_CONTEXT_INVALID)
+        chosen = active[0]
+    else:
+        hint = str(requested_tenant_id).strip()
+        matches = [m for m in active if m.tenant_id == hint]
+        if not matches:
+            raise TenancyError(
+                "requested tenant is not authorized for this principal",
+                TenancyErrorCode.TENANT_NOT_AUTHORIZED,
+            )
+        if len(matches) != 1:
+            raise TenancyError("tenant membership is ambiguous", TenancyErrorCode.TENANT_CONTEXT_INVALID)
+        chosen = matches[0]
+    return TenantContext(
+        tenant_id=chosen.tenant_id,
+        user_id=user_id,
+        principal_id=principal.id,
+        role=chosen.role,
+        environment=environment,
+        correlation_id=principal.correlation_id,
+    )

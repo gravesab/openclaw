@@ -31,9 +31,9 @@ from tools.property_manager.tenancy import (
     Role,
     TenancyError,
     TenancyErrorCode,
-    TenantContext,
     TenantMembership,
     VerifiedPrincipal,
+    open_session,
     require_capability,
 )
 from tools.property_manager.tenant_repository import TenantSession
@@ -110,22 +110,24 @@ def _principal(principal_id: str, correlation_id: str) -> VerifiedPrincipal:
 class TenantContextUnitTests(unittest.TestCase):
     def test_single_membership_needs_no_hint(self) -> None:
         principal = _principal(PRINCIPAL_A, "corr-1")
-        context = TenantContext.resolve(
+        context = open_session(
             principal=principal,
             user_id=USER_A,
             memberships=[TenantMembership(BOOTSTRAP_TENANT, USER_A, Role.OWNER, "active")],
+            environment=ENVIRONMENT,
             requested_tenant_id=None,
         )
         self.assertEqual(context.tenant_id, str(UUID(BOOTSTRAP_TENANT)))
-        self.assertEqual(context.membership_role, Role.OWNER)
+        self.assertEqual(context.role, Role.OWNER)
 
     def test_single_membership_rejects_wrong_hint(self) -> None:
         principal = _principal(PRINCIPAL_A, "corr-2")
         with self.assertRaises(TenancyError) as raised:
-            TenantContext.resolve(
+            open_session(
                 principal=principal,
                 user_id=USER_A,
                 memberships=[TenantMembership(BOOTSTRAP_TENANT, USER_A, Role.OWNER, "active")],
+                environment=ENVIRONMENT,
                 requested_tenant_id=TENANT_B,
             )
         self.assertEqual(raised.exception.code, TenancyErrorCode.TENANT_NOT_AUTHORIZED)
@@ -137,30 +139,34 @@ class TenantContextUnitTests(unittest.TestCase):
             TenantMembership(TENANT_B, USER_MULTI, Role.VIEWER, "active"),
         ]
         with self.assertRaises(TenancyError) as raised:
-            TenantContext.resolve(
-                principal=principal, user_id=USER_MULTI, memberships=memberships, requested_tenant_id=None
+            open_session(
+                principal=principal, user_id=USER_MULTI, memberships=memberships,
+                environment=ENVIRONMENT, requested_tenant_id=None,
             )
-        self.assertEqual(raised.exception.code, TenancyErrorCode.TENANT_NOT_AUTHORIZED)
-        chosen = TenantContext.resolve(
-            principal=principal, user_id=USER_MULTI, memberships=memberships, requested_tenant_id=TENANT_B
+        self.assertEqual(raised.exception.code, TenancyErrorCode.TENANT_CONTEXT_INVALID)
+        chosen = open_session(
+            principal=principal, user_id=USER_MULTI, memberships=memberships,
+            environment=ENVIRONMENT, requested_tenant_id=TENANT_B,
         )
         self.assertEqual(chosen.tenant_id, str(UUID(TENANT_B)))
-        self.assertEqual(chosen.membership_role, Role.VIEWER)
+        self.assertEqual(chosen.role, Role.VIEWER)
 
     def test_suspended_revoked_and_missing_memberships_deny(self) -> None:
         principal = _principal(PRINCIPAL_A, "corr-4")
         for status in ("suspended", "revoked"):
             with self.subTest(status=status):
                 with self.assertRaises(TenancyError):
-                    TenantContext.resolve(
+                    open_session(
                         principal=principal,
                         user_id=USER_A,
                         memberships=[TenantMembership(BOOTSTRAP_TENANT, USER_A, Role.OWNER, status)],
+                        environment=ENVIRONMENT,
                         requested_tenant_id=BOOTSTRAP_TENANT,
                     )
         with self.assertRaises(TenancyError):
-            TenantContext.resolve(
-                principal=principal, user_id=USER_A, memberships=[], requested_tenant_id=BOOTSTRAP_TENANT
+            open_session(
+                principal=principal, user_id=USER_A, memberships=[],
+                environment=ENVIRONMENT, requested_tenant_id=BOOTSTRAP_TENANT,
             )
 
     def test_stale_and_invalid_principals_deny(self) -> None:
@@ -177,10 +183,11 @@ class TenantContextUnitTests(unittest.TestCase):
             correlation_id="corr-5",
         )
         with self.assertRaises(TenancyError):
-            TenantContext.resolve(
+            open_session(
                 principal=stale,
                 user_id=USER_A,
                 memberships=[TenantMembership(BOOTSTRAP_TENANT, USER_A, Role.OWNER, "active")],
+                environment=ENVIRONMENT,
                 requested_tenant_id=BOOTSTRAP_TENANT,
                 now=now,
             )
@@ -199,56 +206,59 @@ class TenantContextUnitTests(unittest.TestCase):
 
     def test_capability_matrix(self) -> None:
         principal = _principal(PRINCIPAL_A, "corr-7")
-        owner = TenantContext.resolve(
+        owner = open_session(
             principal=principal,
             user_id=USER_A,
             memberships=[TenantMembership(BOOTSTRAP_TENANT, USER_A, Role.OWNER, "active")],
+            environment=ENVIRONMENT,
             requested_tenant_id=None,
         )
-        require_capability(owner, Capability.READ)
-        require_capability(owner, Capability.WRITE)
-        require_capability(owner, Capability.ADMIN)
-        manager = TenantContext.resolve(
+        require_capability(owner, Capability.PROPERTY_READ)
+        require_capability(owner, Capability.PROPERTY_WRITE)
+        require_capability(owner, Capability.PROPERTY_ADMIN)
+        manager = open_session(
             principal=_principal(PRINCIPAL_B, "corr-8"),
             user_id=USER_B,
             memberships=[TenantMembership(TENANT_B, USER_B, Role.MANAGER, "active")],
+            environment=ENVIRONMENT,
             requested_tenant_id=None,
         )
-        require_capability(manager, Capability.READ)
-        require_capability(manager, Capability.WRITE)
+        require_capability(manager, Capability.PROPERTY_READ)
+        require_capability(manager, Capability.PROPERTY_WRITE)
         with self.assertRaises(TenancyError) as raised:
-            require_capability(manager, Capability.ADMIN)
+            require_capability(manager, Capability.PROPERTY_ADMIN)
         self.assertEqual(raised.exception.code, TenancyErrorCode.CAPABILITY_FORBIDDEN)
-        viewer = TenantContext.resolve(
+        viewer = open_session(
             principal=_principal(PRINCIPAL_VIEWER, "corr-9"),
             user_id=USER_VIEWER,
             memberships=[TenantMembership(BOOTSTRAP_TENANT, USER_VIEWER, Role.VIEWER, "active")],
+            environment=ENVIRONMENT,
             requested_tenant_id=None,
         )
-        require_capability(viewer, Capability.READ)
+        require_capability(viewer, Capability.PROPERTY_READ)
         with self.assertRaises(TenancyError):
-            require_capability(viewer, Capability.WRITE)
+            require_capability(viewer, Capability.PROPERTY_WRITE)
 
-    def test_context_invariants_reject_mismatches(self) -> None:
+    def test_session_binds_environment_and_principal(self) -> None:
         principal = _principal(PRINCIPAL_A, "corr-10")
         with self.assertRaises(TenancyError):
-            TenantContext(
+            open_session(
                 principal=principal,
+                user_id=USER_A,
+                memberships=[TenantMembership(BOOTSTRAP_TENANT, USER_A, Role.OWNER, "active")],
                 environment="production",
-                tenant_id=BOOTSTRAP_TENANT,
-                user_id=USER_A,
-                membership_role=Role.OWNER,
-                correlation_id="corr-10",
+                requested_tenant_id=BOOTSTRAP_TENANT,
             )
-        with self.assertRaises(TenancyError):
-            TenantContext(
-                principal=principal,
-                environment=ENVIRONMENT,
-                tenant_id=BOOTSTRAP_TENANT,
-                user_id=USER_A,
-                membership_role=Role.OWNER,
-                correlation_id="other",
-            )
+        session = open_session(
+            principal=principal,
+            user_id=USER_A,
+            memberships=[TenantMembership(BOOTSTRAP_TENANT, USER_A, Role.OWNER, "active")],
+            environment=ENVIRONMENT,
+            requested_tenant_id=BOOTSTRAP_TENANT,
+        )
+        self.assertEqual(session.principal_id, str(UUID(PRINCIPAL_A)))
+        self.assertEqual(session.environment, ENVIRONMENT)
+        self.assertEqual(session.correlation_id, "corr-10")
 
 
 class DisposableProofBlocked(RuntimeError):
@@ -598,13 +608,14 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
 
     @classmethod
     def _context(cls, principal_id, correlation_id, user_id, memberships, requested):
-        return TenantContext.resolve(
+        return open_session(
             principal=_principal(principal_id, correlation_id),
             user_id=user_id,
             memberships=[
                 TenantMembership(tenant_id, user_id, role, "active")
                 for tenant_id, role in memberships
             ],
+            environment=ENVIRONMENT,
             requested_tenant_id=requested,
         )
 

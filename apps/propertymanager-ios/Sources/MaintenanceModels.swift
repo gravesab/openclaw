@@ -238,9 +238,8 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
 
     /// Lists never show work further out than the two-week scheduling window.
     /// Meter-only tasks have no real calendar date, so they show only when the meter says due.
+    /// A meter hold uses the hold date for the window check.
     func isInSchedulingWindow(now: Date = Date(), calendar: Calendar = .current) -> Bool {
-        if dueMeter == true || overdueMeter == true { return true }
-        if scheduleKind == "meter" { return false }
         guard let windowEnd = calendar.date(
             byAdding: .day,
             value: Self.schedulingWindowDays + 1,
@@ -248,6 +247,11 @@ struct MaintenanceTask: Identifiable, Codable, Hashable {
         ) else {
             return true
         }
+        if deferred == true, let held = TaskBypassPolicy.civilDate(deferredUntil, calendar: calendar) {
+            return held < windowEnd
+        }
+        if dueMeter == true || overdueMeter == true { return true }
+        if scheduleKind == "meter" { return false }
         return nextDue < windowEnd
     }
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Task bypass contracts: skip keeps the cadence, reschedule moves to a picked target."""
+"""Task bypass contracts: skip moves to tomorrow, reschedule moves to a picked target."""
 
 from __future__ import annotations
 
@@ -181,28 +181,34 @@ class BypassRouteTests(unittest.TestCase):
     def test_skip_requires_credentials(self):
         self.assertEqual(self.client.post("/tasks/task/skip", json={}).status_code, 401)
 
-    def test_calendar_skip_moves_to_next_occurrence_with_note(self):
+    def test_calendar_skip_moves_to_tomorrow_with_note(self):
         response, apply = self.post("/tasks/task/skip", _task(), {"note": "  Parts on order  "})
         self.assertEqual(response.status_code, 200, response.get_json())
         change = apply.call_args.kwargs
         self.assertEqual(change["action"], "skip")
-        self.assertEqual(change["new_next_due"], datetime(2026, 11, 1, 17, 0, tzinfo=timezone.utc))
+        # Ranch midday on 2026-10-05 (day after fixed NOW of 2026-10-04).
+        self.assertEqual(change["new_next_due"], datetime(2026, 10, 5, 17, 0, tzinfo=timezone.utc))
         self.assertIsNone(change["new_deferred_until"])
         self.assertEqual(change["note"], "Parts on order")
         self.assertEqual(response.get_json()["schedule_events"], [{"action": "skip"}])
 
-    def test_meter_skip_advances_trigger_and_calendar(self):
+    def test_meter_skip_holds_until_tomorrow_without_advancing_trigger(self):
         task = _task(asset_id="asset", schedule_kind="meter", meter_interval_value=250, next_due_meter_value=250)
         meter = {"meter_type": "runtime_hours", "current_value": "260"}
         response, apply = self.post("/tasks/task/skip", task, meter=meter)
         self.assertEqual(response.status_code, 200, response.get_json())
-        self.assertEqual(apply.call_args.kwargs["new_next_due_meter"], Decimal("500"))
+        change = apply.call_args.kwargs
+        self.assertEqual(change["new_next_due"], datetime(2026, 10, 5, 17, 0, tzinfo=timezone.utc))
+        self.assertEqual(change["new_next_due_meter"], Decimal("250"))
+        self.assertEqual(change["new_deferred_until"], date(2026, 10, 5))
 
-    def test_one_time_meter_skip_is_rejected(self):
+    def test_one_time_meter_skip_holds_until_tomorrow(self):
         task = _task(asset_id="asset", schedule_kind="meter", next_due_meter_value=250)
         response, apply = self.post("/tasks/task/skip", task, meter={"meter_type": "runtime_hours", "current_value": "10"})
-        self.assertEqual(response.status_code, 400)
-        apply.assert_not_called()
+        self.assertEqual(response.status_code, 200, response.get_json())
+        change = apply.call_args.kwargs
+        self.assertEqual(change["new_deferred_until"], date(2026, 10, 5))
+        self.assertEqual(change["new_next_due_meter"], Decimal("250"))
 
     def test_work_requests_and_missing_tasks_are_rejected(self):
         response, apply = self.post("/tasks/task/skip", _task(kind="Work Request", intake_state="submitted"))

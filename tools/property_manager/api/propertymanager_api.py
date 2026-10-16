@@ -1641,7 +1641,7 @@ def _apply_schedule_change(task: dict, *, action: str, new_next_due, new_next_du
 @app.post("/tasks/<task_id>/skip")
 @auth_required()
 def skip_task(task_id: str):
-    """Bypass this occurrence: move to the next scheduled one without a completion."""
+    """Bypass for one day: schedule tomorrow without recording a completion."""
     payload = request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return validation_error("JSON object body required")
@@ -1655,32 +1655,19 @@ def skip_task(task_id: str):
         return error
 
     now = datetime.now(timezone.utc)
-    warning_days = int(task.get("warning_days") or 0)
-    try:
-        # Anchored on the current due date, not today, so the cadence is kept.
-        new_next_due = ts.skip_calendar_due(
-            ts.parse_db_timestamp(task.get("next_due")),
-            now=now,
-            advance=lambda anchor: next_calendar_due(
-                anchor, frequency=task.get("frequency"), warning_days=warning_days
-            ),
-        )
-        new_next_due_meter = ms._as_decimal(task.get("next_due_meter_value"))
-        if (task.get("schedule_kind") or "calendar") in METER_SCHEDULE_KINDS:
-            new_next_due_meter = ts.skip_meter_due(
-                new_next_due_meter,
-                interval=ms._as_decimal(task.get("meter_interval_value")),
-                current_meter=_current_meter_value(task),
-            )
-    except ValueError as exc:
-        return validation_error(str(exc))
+    tomorrow = ts.ranch_today(now) + timedelta(days=1)
+    new_next_due = ts.due_at_for_date(tomorrow)
+    new_next_due_meter = ms._as_decimal(task.get("next_due_meter_value"))
+    # Meter tasks stay held until tomorrow so due flags do not bring them back today.
+    meter_scheduled = (task.get("schedule_kind") or "calendar") in METER_SCHEDULE_KINDS
+    new_deferred_until = tomorrow if meter_scheduled else None
 
     return _apply_schedule_change(
         task,
         action="skip",
         new_next_due=new_next_due,
         new_next_due_meter=new_next_due_meter,
-        new_deferred_until=None,
+        new_deferred_until=new_deferred_until,
         note=note,
     )
 

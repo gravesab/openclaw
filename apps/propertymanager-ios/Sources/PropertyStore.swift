@@ -54,8 +54,10 @@ final class PropertyStore: ObservableObject {
     @Published var isCompleting = false
     @Published var isSaving = false
     @Published var isBypassing = false
-    /// Bypassed tasks stay listed under any filter until the next pull-to-refresh, so the new date is visible.
+    /// Rescheduled tasks inside the two-week window stay listed until refresh so the new date is visible.
     @Published private(set) var recentlyBypassedTaskIDs: Set<UUID> = []
+    /// Done and Bypass leave the list immediately, even if the next due date is still inside the window.
+    @Published private(set) var recentlyClearedTaskIDs: Set<UUID> = []
     @Published var errorMessage: String?
     @Published var statusMessage: String?
 
@@ -91,6 +93,9 @@ final class PropertyStore: ObservableObject {
                     return false
                 }
                 if let wanted = originFilter.matches, task.origin != wanted {
+                    return false
+                }
+                if recentlyClearedTaskIDs.contains(task.id) {
                     return false
                 }
                 if recentlyBypassedTaskIDs.contains(task.id) {
@@ -302,9 +307,7 @@ final class PropertyStore: ObservableObject {
                 meterValueAtCompletion: meterValue,
                 confirmCurrentMeter: confirmCurrentMeter
             )
-            if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
-                tasks[index] = updated
-            }
+            showCleared(updated)
             statusMessage = "Marked \(updated.area) / \(updated.item) done"
             await refreshAssets()
             return true
@@ -324,7 +327,8 @@ final class PropertyStore: ObservableObject {
     }
 
     func reschedule(task: MaintenanceTask, body: [String: Any]) async -> Bool {
-        await bypass(task: task, keepListed: true) {
+        // Stay listed only when the new date is still inside the two-week window.
+        await bypass(task: task, keepListed: nil) {
             try await $0.rescheduleTask(id: task.id, body: body)
         } status: { updated in
             if updated.deferred == true, let held = TaskBypassPolicy.civilDate(updated.deferredUntil) {
@@ -339,7 +343,7 @@ final class PropertyStore: ObservableObject {
 
     private func bypass(
         task: MaintenanceTask,
-        keepListed: Bool,
+        keepListed: Bool?,
         request: (PropertyAPIClient) async throws -> MaintenanceTask,
         status: (MaintenanceTask) -> String
     ) async -> Bool {
@@ -348,7 +352,8 @@ final class PropertyStore: ObservableObject {
         defer { isBypassing = false }
         do {
             let updated = try await request(client)
-            showBypassed(updated, keepListed: keepListed)
+            let listed = keepListed ?? updated.isInSchedulingWindow()
+            showBypassed(updated, keepListed: listed)
             statusMessage = status(updated)
             return true
         } catch {
@@ -357,18 +362,32 @@ final class PropertyStore: ObservableObject {
         }
     }
 
-    /// A skipped task leaves To Do right away; a rescheduled one stays listed until refresh to show its new date.
+    /// Done or Bypass: leave the list right away.
+    func showCleared(_ updated: MaintenanceTask) {
+        if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
+            tasks[index] = updated
+        }
+        recentlyBypassedTaskIDs.remove(updated.id)
+        recentlyClearedTaskIDs.insert(updated.id)
+    }
+
+    /// Reschedule inside the window keeps the row; outside the window clears it.
     func showBypassed(_ updated: MaintenanceTask, keepListed: Bool) {
         if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
             tasks[index] = updated
         }
         if keepListed {
+            recentlyClearedTaskIDs.remove(updated.id)
             recentlyBypassedTaskIDs.insert(updated.id)
+        } else {
+            recentlyBypassedTaskIDs.remove(updated.id)
+            recentlyClearedTaskIDs.insert(updated.id)
         }
     }
 
     func clearRecentlyBypassed() {
         recentlyBypassedTaskIDs.removeAll()
+        recentlyClearedTaskIDs.removeAll()
     }
 
     func saveEdits(taskID: UUID, fields: [String: Any], parts: [[String: Any]]? = nil) async -> Bool {

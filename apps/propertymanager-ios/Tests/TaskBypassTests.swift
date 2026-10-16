@@ -91,7 +91,7 @@ final class TaskBypassTests: XCTestCase {
     }
 
     @MainActor
-    func testRescheduledTaskStaysListedWithItsNewDateUntilRefresh() throws {
+    func testRescheduledTaskStaysOnlyInsideTheTwoWeekWindow() throws {
         let store = PropertyStore()
         store.filter = .toDo
         store.searchText = ""
@@ -101,14 +101,32 @@ final class TaskBypassTests: XCTestCase {
         store.tasks = [try task(["next_due": "2026-10-01T17:00:00Z"])]
         XCTAssertEqual(store.filteredTasks.count, 1)
 
-        let rescheduled = try task(["next_due": "2099-10-23T17:00:00+00:00"])
-        store.showBypassed(rescheduled, keepListed: true)
+        let insideWindow = try task(["next_due": ISO8601DateFormatter().string(
+            from: Calendar.current.date(byAdding: .day, value: 7, to: Date())!
+        )])
+        store.showBypassed(insideWindow, keepListed: true)
+        XCTAssertEqual(store.filteredTasks.map(\.id), [insideWindow.id])
 
-        XCTAssertEqual(store.filteredTasks.map(\.nextDue), [rescheduled.nextDue])
-        store.searchText = "pump"
+        let outsideWindow = try task(["next_due": "2099-10-23T17:00:00+00:00"])
+        store.showBypassed(outsideWindow, keepListed: false)
         XCTAssertTrue(store.filteredTasks.isEmpty)
-        store.searchText = ""
         store.clearRecentlyBypassed()
+        XCTAssertTrue(store.filteredTasks.isEmpty)
+    }
+
+    @MainActor
+    func testDoneClearsTheTaskFromTheList() throws {
+        let store = PropertyStore()
+        store.filter = .all
+        store.searchText = ""
+        store.originFilter = .all
+        store.selectedCategory = "All"
+        store.selectedTaskAssetId = nil
+        store.tasks = [try task(["next_due": "2026-10-01T17:00:00Z"])]
+        let completed = try task(["next_due": ISO8601DateFormatter().string(
+            from: Calendar.current.date(byAdding: .day, value: 1, to: Date())!
+        )])
+        store.showCleared(completed)
         XCTAssertTrue(store.filteredTasks.isEmpty)
     }
 

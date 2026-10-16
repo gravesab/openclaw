@@ -87,6 +87,8 @@ struct PropertyManagerApp: App {
             ContentView(store: store)
                 .frame(minWidth: 1050, minHeight: 720)
                 .preferredColorScheme(AppAppearance.from(storageValue: appearanceRaw).colorScheme)
+                .fullWritingTools()
+                .onAppear { TextChecking.install() }
                 .toolbar {
                     ToolbarItem(placement: .principal) {
                         HStack(spacing: 6) {
@@ -239,6 +241,12 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
     var dueMeter: Bool? = nil
     var overdueMeter: Bool? = nil
     var assetId: UUID? = nil
+    /// Civil date (`YYYY-MM-DD`) a meter-scheduled task is held off To Do until.
+    var deferredUntil: String? = nil
+    var deferred: Bool? = nil
+    /// Set while the latest skip or reschedule has not been followed by a completion.
+    var lastBypassAction: String? = nil
+    var lastBypassedAt: String? = nil
 
     enum CodingKeys: String, CodingKey {
         case id, area, item, category, kind, priority, frequency
@@ -249,6 +257,7 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         case manufacturer, sourceManualName, origin, partNumbers, referenceURLs, toolsRequired, parts, photoFileNames
         case manualImport
         case scheduleKind, meterIntervalValue, meterIntervalUnit, nextDueMeterValue, remainingMeter, dueMeter, overdueMeter, assetId
+        case deferredUntil, deferred, lastBypassAction, lastBypassedAt
     }
 
     init(
@@ -290,7 +299,11 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         remainingMeter: Decimal? = nil,
         dueMeter: Bool? = nil,
         overdueMeter: Bool? = nil,
-        assetId: UUID? = nil
+        assetId: UUID? = nil,
+        deferredUntil: String? = nil,
+        deferred: Bool? = nil,
+        lastBypassAction: String? = nil,
+        lastBypassedAt: String? = nil
     ) {
         self.id = id
         self.area = area
@@ -331,6 +344,10 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         self.dueMeter = dueMeter
         self.overdueMeter = overdueMeter
         self.assetId = assetId
+        self.deferredUntil = deferredUntil
+        self.deferred = deferred
+        self.lastBypassAction = lastBypassAction
+        self.lastBypassedAt = lastBypassedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -381,6 +398,10 @@ struct MaintenanceTask: Identifiable, Codable, Equatable {
         dueMeter = try c.decodeIfPresent(Bool.self, forKey: .dueMeter)
         overdueMeter = try c.decodeIfPresent(Bool.self, forKey: .overdueMeter)
         assetId = try c.decodeIfPresent(UUID.self, forKey: .assetId)
+        deferredUntil = try c.decodeIfPresent(String.self, forKey: .deferredUntil)
+        deferred = try c.decodeIfPresent(Bool.self, forKey: .deferred)
+        lastBypassAction = try c.decodeIfPresent(String.self, forKey: .lastBypassAction)
+        lastBypassedAt = try c.decodeIfPresent(String.self, forKey: .lastBypassedAt)
     }
 
     /// Keep Mac-only editor fields when an API response omits them.
@@ -427,6 +448,10 @@ final class MaintenanceStore: ObservableObject {
     @Published var categories: [CategoryDefinition] = []
     @Published var selectedTaskID: UUID?
     @Published var statusMessage: String = "Ready"
+    /// Rescheduled tasks inside the two-week window stay listed until Refresh so the new date is visible.
+    @Published private(set) var recentlyBypassedTaskIDs: Set<UUID> = []
+    /// Done and Bypass leave the list immediately, even when the next due date is still inside the window.
+    @Published private(set) var recentlyClearedTaskIDs: Set<UUID> = []
     @Published var manualExtractionState: ManualExtractionState = .idle
     @Published var isOnline: Bool = false
     @Published var lastSyncAt: Date?
@@ -1192,7 +1217,10 @@ final class MaintenanceStore: ObservableObject {
             if selectedTaskID == nil || !tasks.contains(where: { $0.id == selectedTaskID }) {
                 selectedTaskID = tasks.first?.id
             }
-            ensureBuiltInCategories()
+            // The server list is authoritative: built-ins removed there must not reappear here.
+            if remoteCategories.isEmpty {
+                ensureBuiltInCategories()
+            }
             writeLocalCacheOnly()
             isOnline = true
             lastSyncAt = Date()
@@ -1352,11 +1380,14 @@ final class MaintenanceStore: ObservableObject {
         let local = tasks.first(where: { $0.id == task.id }) ?? task
         let completed = updated.mergingEditorFields(from: local)
         acceptServerTask(completed)
+        recentlyBypassedTaskIDs.remove(completed.id)
+        recentlyClearedTaskIDs.insert(completed.id)
         isOnline = true
         lastSyncAt = Date()
         hasLocalChanges = false
         persistSyncState()
-        statusMessage = "Completed · next due \(DateHelper.isoDate(completed.nextDue))"
+        let doneAt = (completed.lastDone ?? Date()).formatted(date: .abbreviated, time: .shortened)
+        statusMessage = "Done \(doneAt) · next due \(DateHelper.isoDate(completed.nextDue))"
 
         switch source {
         case .editor:
@@ -1375,6 +1406,63 @@ final class MaintenanceStore: ObservableObject {
             await refreshAssets()
         }
         return nil
+    }
+
+    /// Skips or reschedules through the server without recording a completion.
+    /// The server owns the new due date, hold, and history entry.
+    /// - Returns: An error message, or nil on success.
+    @MainActor
+    func bypass(task: MaintenanceTask, submission: TaskBypassSubmission) async -> String? {
+        statusMessage = "Bypassing…"
+        let updated: MaintenanceTask
+        do {
+            switch submission {
+            case .skip(let note):
+                updated = try await apiClient.skipTask(id: task.id, note: note)
+            case .reschedule(let body):
+                updated = try await apiClient.rescheduleTask(id: task.id, body: body)
+            }
+        } catch {
+            if case PropertyAPIError.transport = error { isOnline = false }
+            let message = error.localizedDescription
+            statusMessage = "Couldn’t bypass: \(message)"
+            return message
+        }
+
+        let local = tasks.first(where: { $0.id == task.id }) ?? task
+        let bypassed = updated.mergingEditorFields(from: local)
+        acceptServerTask(bypassed)
+        switch submission {
+        case .skip:
+            recentlyBypassedTaskIDs.remove(bypassed.id)
+            recentlyClearedTaskIDs.insert(bypassed.id)
+        case .reschedule:
+            if bypassed.isInSchedulingWindow() {
+                recentlyClearedTaskIDs.remove(bypassed.id)
+                recentlyBypassedTaskIDs.insert(bypassed.id)
+            } else {
+                recentlyBypassedTaskIDs.remove(bypassed.id)
+                recentlyClearedTaskIDs.insert(bypassed.id)
+            }
+        }
+        isOnline = true
+        lastSyncAt = Date()
+        hasLocalChanges = false
+        persistSyncState()
+        if bypassed.deferred == true, let held = TaskBypassPolicy.civilDay(bypassed.deferredUntil) {
+            statusMessage = "Bypassed · held until \(held)"
+        } else {
+            statusMessage = "Bypassed · next due \(DateHelper.isoDate(bypassed.nextDue))"
+        }
+        if AppEnvironment.isDevelopment || automaticCalendarPublishingEnabled {
+            await publishCalendarTasks([bypassed])
+        }
+        return nil
+    }
+
+    func clearRecentlyBypassed() {
+        recentlyBypassedTaskIDs.removeAll()
+        recentlyClearedTaskIDs.removeAll()
     }
 
     func addTask(category filterCategory: String? = nil, kind: TaskKind = .scheduled) {
@@ -2663,6 +2751,7 @@ struct ContentView: View {
     @State private var showingURLImportSheet = false
     @State private var showingManualLibrary = false
     @State private var completionRequest: TaskCompletionRequest?
+    @State private var bypassRequest: TaskBypassRequest?
     @State private var manualImportManufacturer = ""
     @State private var manualImportLockedAssetID: UUID?
     @State private var manualImportSourceManual: PropertyAPIClient.AssetManualLibraryEntry?
@@ -2684,7 +2773,10 @@ struct ContentView: View {
         }
 
         let now = Date()
-        result = result.filter { $0.matches(listFilter, now: now) }
+        result = result.filter {
+            if store.recentlyClearedTaskIDs.contains($0.id) { return false }
+            return store.recentlyBypassedTaskIDs.contains($0.id) || $0.matches(listFilter, now: now)
+        }
 
         if let selectedCategoryFilter {
             result = result.filter { task in
@@ -2757,7 +2849,10 @@ struct ContentView: View {
                 connectionTestResult: store.connectionTestResult,
                 isTestingConnection: store.isTestingConnection,
                 testConnectionAction: { Task { await store.testConnection() } },
-                refreshAction: { Task { await store.refreshFromServer() } },
+                refreshAction: {
+                    store.clearRecentlyBypassed()
+                    Task { await store.refreshFromServer() }
+                },
                 importManualAction: {
                     store.chooseManualPDFAndImport { drafts, manufacturer in
                         manualDrafts = drafts
@@ -2839,10 +2934,28 @@ struct ContentView: View {
                                         task: task,
                                         groupName: section.name,
                                         assets: store.assets,
-                                        isSelected: task.id == store.selectedTaskID
+                                        isSelected: task.id == store.selectedTaskID,
+                                        onDone: {
+                                            store.selectedTaskID = task.id
+                                            completionRequest = TaskCompletionRequest(
+                                                task: task,
+                                                initialNote: TaskCompletionPolicy.initialNote(resultNotes: task.resultNotes),
+                                                source: .editor
+                                            )
+                                        },
+                                        onBypass: { action in
+                                            store.selectedTaskID = task.id
+                                            bypassRequest = TaskBypassRequest(task: task, action: action)
+                                        }
                                     )
                                     .onTapGesture {
                                         store.selectedTaskID = task.id
+                                    }
+                                    .contextMenu {
+                                        TaskBypassMenuItems(task: task) { action in
+                                            store.selectedTaskID = task.id
+                                            bypassRequest = TaskBypassRequest(task: task, action: action)
+                                        }
                                     }
                                 }
                             }
@@ -2907,6 +3020,11 @@ struct ContentView: View {
         .sheet(item: $completionRequest) { request in
             TaskCompletionSheet(store: store, request: request) {
                 completionRequest = nil
+            }
+        }
+        .sheet(item: $bypassRequest) { request in
+            TaskBypassSheet(store: store, request: request) {
+                bypassRequest = nil
             }
         }
         .sheet(isPresented: $showingManualImportReview) {
@@ -2981,6 +3099,13 @@ struct ContentView: View {
                         initialNote: TaskCompletionPolicy.initialNote(resultNotes: task.resultNotes),
                         source: .editor
                     )
+                },
+                bypassAction: { action in
+                    guard let task = store.tasks.first(where: { $0.id == selectedTaskID }) else { return }
+                    bypassRequest = TaskBypassRequest(task: task, action: action)
+                },
+                loadScheduleEventsAction: { taskID in
+                    try await store.apiClient.fetchScheduleEvents(taskID: taskID)
                 },
                 duplicateAction: store.duplicateSelectedTask,
                 deleteAction: store.deleteSelectedTask,
@@ -3308,6 +3433,7 @@ struct ConnectionStatusCard: View {
             TextField("http://host:5062", text: $apiBaseURL)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
+                .noWritingTools()
 
             Text("API Key")
                 .font(.caption2)
@@ -3322,6 +3448,7 @@ struct ConnectionStatusCard: View {
             TextField(AppEnvironment.defaultManualLibraryBaseURL, text: $manualLibraryBaseURL)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
+                .noWritingTools()
 
             Text("Operator PIN")
                 .font(.caption2)
@@ -3336,6 +3463,7 @@ struct ConnectionStatusCard: View {
             TextField(PropertyAPIClient.defaultOperatorIdentity, text: $operatorIdentity)
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
+                .noWritingTools()
 
             Button(isTestingConnection ? "Testing…" : "Test Connection", action: testConnectionAction)
                 .controlSize(.small)
@@ -3557,6 +3685,7 @@ struct TaskListHeaderView: View {
             HStack {
                 TextField("Search tasks, parts, vendors (any word)...", text: $searchText)
                     .textFieldStyle(.roundedBorder)
+                    .voiceInput($searchText)
                 if !searchText.isEmpty {
                     Button {
                         searchText = ""
@@ -3749,6 +3878,7 @@ struct TaskListHeaderView: View {
                     .foregroundStyle(.secondary)
                 TextField("Category name", text: $newCategoryName)
                     .textFieldStyle(.roundedBorder)
+                    .voiceInput($newCategoryName)
                 HStack {
                     Button("Cancel") { showingAddCategory = false }
                     Spacer()
@@ -3791,6 +3921,8 @@ struct TaskRowView: View {
     let groupName: String
     let assets: [MacRanchAsset]
     let isSelected: Bool
+    var onDone: (() -> Void)?
+    var onBypass: ((TaskBypassAction) -> Void)?
 
     var body: some View {
         let displayTitle = TaskTitle.displayItemTitle(item: task.item, group: groupName)
@@ -3820,7 +3952,7 @@ struct TaskRowView: View {
                             .foregroundStyle(.secondary)
                     }
 
-                    Text(displayTitle)
+                    Text(TaskTitle.highlightingSafety(displayTitle))
                         .fontWeight(.semibold)
                         .lineLimit(2)
                 }
@@ -3828,7 +3960,7 @@ struct TaskRowView: View {
                 Text(equipmentSubtitle(for: task))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .lineLimit(2)
 
                 if let badge = task.meterBadge(assets: assets) {
                     Text(badge)
@@ -3836,13 +3968,23 @@ struct TaskRowView: View {
                         .foregroundStyle(task.overdueMeter == true ? Color.red : (task.dueMeter == true ? Color.orange : Color.secondary))
                 }
 
-                                Text("Est. \(task.estimatedMinutes) min  •  Due:\u{00A0}\(DateHelper.isoDate(task.nextDue))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.85)
+                ViewThatFits(in: .horizontal) {
+                    Text("Est. \(task.estimatedMinutes) min  •  Due:\u{00A0}\(DateHelper.isoDate(task.nextDue))")
+                        .fixedSize()
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Est. \(task.estimatedMinutes) min")
+                        Text("Due:\u{00A0}\(DateHelper.isoDate(task.nextDue))")
+                            .fixedSize()
+                    }
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+                if task.lastBypassedAt != nil {
+                    Label("Bypassed", systemImage: "arrow.uturn.forward.circle")
+                        .font(.caption2)
+                        .foregroundStyle(.indigo)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
 
@@ -3868,6 +4010,27 @@ struct TaskRowView: View {
                     .background(statusColor.opacity(0.14))
                     .foregroundStyle(statusColor)
                     .clipShape(Capsule())
+
+                if let onDone, TaskBypassPolicy.canBypass(task) {
+                    Button("Done", action: onDone)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(.green)
+                        .fixedSize()
+                        .help("Mark this task finished. The server records today's date and time.")
+                }
+
+                if let onBypass, TaskBypassPolicy.canBypass(task) {
+                    TaskBypassMenu(task: task, onSelect: onBypass) {
+                        Text("Bypass")
+                    }
+                    .menuIndicator(.hidden)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .tint(.indigo)
+                    .fixedSize()
+                    .help("Skip to the next due date or reschedule, without marking the task done.")
+                }
             }
         }
         .padding(12)
@@ -3977,6 +4140,9 @@ extension MaintenanceTask {
 
     func meterBadge(assets: [MacRanchAsset]) -> String? {
         let unit = meterUnitLabel(assets: assets)
+        if deferred == true, let held = TaskBypassPolicy.civilDay(deferredUntil) {
+            return "Held until \(held)"
+        }
         if overdueMeter == true { return "Overdue" }
         if dueMeter == true { return "Due now" }
         if let rem = remainingMeter, rem > 0 {
@@ -4114,6 +4280,8 @@ struct TaskEditorView: View {
     let autosaveAction: (MaintenanceTask) -> Void
     let saveAction: () -> Void
     let completeAction: () -> Void
+    let bypassAction: (TaskBypassAction) -> Void
+    let loadScheduleEventsAction: (UUID) async throws -> [TaskScheduleEvent]
     let duplicateAction: () -> Void
     let deleteAction: () -> Void
     let addPhotoAction: () -> Void
@@ -4121,6 +4289,24 @@ struct TaskEditorView: View {
     let loadPhotoAction: (UUID, String) async throws -> Data
     let fillHowToAction: () -> Void
     @State private var isFillingHowTo = false
+    @State private var scheduleEvents: [TaskScheduleEvent] = []
+    @State private var scheduleEventsError: String?
+
+    private struct ScheduleHistoryKey: Equatable {
+        let taskID: UUID
+        let nextDue: Date
+        let nextDueMeterValue: Decimal?
+        let deferredUntil: String?
+    }
+
+    private var scheduleHistoryKey: ScheduleHistoryKey {
+        ScheduleHistoryKey(
+            taskID: task.id,
+            nextDue: task.nextDue,
+            nextDueMeterValue: task.nextDueMeterValue,
+            deferredUntil: task.deferredUntil
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -4143,6 +4329,7 @@ struct TaskEditorView: View {
 
                         completionCard
                         historyCard
+                        bypassHistoryCard
                         automationCard
                     }
                     .padding(20)
@@ -4160,6 +4347,24 @@ struct TaskEditorView: View {
         }
         .onChange(of: task) { newValue in
             autosaveAction(newValue)
+        }
+        .task(id: scheduleHistoryKey) {
+            await loadScheduleEvents()
+        }
+    }
+
+    @MainActor
+    private func loadScheduleEvents() async {
+        let taskID = task.id
+        do {
+            let events = try await loadScheduleEventsAction(taskID)
+            guard task.id == taskID else { return }
+            scheduleEvents = events
+            scheduleEventsError = nil
+        } catch {
+            guard !error.isCancellation, task.id == taskID else { return }
+            scheduleEvents = []
+            scheduleEventsError = "Couldn’t load bypass history: \(error.localizedDescription)"
         }
     }
 
@@ -4344,6 +4549,7 @@ struct TaskEditorView: View {
                 LabeledField(title: "Item (Shared)") {
                     TextField("Item", text: $task.item)
                         .textFieldStyle(.roundedBorder)
+                        .voiceInput($task.item)
                 }
 
                 HStack(spacing: 16) {
@@ -4371,6 +4577,7 @@ struct TaskEditorView: View {
                 LabeledField(title: "Description") {
                     TextField("Description", text: $task.taskDescription, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
+                        .voiceInput($task.taskDescription)
                 }
             }
         }
@@ -4484,10 +4691,12 @@ struct TaskEditorView: View {
                         RoundedRectangle(cornerRadius: 10)
                             .stroke(Color.secondary.opacity(0.25))
                     )
+                    .voiceInput($task.responseInstructions)
 
                 LabeledField(title: "Supplies Needed") {
                     TextField("Supplies Needed", text: $task.suppliesNeeded, axis: .vertical)
                         .textFieldStyle(.roundedBorder)
+                        .voiceInput($task.suppliesNeeded)
                 }
 
                 LabeledField(title: "Extra Notes") {
@@ -4502,6 +4711,7 @@ struct TaskEditorView: View {
                                 .stroke(Color.secondary.opacity(0.25))
                         )
                         .accessibilityLabel("Extra Notes")
+                        .voiceInput($task.notes)
                 }
             }
         }
@@ -4526,11 +4736,13 @@ struct TaskEditorView: View {
                     LabeledField(title: "Manufacturer") {
                         TextField("Manufacturer", text: $task.manufacturer)
                             .textFieldStyle(.roundedBorder)
+                            .voiceInput($task.manufacturer)
                     }
                     LabeledField(title: "Source Manual") {
                         HStack {
                             TextField("Manual file name or URL", text: $task.sourceManualName)
                                 .textFieldStyle(.roundedBorder)
+                                .noWritingTools()
                             if let url = ManualSourceLink.url(
                                 provenanceURL: task.manualImport?.provenance.originalURL,
                                 displayName: task.sourceManualName,
@@ -4564,6 +4776,7 @@ struct TaskEditorView: View {
                             HStack(spacing: 8) {
                                 TextField("Part name (e.g. Engine oil)", text: $task.parts[index].name)
                                     .textFieldStyle(.roundedBorder)
+                                    .voiceInput($task.parts[index].name)
                                 Button(role: .destructive) {
                                     task.parts.remove(at: index)
                                 } label: {
@@ -4574,13 +4787,16 @@ struct TaskEditorView: View {
                             HStack(spacing: 8) {
                                 TextField("OEM part number", text: $task.parts[index].oemPartNumber)
                                     .textFieldStyle(.roundedBorder)
+                                    .noWritingTools()
                                 TextField("Part number", text: $task.parts[index].partNumber)
                                     .textFieldStyle(.roundedBorder)
+                                    .noWritingTools()
                             }
 
                             HStack(spacing: 8) {
                                 TextField("Buy URL", text: $task.parts[index].buyURL)
                                     .textFieldStyle(.roundedBorder)
+                                    .noWritingTools()
                                 TextField(
                                     "Cost",
                                     value: $task.parts[index].cost,
@@ -4619,11 +4835,14 @@ struct TaskEditorView: View {
                         HStack(spacing: 8) {
                             TextField("Tool", text: $task.toolsRequired[index].name)
                                 .textFieldStyle(.roundedBorder)
+                                .voiceInput($task.toolsRequired[index].name)
                             TextField("Size", text: $task.toolsRequired[index].size)
                                 .textFieldStyle(.roundedBorder)
+                                .noWritingTools()
                                 .frame(maxWidth: 100)
                             TextField("Notes", text: $task.toolsRequired[index].notes)
                                 .textFieldStyle(.roundedBorder)
+                                .voiceInput($task.toolsRequired[index].notes)
                             Button(role: .destructive) {
                                 task.toolsRequired.remove(at: index)
                             } label: {
@@ -4646,7 +4865,9 @@ struct TaskEditorView: View {
 
         CardView(title: "Response Preview", icon: "eye") {
             VStack(alignment: .leading, spacing: 10) {
-                Text(TaskTitle.displayFullTitle(area: task.area, item: task.item, assetId: task.assetId, assets: assets))
+                Text(TaskTitle.highlightingSafety(
+                    TaskTitle.displayFullTitle(area: task.area, item: task.item, assetId: task.assetId, assets: assets)
+                ))
                     .font(.headline)
                     .fontWeight(.bold)
 
@@ -4704,6 +4925,13 @@ struct TaskEditorView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
 
+                    TaskBypassMenu(task: task, onSelect: bypassAction) {
+                        Label("Bypass", systemImage: "arrow.uturn.forward.circle")
+                    }
+                    .fixedSize()
+                    .disabled(!TaskBypassPolicy.canBypass(task))
+                    .help("Skip to the next due date or reschedule, without marking the task done.")
+
                     Text(task.lastDone.map { "Last done: \(DateHelper.isoDate($0))" } ?? "Last done: Never")
                         .foregroundStyle(.secondary)
 
@@ -4721,6 +4949,7 @@ struct TaskEditorView: View {
                             RoundedRectangle(cornerRadius: 10)
                                 .stroke(Color.secondary.opacity(0.25))
                         )
+                        .voiceInput($task.resultNotes)
                 }
             }
         }
@@ -4743,6 +4972,18 @@ struct TaskEditorView: View {
                             .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
                 }
+            }
+        }
+    }
+
+    var bypassHistoryCard: some View {
+        CardView(title: "Bypass History", icon: "arrow.uturn.forward.circle") {
+            VStack(alignment: .leading, spacing: 8) {
+                if let scheduleEventsError {
+                    Text(scheduleEventsError)
+                        .foregroundStyle(.secondary)
+                }
+                TaskScheduleHistoryList(events: scheduleEvents)
             }
         }
     }
@@ -4799,6 +5040,13 @@ struct TaskEditorView: View {
                 .tint(.green)
                 .fixedSize()
                 .help("Mark complete on the server (advances next due). Does not replace Save for field edits.")
+
+                TaskBypassMenu(task: task, onSelect: bypassAction) {
+                    Label("Bypass", systemImage: "arrow.uturn.forward.circle")
+                }
+                .fixedSize()
+                .disabled(!TaskBypassPolicy.canBypass(task))
+                .help("Skip to the next due date or reschedule, without marking the task done.")
             }
         }
         .padding(16)
@@ -4952,6 +5200,7 @@ struct URLManualImportSheet: View {
 
             TextField("https://manuals.example.com/.../toc.html", text: $urlText)
                 .textFieldStyle(.roundedBorder)
+                .noWritingTools()
                 .disabled(isFetching)
 
             if isFetching || statusMessage.localizedCaseInsensitiveContains("Fetching manual")
@@ -5419,6 +5668,7 @@ struct ManualLibrarySheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 TextField("Search library PDFs (any word)...", text: $librarySearch)
                     .textFieldStyle(.roundedBorder)
+                    .voiceInput($librarySearch)
                 if !libraryError.isEmpty {
                     Text(libraryError)
                         .font(.caption)

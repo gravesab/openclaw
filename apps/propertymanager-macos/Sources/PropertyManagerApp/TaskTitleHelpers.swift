@@ -1,6 +1,18 @@
-import Foundation
+import SwiftUI
 
 enum TaskTitle {
+    /// Every "safety" in a task title is shown red and bold, in any capitalization.
+    static func highlightingSafety(_ title: String) -> AttributedString {
+        var attributed = AttributedString(title)
+        var searchStart = attributed.startIndex
+        while let range = attributed[searchStart...].range(of: "safety", options: .caseInsensitive) {
+            attributed[range].foregroundColor = .red
+            attributed[range].inlinePresentationIntent = .stronglyEmphasized
+            searchStart = range.upperBound
+        }
+        return attributed
+    }
+
     static func displayAssetName(area: String, assetId: UUID?, assets: [MacRanchAsset]) -> String {
         if let assetId,
            let name = assets.first(where: { $0.id == assetId })?.name.trimmingCharacters(in: .whitespacesAndNewlines),

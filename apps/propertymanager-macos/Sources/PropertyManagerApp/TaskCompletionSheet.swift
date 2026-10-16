@@ -138,9 +138,9 @@ struct TaskCompletionSheet: View {
             Text("Complete task")
                 .font(.title2.weight(.semibold))
             VStack(alignment: .leading, spacing: 4) {
-                Text(task.item)
+                Text(TaskTitle.highlightingSafety(task.item))
                     .font(.headline)
-                Text("Completion time is recorded by the server.")
+                Text("Marked finished with today's date and time when you click Mark Complete.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -154,6 +154,7 @@ struct TaskCompletionSheet: View {
                     .font(.body)
                     .frame(minHeight: 70)
                     .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.3)))
+                    .voiceInput($note)
             }
 
             if let localError {

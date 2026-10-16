@@ -598,7 +598,7 @@ private enum MacFlexibleUUID {
 }
 
 /// Postgres/Flask timestamps often have 1–6 fractional digits; Apple ISO8601 is picky.
-private enum MacFlexibleDate {
+enum MacFlexibleDate {
     static func decode<K: CodingKey>(_ c: KeyedDecodingContainer<K>, key: K) -> Date? {
         if c.contains(key), (try? c.decodeNil(forKey: key)) == true {
             return nil

@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject private var store: PropertyStore
+    @Environment(\.scenePhase) private var scenePhase
     @AppStorage(PropertyManagerBuildEnvironment.appearanceKey)
     private var appearanceRaw: String = AppAppearance.system.rawValue
 
@@ -67,6 +68,12 @@ struct RootView: View {
         }
         .fullWritingTools()
         .onAppear { SpellChecking.install() }
+        // Let the system Home gesture suspend the app cleanly: release the mic/session.
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                FieldDictation.shared.stop()
+            }
+        }
         .task {
             await store.refresh()
             await store.refreshAssets()

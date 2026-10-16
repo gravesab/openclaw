@@ -72,6 +72,15 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertTrue(LivestockCatalog.petBreeds(for: .cat).contains("Siamese"))
         XCTAssertTrue(LivestockCatalog.petBreeds(for: .bird).contains("Cockatiel"))
         XCTAssertTrue(LivestockCatalog.petBreeds(for: .reptile).contains("Bearded Dragon"))
+        for kind in [PetKind.dog, .cat, .bird, .reptile, .other] {
+            let menu = LivestockCatalog.petBreedMenu(for: kind)
+            XCTAssertEqual(menu.prefix(2).map(\.value), ["mixed", "typed"])
+            XCTAssertEqual(menu.prefix(2).map(\.label), ["Mixed", "Type a breed"])
+        }
+        let dogMenu = LivestockCatalog.petBreedMenu(for: .dog)
+        XCTAssertEqual(dogMenu.dropFirst(2).first?.value, "Akita")
+        XCTAssertTrue(dogMenu.contains { $0.value == "Labrador Retriever" })
+        XCTAssertFalse(LivestockCatalog.petBreedMenu(for: .other).contains { $0.value == "Labrador Retriever" })
 
         var typed = AddAnimalDraft(category: .pets, displayName: "Moss")
         typed.selectPetKind(.cat)
@@ -87,6 +96,12 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertEqual(mixed.petBreedProblem, "Enter both breeds in the mix.")
         mixed.mixBreedTwo = "Poodle"
         XCTAssertNil(mixed.petBreedProblem)
+        mixed.selectPetKind(.cat)
+        XCTAssertEqual(mixed.petBreedChoice, "mixed")
+        mixed.mixBreedOne = "Siamese"
+        mixed.mixBreedTwo = "Maine Coon"
+        XCTAssertNil(mixed.petBreedProblem)
+        XCTAssertEqual(mixed.recordedPetBreed, "mixed")
         var other = AddAnimalDraft(category: .pets, displayName: "Moss")
         other.selectPetKind(.other)
         XCTAssertEqual(other.petFormProblem, "Enter the species.")
@@ -157,9 +172,14 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertEqual(prod.name, "Livestock PROD")
         XCTAssertEqual(prod.environment, "PROD")
         XCTAssertEqual(prod.headerDetail, "Version 1.2.0 · Build 9")
+        XCTAssertEqual(prod.databaseLabel, "livestock database")
+        XCTAssertEqual(prod.serverLabel, "livestock server")
+        XCTAssertTrue(prod.isProduction)
 
         XCTAssertEqual(LivestockBuildStamp.current.name, "Livestock DEV")
         XCTAssertEqual(LivestockBuildStamp.current.environment, "DEV")
+        XCTAssertEqual(LivestockBuildStamp.current.databaseLabel, "DEV database")
+        XCTAssertFalse(LivestockBuildStamp.current.isProduction)
         XCTAssertFalse(LivestockBuildStamp.current.version.isEmpty)
         XCTAssertFalse(LivestockBuildStamp.current.build.isEmpty)
     }
@@ -177,22 +197,120 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertEqual(store.animals.first { $0.id == store.selectedAnimalID }?.displayName, "Cedar")
     }
 
+    @MainActor
+    func testFixtureRenameUpdatesLivestockPetsAndHerds() async {
+        let store = LivestockStore()
+        await store.loadFixtures()
+        let animal = try! XCTUnwrap(store.animals.first { $0.species == .pet } ?? store.animals.first)
+        let blank = await store.renameAnimal(animalID: animal.id, displayName: "   ")
+        XCTAssertEqual(blank, "Display name is required.")
+        XCTAssertEqual(store.animals.first { $0.id == animal.id }?.displayName, animal.displayName)
+        let saved = await store.renameAnimal(animalID: animal.id, displayName: "  North Pasture  ")
+        XCTAssertEqual(saved, "Name saved.")
+        XCTAssertEqual(store.animals.first { $0.id == animal.id }?.displayName, "North Pasture")
+
+        let eastSaved = await store.createHerd(name: "East Field")
+        let westSaved = await store.createHerd(name: "West Field")
+        XCTAssertEqual(eastSaved, "Herd saved.")
+        XCTAssertEqual(westSaved, "Herd saved.")
+        let east = try! XCTUnwrap(store.herds.first { $0.name == "East Field" })
+        let duplicate = await store.renameHerd(herdID: east.id, name: "west field")
+        XCTAssertEqual(duplicate, "That herd name is already used.")
+        XCTAssertEqual(store.herds.first { $0.id == east.id }?.name, "East Field")
+        let assigned = await store.assignHerd(animalID: animal.id, herdID: east.id)
+        XCTAssertEqual(assigned, "Herd assigned.")
+        let renamedHerd = await store.renameHerd(herdID: east.id, name: "  North Field  ")
+        XCTAssertEqual(renamedHerd, "Name saved.")
+        XCTAssertEqual(store.herds.first { $0.id == east.id }?.name, "North Field")
+        XCTAssertEqual(store.animals.first { $0.id == animal.id }?.herdName, "North Field")
+
+        let viewer = LivestockStore(fixtureWriteRole: .viewer)
+        await viewer.loadFixtures()
+        let blocked = try! XCTUnwrap(viewer.animals.first)
+        let denied = await viewer.renameAnimal(animalID: blocked.id, displayName: "Hidden")
+        XCTAssertNotEqual(denied, "Name saved.")
+        XCTAssertEqual(viewer.animals.first { $0.id == blocked.id }?.displayName, blocked.displayName)
+    }
+
     func testNavigationKeepsFirstSliceScreensOnly() {
         XCTAssertEqual(
             LivestockDestination.allCases.map(\.label),
-            ["Herd overview", "Create herd", "Herds that have been retired", "Current livestock", "Livestock retired to a better life", "Current pets", "Pets retired to a better life"]
+            ["Herd overview", "Herd", "Create herd", "Herds that have been retired", "Current livestock/group", "Livestock/group retired to a better life", "Current pets", "Pets retired to a better life"]
         )
         XCTAssertTrue(AnimalCategory.liveStock.includes(.cattle))
         XCTAssertFalse(AnimalCategory.liveStock.includes(.pet))
         XCTAssertTrue(AnimalCategory.pets.includes(.pet))
         XCTAssertFalse(AnimalCategory.pets.includes(.goat))
+        let fixtures = FixtureLivestockReadModel.fixtureAnimals
+        XCTAssertEqual(LivestockAnimalSearch.listed(fixtures, query: "  ").map(\.displayName), ["Juniper", "Cedar"])
+        XCTAssertEqual(LivestockAnimalSearch.listed(fixtures, query: "jun").map(\.displayName), ["Juniper"])
+        XCTAssertEqual(LivestockAnimalSearch.listed(fixtures, query: "G-18").map(\.displayName), ["Cedar"])
+        XCTAssertTrue(LivestockAnimalSearch.listed(fixtures, query: "no-such-animal").isEmpty)
+        XCTAssertFalse(LivestockAnimalSearch.matches(fixtures[0], query: "Cedar"))
         let labels = LivestockDestination.allCases.map(\.label)
+        XCTAssertEqual(LivestockDestination.herd.label, "Herd")
         XCTAssertFalse(labels.contains("Care"))
         XCTAssertFalse(labels.contains("Feed and supplies"))
         XCTAssertFalse(labels.contains("Costs"))
         XCTAssertEqual(FixtureLoadState.empty(message: "Nothing here").message, "Nothing here")
         XCTAssertEqual(FixtureLoadState.error(message: "Read failed").message, "Read failed")
         XCTAssertEqual(FixtureLoadState.loading.message, "Loading fixture presentation…")
+    }
+
+    func testDictationReplacesSelectedTextAndKeepsTheRest() {
+        let field = "Fix the north gate"
+        let north = field.range(of: "north")!
+        let lower = field.utf16.distance(from: field.utf16.startIndex, to: north.lowerBound)
+        let upper = field.utf16.distance(from: field.utf16.startIndex, to: north.upperBound)
+        XCTAssertEqual(
+            AppleIntelligenceDictationText.completed(
+                value: field,
+                replacingUTF16: lower..<upper,
+                utterance: "south"
+            ),
+            "Fix the south gate"
+        )
+        XCTAssertEqual(
+            AppleIntelligenceDictationText.completed(
+                value: "Juniper",
+                replacingUTF16: 0..<7,
+                utterance: "Cedar"
+            ),
+            "Cedar"
+        )
+        XCTAssertEqual(
+            AppleIntelligenceDictationText.completed(
+                value: field,
+                replacingUTF16: lower..<upper,
+                utterance: "  "
+            ),
+            field
+        )
+        let caret = field.utf16.distance(from: field.utf16.startIndex, to: field.range(of: "gate")!.lowerBound)
+        XCTAssertEqual(
+            AppleIntelligenceDictationText.completed(
+                value: field,
+                replacingUTF16: caret..<caret,
+                utterance: "barn"
+            ),
+            "Fix the north barn gate"
+        )
+        XCTAssertEqual(
+            AppleIntelligenceDictationText.completed(
+                value: field,
+                replacingUTF16: nil,
+                utterance: "now"
+            ),
+            "Fix the north gate now"
+        )
+        XCTAssertEqual(
+            AppleIntelligenceDictationText.completed(
+                value: field,
+                replacingUTF16: 90..<94,
+                utterance: "south"
+            ),
+            "Fix the north gate south"
+        )
     }
 
     func testAppearanceChoicesIncludeSystemLightAndDark() {
@@ -419,6 +537,7 @@ final class LivestockFoundationTests: XCTestCase {
         draft.identifierValue = " NR-9 "
         draft.identifierCost = "0"
         draft.lifecycleType = .weightRecorded
+        draft.lifecycleWeight = "842"
         draft.lifecycleAt = Date().addingTimeInterval(3600)
         let saved = await store.saveAnimalRecords(animalID: animal.id, draft: draft)
         XCTAssertTrue(saved.savedIdentifier)
@@ -445,19 +564,22 @@ final class LivestockFoundationTests: XCTestCase {
         draft.feedLines = [
             LivestockFeedEntry(inputType: .hay, quantity: "2", cost: "-1"),
         ]
-        XCTAssertNil(draft.costProblem())
-        XCTAssertEqual(draft.enteredTotal(), Decimal(string: "3.50", locale: Locale(identifier: "en_US_POSIX")))
+        XCTAssertEqual(draft.costProblem(), "\(LivestockInputType.hay.label) cost cannot be negative.")
         draft.feedLines[0].cost = "1.25"
         draft.costAmount = "10"
         XCTAssertNil(draft.costProblem())
-        XCTAssertEqual(draft.enteredTotal(), Decimal(string: "15.75", locale: Locale(identifier: "en_US_POSIX")))
+        XCTAssertEqual(draft.enteredTotal(), Decimal(string: "927", locale: Locale(identifier: "en_US_POSIX")))
         XCTAssertEqual(
             LivestockMoney.total(recorded: 20, entered: draft.enteredTotal()),
-            Decimal(string: "35.75", locale: Locale(identifier: "en_US_POSIX"))
+            Decimal(string: "947", locale: Locale(identifier: "en_US_POSIX"))
         )
         XCTAssertEqual(LivestockMoney.total(recorded: -5, entered: 0), 0)
         XCTAssertEqual(LivestockMoney.positiveText("0"), nil)
         XCTAssertEqual(LivestockMoney.positiveText("8"), "8")
+        XCTAssertEqual(LivestockMoney.entry("123456.789"), "12345.78")
+        XCTAssertEqual(LivestockMoney.entry("$99,999.90"), "99999.90")
+        XCTAssertEqual(LivestockMoney.entry("-4.5"), "-4.5")
+        XCTAssertEqual(LivestockMoney.entry("-"), "-")
         var typedCosts = LivestockAnimalSaveDraft()
         typedCosts.identifierCost = "1"
         typedCosts.careCost = "1"
@@ -468,10 +590,24 @@ final class LivestockFoundationTests: XCTestCase {
         ]
         let summary = typedCosts.costSummary(recorded: [])
         XCTAssertEqual(summary.feedSubtotals.map(\.label), ["Feed · Daily", "Hay · Monthly", "Supplement · Weekly"])
-        XCTAssertEqual(summary.feedTotal, 47)
+        XCTAssertEqual(summary.feedTotal, 1470)
         XCTAssertEqual(summary.other, 2)
-        XCTAssertEqual(summary.total, 49)
-        XCTAssertEqual(LivestockMoney.usd(summary.total), "$49.00")
+        XCTAssertEqual(summary.total, 1472)
+        XCTAssertEqual(LivestockMoney.usd(summary.total), "$1,472.00")
+        XCTAssertEqual(LivestockCostFrequency.daily.timesPerYear, 365)
+        XCTAssertEqual(LivestockCostFrequency.weekly.timesPerYear, 52)
+        XCTAssertEqual(LivestockCostFrequency.monthly.timesPerYear, 12)
+        XCTAssertEqual(LivestockCostFrequency.quarterly.timesPerYear, 4)
+        XCTAssertEqual(LivestockCostFrequency.semiAnnual.timesPerYear, 2)
+        XCTAssertEqual(LivestockCostFrequency.annual.timesPerYear, 1)
+        XCTAssertEqual(LivestockCostFrequency.semiAnnual.label, "Semi-annual")
+        XCTAssertEqual(LivestockCostFrequency.annual.label, "Annual")
+        let weekly = LivestockFeedEntry(inputType: .corn, quantity: "2", frequency: .weekly, cost: "3")
+        XCTAssertEqual(weekly.annualFeedCost, 312)
+        let semiAnnual = LivestockFeedEntry(inputType: .corn, quantity: "2", frequency: .semiAnnual, cost: "3")
+        XCTAssertEqual(semiAnnual.annualFeedCost, 12)
+        let annual = LivestockFeedEntry(inputType: .corn, quantity: "2", frequency: .annual, cost: "3")
+        XCTAssertEqual(annual.annualFeedCost, 6)
         var correction = LivestockAnimalSaveDraft()
         correction.identifierCost = "3"
         correction.costAmount = "-8"
@@ -580,9 +716,35 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertEqual(retiredPet.retirementDisplay, "Lost")
         XCTAssertTrue(LivestockDestination.petsInactive.includesAnimal(retiredPet))
         XCTAssertFalse(LivestockDestination.pets.includesAnimal(retiredPet))
-        XCTAssertEqual(LivestockInputType.entryChoices(for: .pet).map(\.label), ["Dry food", "Wet food", "Supplement"])
-        XCTAssertEqual(LivestockInputType.entryChoices(for: .cattle).map(\.label), ["Feed", "Hay", "Supplement"])
-        XCTAssertEqual(LivestockInputUnit.entryChoices.map(\.label), ["Pounds", "Kilograms", "Scoops", "Bag"])
+        XCTAssertEqual(
+            LivestockInputType.entryChoices(for: .pet).map(\.label),
+            ["Dry food", "Wet food", "Prepared meal", "Supplement"]
+        )
+        XCTAssertEqual(
+            LivestockInputType.entryChoices(for: .cattle).map(\.label),
+            ["Pasture", "Grass hay", "Alfalfa hay", "Corn", "Corn silage", "Prepared meal", "Mineral", "Supplement"]
+        )
+        XCTAssertEqual(
+            LivestockInputType.entryChoices(for: .chicken).map(\.label),
+            ["Prepared meal", "Scratch", "Corn", "Oyster shell", "Grit", "Supplement"]
+        )
+        XCTAssertEqual(
+            LivestockInputType.entryChoices(for: .pet, petKind: .bird).map(\.label),
+            ["Seed", "Pellets", "Prepared meal", "Supplement"]
+        )
+        XCTAssertEqual(LivestockInputUnit.entryChoices.map(\.label), ["Scoop", "Cup", "Bale", "Each", "Bag", "Pounds"])
+        let shot = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: Date(), itemName: "CDT")
+        XCTAssertEqual(shot.summary, "Vaccination · CDT")
+        let pills = LivestockCareEvent(
+            id: UUID(),
+            type: .medicationAdministration,
+            occurredAt: Date(),
+            itemName: "Ivermectin",
+            itemKind: "Pills"
+        )
+        XCTAssertEqual(pills.summary, "Medication · Ivermectin · Pills")
+        let unnamed = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: Date())
+        XCTAssertEqual(unnamed.summary, "Vaccination")
     }
 
     @MainActor
@@ -631,6 +793,13 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertTrue(LivestockIdentifierKind.acceptsCode("registry_number"))
     }
 
+    func testPoundsShowReadOnlyKilograms() {
+        XCTAssertEqual(LivestockWeight.kilogramsText(for: "842.5"), "382.15 kg")
+        XCTAssertEqual(LivestockWeight.kilogramsText(for: "1"), "0.45 kg")
+        XCTAssertEqual(LivestockWeight.kilogramsText(for: ""), "—")
+        XCTAssertEqual(LivestockWeight.kilogramsText(for: "0"), "—")
+    }
+
     @MainActor
     func testFixtureLifecycleAppendsInTimeOrder() async {
         let store = LivestockStore()
@@ -648,19 +817,49 @@ final class LivestockFoundationTests: XCTestCase {
         ) else {
             return XCTFail("A later tagged event should append")
         }
-        guard case .recorded = store.recordFixtureLifecycleEvent(
+        guard case .recorded(let weight) = store.recordFixtureLifecycleEvent(
             animalID: animalID,
             type: .weightRecorded,
-            occurredAt: intakeAt.addingTimeInterval(120)
+            occurredAt: intakeAt.addingTimeInterval(120),
+            weightPounds: Decimal(string: "842.5", locale: Locale(identifier: "en_US_POSIX"))
         ) else {
             return XCTFail("A later weight recorded event should append")
         }
-        XCTAssertEqual(store.animals[0].lifecycleEvents.map(\.type), [.intake, .tagged, .weightRecorded])
+        XCTAssertEqual(weight.historyTitle, "Weight recorded · 842.5 lb")
+        XCTAssertEqual(
+            store.recordFixtureLifecycleEvent(
+                animalID: animalID,
+                type: .weightRecorded,
+                occurredAt: intakeAt.addingTimeInterval(180)
+            ),
+            .rejected("Enter the weight in pounds.")
+        )
+        XCTAssertEqual(
+            store.recordFixtureLifecycleEvent(
+                animalID: animalID,
+                type: .intake,
+                occurredAt: intakeAt.addingTimeInterval(180),
+                weightPounds: 10
+            ),
+            .rejected("Only a weight record stores a weight.")
+        )
+        guard case .recorded(let correctedWeight) = store.correctFixtureLifecycleEvent(
+            animalID: animalID,
+            eventID: weight.id,
+            occurredAt: intakeAt.addingTimeInterval(30),
+            reason: .incorrectTime,
+            confirmed: true
+        ) else {
+            return XCTFail("Owner should keep the weight on a time correction")
+        }
+        XCTAssertEqual(correctedWeight.weightPounds, weight.weightPounds)
+        XCTAssertTrue(correctedWeight.historyTitle.contains("842.5 lb"))
+        XCTAssertEqual(store.animals[0].lifecycleEvents.map(\.type), [.intake, .tagged, .weightRecorded, .weightRecorded])
         XCTAssertEqual(
             store.recordFixtureLifecycleEvent(animalID: animalID, type: .intake, occurredAt: intakeAt),
             .rejected(FixturePresentationBoundary.lifecycleOrderBoundary)
         )
-        XCTAssertEqual(store.animals[0].lifecycleEvents.count, 3)
+        XCTAssertEqual(store.animals[0].lifecycleEvents.count, 4)
         XCTAssertEqual(store.animals[1].lifecycleEvents.count, 0)
         XCTAssertFalse(store.session.isLive)
         XCTAssertTrue(FixturePresentationBoundary.lifecycleBoundary.contains("not written to a database or disk"))
@@ -805,6 +1004,38 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertFalse(LivestockDevLoopbackRead.isLoopback(URL(string: "https://127.0.0.1/api")!))
         XCTAssertTrue(LivestockDevLoopbackRead.isLoopback(URL(string: "http://127.0.0.1:9/api/ranchos/livestock/v1/animals")!))
         XCTAssertFalse(LivestockDevLoopbackRead.acceptsDevURL(URL(string: "http://192.168.50.115:9/api")!))
+
+        let loopback = """
+        {"baseURL":"http://127.0.0.1:18761","token":"secret","tenantID":"tenant-a","expiresAt":"\(expiresAt)"}
+        """
+        try loopback.write(to: ticket, atomically: true, encoding: .utf8)
+        let loaded = try XCTUnwrap(LivestockDevLoopbackRead.load(fileURL: ticket))
+        XCTAssertEqual(loaded.tenantID, "tenant-a")
+        XCTAssertTrue(LivestockDevLoopbackRead.connectedUntilCaption(loaded.expiresAt).hasPrefix("Connected to DEV until "))
+        XCTAssertTrue(
+            LivestockDevLoopbackRead.connectedUntilCaption(loaded.expiresAt, environment: "PROD")
+                .hasPrefix("Connected to PROD until ")
+        )
+
+        let expiredAt = expiry.string(from: Date().addingTimeInterval(-60))
+        let expired = """
+        {"baseURL":"http://127.0.0.1:18761","token":"secret","tenantID":"tenant-a","expiresAt":"\(expiredAt)"}
+        """
+        try expired.write(to: ticket, atomically: true, encoding: .utf8)
+        XCTAssertNil(LivestockDevLoopbackRead.load(fileURL: ticket))
+    }
+
+    @MainActor
+    func testReconnectWithoutATicketDoesNotOpenTheSampleSession() async {
+        let store = LivestockStore()
+        await store.loadFixtures()
+        XCTAssertEqual(store.animals.first?.displayName, "Juniper")
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("missing-dev-read.json")
+        await store.reconnectToDev(fileURL: missing)
+        XCTAssertFalse(store.session.isLive)
+        XCTAssertTrue(store.animals.isEmpty)
+        XCTAssertEqual(store.session.statusTitle, "DEV connection ended")
+        XCTAssertEqual(store.animalsState, .error(message: LivestockReadConnection.endedMessage))
     }
 
     func testCostsGroupByDateNewestDayFirst() {
@@ -902,6 +1133,135 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertEqual(livestock.recordedCostTotal, 0)
     }
 
+    func testHerdFeedAddsToOverviewWithoutCopyingOntoAnimals() {
+        let consumptionID = UUID()
+        let herd = LivestockHerd(
+            id: UUID(),
+            name: "North pasture",
+            consumptions: [
+                LivestockConsumption(
+                    id: consumptionID,
+                    inputType: .hay,
+                    quantity: "4",
+                    unit: .bale,
+                    observedAt: Date(),
+                    supplier: nil,
+                    batch: nil,
+                    frequency: .daily
+                )
+            ],
+            costs: [
+                LivestockCostAttribution(
+                    id: UUID(),
+                    amount: "40",
+                    financeReference: nil,
+                    recordedAt: Date(),
+                    frequency: .daily,
+                    feedType: .hay,
+                    consumptionID: consumptionID,
+                    basisCode: "per_herd"
+                )
+            ]
+        )
+        let animal = Animal(
+            id: UUID(),
+            displayName: "Maple",
+            species: .sheep,
+            productionType: .breeding,
+            breed: nil,
+            identifiers: [],
+            herdID: herd.id,
+            herdName: herd.name,
+            status: "Active"
+        )
+        XCTAssertTrue(animal.consumptions.isEmpty)
+        XCTAssertEqual(animal.recordedCostTotal, 0)
+        XCTAssertGreaterThan(herd.recordedCostTotal, 0)
+        XCTAssertEqual(HerdOverview.from(animals: [animal], herds: [herd]).totalCost, herd.recordedCostTotal)
+        XCTAssertTrue(herd.costs[0].summary.contains("per herd"))
+    }
+
+    @MainActor
+    func testHerdFeedSaveWithoutALiveConnectionStaysOffTheSampleSession() async {
+        let store = LivestockStore()
+        await store.loadFixtures()
+        _ = await store.createHerd(name: "East Field")
+        let herdID = try! XCTUnwrap(store.herds.first?.id)
+        let message = await store.saveHerdFeed(
+            herdID: herdID,
+            lines: [LivestockFeedEntry(inputType: .hay, quantity: "2", cost: "10")],
+            observedAt: Date(),
+            supplier: "",
+            batch: ""
+        )
+        XCTAssertEqual(message, "Herd feed saves in the DEV database. Connect to it first.")
+        XCTAssertTrue(store.herds[0].consumptions.isEmpty)
+        XCTAssertEqual(store.animals.first?.displayName, "Juniper")
+    }
+
+    func testHerdCareAddsToOverviewWithoutCopyingOntoAnimals() {
+        let eventID = UUID()
+        let herd = LivestockHerd(
+            id: UUID(),
+            name: "North pasture",
+            careEvents: [
+                LivestockCareEvent(
+                    id: eventID,
+                    type: .vaccination,
+                    occurredAt: Date(),
+                    itemName: "CDT"
+                )
+            ],
+            costs: [
+                LivestockCostAttribution(
+                    id: UUID(),
+                    amount: "12",
+                    financeReference: nil,
+                    recordedAt: Date(),
+                    careEventID: eventID,
+                    basisCode: "per_herd"
+                )
+            ]
+        )
+        let animal = Animal(
+            id: UUID(),
+            displayName: "Maple",
+            species: .sheep,
+            productionType: .breeding,
+            breed: nil,
+            identifiers: [],
+            herdID: herd.id,
+            herdName: herd.name,
+            status: "Active"
+        )
+        XCTAssertTrue(animal.careEvents.isEmpty)
+        XCTAssertEqual(animal.recordedCostTotal, 0)
+        XCTAssertGreaterThan(herd.recordedCostTotal, 0)
+        XCTAssertEqual(HerdOverview.from(animals: [animal], herds: [herd]).totalCost, herd.recordedCostTotal)
+        XCTAssertEqual(herd.costLabel(herd.costs[0]), "Care · Vaccination")
+        XCTAssertTrue(herd.costs[0].summary.contains("per herd"))
+    }
+
+    @MainActor
+    func testHerdCareSaveWithoutALiveConnectionStaysOffTheSampleSession() async {
+        let store = LivestockStore()
+        await store.loadFixtures()
+        _ = await store.createHerd(name: "West Field")
+        let herdID = try! XCTUnwrap(store.herds.first?.id)
+        let message = await store.saveHerdCare(
+            herdID: herdID,
+            type: .observation,
+            occurredAt: Date(),
+            itemName: "",
+            itemKind: "",
+            cost: "",
+            financeReference: ""
+        )
+        XCTAssertEqual(message, "Herd care saves in the DEV database. Connect to it first.")
+        XCTAssertTrue(store.herds[0].careEvents.isEmpty)
+        XCTAssertEqual(store.animals.first?.displayName, "Juniper")
+    }
+
     @MainActor
     func testHerdAssignmentKeepsOneCurrentHerd() async {
         let store = LivestockStore()
@@ -938,6 +1298,16 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertEqual(retired, "Herd retired.")
         XCTAssertEqual(store.herds.filter { !$0.isRetired }.map(\.name), ["North pasture"])
         XCTAssertEqual(store.herds.filter(\.isRetired).map(\.name), ["South"])
+        XCTAssertEqual(LivestockHerdMenu.assignable(store.herds).map(\.name), ["North pasture"])
+        XCTAssertNil(LivestockHerdMenu.selection(south!.id, among: store.herds))
+        XCTAssertEqual(
+            LivestockHerdMenu.selection(store.herds.first { $0.name == "North pasture" }?.id, among: store.herds),
+            store.herds.first { $0.name == "North pasture" }?.id
+        )
+        XCTAssertEqual(
+            HerdGrouping.groups(animals: store.animals, herds: store.herds).map(\.name),
+            ["North pasture", "No herd"]
+        )
         let goat = store.animals.first { $0.species == .goat }!
         let cattle = Animal(
             id: UUID(),
@@ -1025,6 +1395,304 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertTrue(page.herds[0].isRetired)
         XCTAssertEqual(page.herds[0].notes, "test")
         XCTAssertFalse(page.herds[1].isRetired)
+    }
+
+    func testLifecycleAndCareCostsStayWithTheirEventAndType() throws {
+        let day = Date(timeIntervalSince1970: 1_760_536_000)
+        let intake = LivestockLifecycleEvent(id: UUID(), type: .intake, occurredAt: day)
+        let tagged = LivestockLifecycleEvent(id: UUID(), type: .tagged, occurredAt: day.addingTimeInterval(60))
+        let shot = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: day, itemName: "CDT")
+        let secondShot = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: day.addingTimeInterval(120))
+        let surgery = LivestockCareEvent(id: UUID(), type: .surgery, occurredAt: day.addingTimeInterval(240))
+        func cost(_ amount: String, lifecycle: UUID? = nil, care: UUID? = nil) -> LivestockCostAttribution {
+            LivestockCostAttribution(
+                id: UUID(),
+                amount: amount,
+                financeReference: nil,
+                recordedAt: day,
+                lifecycleEventID: lifecycle,
+                careEventID: care
+            )
+        }
+        let animal = Animal(
+            id: UUID(),
+            displayName: "Aster",
+            species: .cattle,
+            productionType: .beef,
+            breed: nil,
+            identifiers: [],
+            lifecycleEvents: [intake, tagged],
+            careEvents: [shot, secondShot, surgery],
+            costs: [
+                cost("25", lifecycle: intake.id),
+                cost("12.50", care: shot.id),
+                cost("10", care: secondShot.id),
+                cost("-2.50", care: secondShot.id),
+                cost("300", care: surgery.id),
+                cost("7"),
+            ],
+            status: "Active"
+        )
+        XCTAssertEqual(animal.eventCost(intake.id), 25)
+        XCTAssertNil(animal.eventCost(tagged.id))
+        XCTAssertEqual(animal.eventCost(secondShot.id), Decimal(string: "7.5"))
+        XCTAssertEqual(animal.lifecycleCostByType, [LivestockTypeCost(label: "Intake", amount: 25)])
+        XCTAssertEqual(animal.careCostByType, [
+            LivestockTypeCost(label: "Surgery", amount: 300),
+            LivestockTypeCost(label: "Vaccination", amount: 20),
+        ])
+        XCTAssertEqual(animal.recordedCostTotal, 352)
+        let labels = LivestockCostLedger.days(from: animal.costs, label: animal.costLabel).flatMap(\.lines).map(\.label)
+        XCTAssertTrue(labels.contains("Routine lifecycle · Intake"))
+        XCTAssertTrue(labels.contains("Care · Vaccination"))
+        XCTAssertTrue(labels.contains("Operational"))
+
+        var draft = LivestockAnimalSaveDraft()
+        draft.lifecycleType = .tagged
+        draft.lifecycleCost = "15"
+        XCTAssertNil(draft.costProblem())
+        XCTAssertEqual(draft.enteredTotal(), 15)
+        XCTAssertTrue(draft.hasActivityCost)
+        draft.lifecycleType = nil
+        XCTAssertEqual(draft.enteredTotal(), 0)
+        draft.lifecycleType = .intake
+        draft.lifecycleCost = "abc"
+        XCTAssertNotNil(draft.costProblem())
+
+        let json = """
+        {"origin":"live","body":{"animals":[{"animal_id":"11111111-2222-4333-8444-555555555551","display_name":"Aster",
+          "species_code":"cattle","production_type_code":"beef","breed_code":"angus","lifecycle_status":"active",
+          "identifiers":[],"lifecycle_events":[],"care_events":[],"consumptions":[],
+          "costs":[{"id":"11111111-2222-4333-8444-5555555555c1","amount":"9.00","recorded_at":"2026-10-15T14:00:00Z",
+            "care_event_id":"11111111-2222-4333-8444-5555555555e1","lifecycle_event_id":null}]}],"herds":[]}}
+        """
+        let page = try LivestockDevLoopbackRead.decode(Data(json.utf8))
+        let decoded = try XCTUnwrap(page.animals.first?.costs.first)
+        XCTAssertEqual(decoded.careEventID, UUID(uuidString: "11111111-2222-4333-8444-5555555555e1"))
+        XCTAssertNil(decoded.lifecycleEventID)
+        XCTAssertEqual(decoded.ledgerLabel, "Care")
+    }
+
+    func testDuplicateEventTakesItsCostOutOfTotalsAndCorrectionsCarryACost() {
+        let day = Date(timeIntervalSince1970: 1_760_536_000)
+        let shot = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: day, isCurrent: false)
+        let duplicate = LivestockCareEvent(
+            id: UUID(), type: .vaccination, occurredAt: day, supersedesID: shot.id, correctionReason: .duplicateEntry
+        )
+        let weighed = LivestockLifecycleEvent(id: UUID(), type: .weightRecorded, occurredAt: day)
+        let shotCost = LivestockCostAttribution(id: UUID(), amount: "25", financeReference: nil, recordedAt: day, careEventID: shot.id)
+        let weighCost = LivestockCostAttribution(
+            id: UUID(), amount: "6", financeReference: nil, recordedAt: day, lifecycleEventID: weighed.id
+        )
+        let hay = LivestockConsumption(
+            id: UUID(), inputType: .grassHay, quantity: "2", unit: .bale, observedAt: day,
+            supplier: nil, batch: nil, frequency: .daily, isCurrent: false
+        )
+        let fixedHay = LivestockConsumption(
+            id: UUID(), inputType: .grassHay, quantity: "3", unit: .bale, observedAt: day,
+            supplier: nil, batch: nil, frequency: .daily, supersedesID: hay.id, correctionReason: .incorrectValue
+        )
+        let straw = LivestockConsumption(
+            id: UUID(), inputType: .grassHay, quantity: "1", unit: .bale, observedAt: day,
+            supplier: nil, batch: nil, frequency: .daily, correctionReason: .duplicateEntry
+        )
+        let hayCost = LivestockCostAttribution(
+            id: UUID(), amount: "30", financeReference: nil, recordedAt: day, frequency: .daily, feedType: .grassHay,
+            consumptionID: hay.id
+        )
+        let strawCost = LivestockCostAttribution(
+            id: UUID(), amount: "11", financeReference: nil, recordedAt: day, frequency: .daily, feedType: .grassHay,
+            consumptionID: straw.id
+        )
+        let olderFeedCost = LivestockCostAttribution(
+            id: UUID(), amount: "4", financeReference: nil, recordedAt: day, frequency: .daily, feedType: .grassHay
+        )
+        let animal = Animal(
+            id: UUID(),
+            displayName: "Aster",
+            species: .cattle,
+            productionType: .beef,
+            breed: nil,
+            identifiers: [],
+            lifecycleEvents: [weighed],
+            careEvents: [shot, duplicate],
+            consumptions: [hay, fixedHay, straw],
+            costs: [shotCost, weighCost, hayCost, strawCost, olderFeedCost],
+            status: "Active"
+        )
+        XCTAssertEqual(animal.activeCosts.map(\.id), [weighCost.id, hayCost.id, olderFeedCost.id])
+        XCTAssertTrue(animal.isRemovedWithEvent(shotCost))
+        XCTAssertTrue(animal.isRemovedWithEvent(strawCost))
+        XCTAssertFalse(animal.isRemovedWithEvent(weighCost))
+        XCTAssertNil(animal.eventCost(duplicate.id))
+        XCTAssertEqual(animal.careCostByType, [])
+        XCTAssertEqual(animal.eventCosts(weighed.id).map(\.id), [weighCost.id])
+        XCTAssertEqual(animal.eventCosts(fixedHay.id).map(\.id), [hayCost.id])
+        XCTAssertEqual(animal.feedCostByType, [LivestockTypeCost(label: LivestockInputType.grassHay.label, amount: 30)])
+        XCTAssertTrue(animal.costLabel(hayCost).hasPrefix("Feed · "))
+
+        XCTAssertNil(LivestockCostFix.entered(costID: weighCost.id, amount: "  "))
+        let fix = LivestockCostFix(costID: weighCost.id, amount: "8.50")
+        XCTAssertNil(fix.problem(reason: .incorrectValue))
+        XCTAssertNotNil(fix.problem(reason: .duplicateEntry))
+        XCTAssertNotNil(LivestockCostFix(costID: weighCost.id, amount: "0").problem(reason: .incorrectValue))
+        XCTAssertNil(LivestockRecordCorrection.feed(
+            consumptionID: fixedHay.id, quantity: "3", unit: .bale, frequency: .daily, observedAt: day,
+            supplier: "", batch: "", reason: .incorrectValue, cost: LivestockCostFix(costID: nil, amount: "12")
+        ).problem)
+        for blankOrZero in ["", "0", "-3"] {
+            XCTAssertNotNil(LivestockRecordCorrection.feed(
+                consumptionID: fixedHay.id, quantity: "3", unit: .bale, frequency: .daily, observedAt: day,
+                supplier: "", batch: "", reason: .incorrectValue, cost: LivestockCostFix(costID: nil, amount: blankOrZero)
+            ).problem, blankOrZero)
+        }
+
+        XCTAssertNil(LivestockFeedEntry.problem(quantity: "2", cost: "4.50", feed: "Hay"))
+        XCTAssertNotNil(LivestockFeedEntry.problem(quantity: "", cost: "4.50", feed: "Hay"))
+        XCTAssertNotNil(LivestockFeedEntry.problem(quantity: "2", cost: "", feed: "Hay"))
+        XCTAssertNotNil(LivestockFeedEntry.problem(quantity: "2", cost: "0", feed: "Hay"))
+        var draft = LivestockAnimalSaveDraft()
+        draft.feedLines = [LivestockFeedEntry(inputType: .grassHay, cost: "6")]
+        XCTAssertEqual(draft.costProblem(), "\(LivestockInputType.grassHay.label) needs a quantity of 1 or more.")
+        XCTAssertNotNil(LivestockRecordCorrection.care(
+            eventID: weighed.id, occurredAt: day, reason: .incorrectValue, itemName: "", itemKind: "",
+            cost: LivestockCostFix(costID: nil, amount: "abc")
+        ).problem)
+    }
+
+    func testCorrectedRecordsReplaceTheEarlierOneInTotalsAndKeepTheirCost() throws {
+        let day = Date(timeIntervalSince1970: 1_760_536_000)
+        let shot = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: day, itemName: "CDT", isCurrent: false)
+        let fixed = LivestockCareEvent(
+            id: UUID(),
+            type: .vaccination,
+            occurredAt: day.addingTimeInterval(3600),
+            itemName: "Covexin",
+            supersedesID: shot.id,
+            correctionReason: .incorrectValue
+        )
+        let hay = LivestockConsumption(
+            id: UUID(), inputType: .grassHay, quantity: "2", unit: .bale, observedAt: day,
+            supplier: nil, batch: nil, frequency: .weekly, isCurrent: false
+        )
+        let duplicateHay = LivestockConsumption(
+            id: UUID(), inputType: .grassHay, quantity: "2", unit: .bale, observedAt: day,
+            supplier: nil, batch: nil, frequency: .weekly,
+            supersedesID: hay.id, correctionReason: .duplicateEntry
+        )
+        let wrong = LivestockCostAttribution(
+            id: UUID(), amount: "100", financeReference: nil, recordedAt: day, careEventID: shot.id, isCurrent: false
+        )
+        let right = LivestockCostAttribution(
+            id: UUID(), amount: "40", financeReference: nil, recordedAt: day, careEventID: shot.id,
+            supersedesID: wrong.id, correctionReason: .incorrectValue
+        )
+        let doubled = LivestockCostAttribution(id: UUID(), amount: "9", financeReference: nil, recordedAt: day, isCurrent: false)
+        let removed = LivestockCostAttribution(
+            id: UUID(), amount: "9", financeReference: nil, recordedAt: day,
+            supersedesID: doubled.id, correctionReason: .duplicateEntry
+        )
+        let animal = Animal(
+            id: UUID(),
+            displayName: "Aster",
+            species: .cattle,
+            productionType: .beef,
+            breed: nil,
+            identifiers: [],
+            careEvents: [shot, fixed],
+            consumptions: [hay, duplicateHay],
+            costs: [wrong, right, doubled, removed],
+            status: "Active"
+        )
+        XCTAssertEqual(animal.activeCosts.map(\.id), [right.id])
+        XCTAssertEqual(animal.recordedCostTotal, 40)
+        XCTAssertEqual(animal.eventCost(fixed.id), 40)
+        XCTAssertEqual(animal.careCostByType, [LivestockTypeCost(label: "Vaccination", amount: 40)])
+        XCTAssertTrue(fixed.isActive)
+        XCTAssertFalse(shot.isActive)
+        XCTAssertTrue(shot.historyTitle.hasSuffix("earlier record"))
+        XCTAssertTrue(fixed.historyTitle.contains("Incorrect value"))
+        XCTAssertFalse(duplicateHay.isActive)
+        XCTAssertTrue(duplicateHay.historyTitle.contains("removed as a duplicate"))
+
+        XCTAssertNotNil(LivestockRecordCorrection.cost(costID: right.id, amount: "0", reason: .incorrectValue).problem)
+        XCTAssertNotNil(LivestockRecordCorrection.cost(costID: right.id, amount: "5", reason: .incorrectTime).problem)
+        XCTAssertNil(LivestockRecordCorrection.cost(costID: right.id, amount: "-5", reason: .incorrectValue).problem)
+        XCTAssertNil(LivestockRecordCorrection.cost(costID: right.id, amount: "", reason: .duplicateEntry).problem)
+        XCTAssertNotNil(LivestockRecordCorrection.feed(
+            consumptionID: hay.id, quantity: "", unit: .bale, frequency: .weekly,
+            observedAt: day, supplier: "", batch: "", reason: .incorrectValue
+        ).problem)
+
+        let json = """
+        {"origin":"live","body":{"animals":[{"animal_id":"11111111-2222-4333-8444-555555555551","display_name":"Aster",
+          "species_code":"cattle","production_type_code":"beef","breed_code":"angus","lifecycle_status":"active",
+          "identifiers":[],"lifecycle_events":[],"consumptions":[],
+          "care_events":[{"id":"11111111-2222-4333-8444-5555555555e2","type":"observation","occurred_at":"2026-10-15T14:00:00Z",
+            "supersedes_id":"11111111-2222-4333-8444-5555555555e1","correction_reason":"incorrect_time","current":true}],
+          "costs":[{"id":"11111111-2222-4333-8444-5555555555c1","amount":"9.00","recorded_at":"2026-10-15T14:00:00Z",
+            "supersedes_id":null,"correction_reason":null,"current":false}]}],"herds":[]}}
+        """
+        let page = try LivestockDevLoopbackRead.decode(Data(json.utf8))
+        let decoded = try XCTUnwrap(page.animals.first)
+        XCTAssertEqual(decoded.careEvents.first?.correctionReason, .incorrectTime)
+        XCTAssertEqual(decoded.careEvents.first?.supersedesID, UUID(uuidString: "11111111-2222-4333-8444-5555555555e1"))
+        XCTAssertEqual(decoded.costs.first?.isCurrent, false)
+        XCTAssertEqual(decoded.recordedCostTotal, 0)
+    }
+
+    func testSupplierListRemembersTheLastNameAndKeepsAnEditedName() {
+        var directory = LivestockSupplierDirectory()
+        directory.remember("  Valley  Mill ")
+        directory.remember("valley mill")
+        XCTAssertEqual(directory.names, ["valley mill"])
+        XCTAssertEqual(directory.last, "valley mill")
+        directory.remember("North Hay")
+        XCTAssertEqual(directory.last, "North Hay")
+        directory.remember("Valley Mill Co")
+        XCTAssertEqual(directory.last, "Valley Mill Co")
+        XCTAssertEqual(directory.names, ["North Hay", "valley mill", "Valley Mill Co"])
+        let earlier = Date(timeIntervalSince1970: 1)
+        let later = Date(timeIntervalSince1970: 2)
+        let animal = Animal(
+            id: UUID(),
+            displayName: "Aster",
+            species: .cattle,
+            productionType: .beef,
+            breed: nil,
+            identifiers: [],
+            consumptions: [
+                LivestockConsumption(
+                    id: UUID(),
+                    inputType: .hay,
+                    quantity: "1",
+                    unit: .bale,
+                    observedAt: earlier,
+                    supplier: "Old Barn",
+                    batch: nil
+                ),
+                LivestockConsumption(
+                    id: UUID(),
+                    inputType: .corn,
+                    quantity: "2",
+                    unit: .scoop,
+                    observedAt: later,
+                    supplier: "River Feed",
+                    batch: "B-1"
+                ),
+            ],
+            status: "Active"
+        )
+        var local = LivestockSupplierDirectory()
+        local.remember("Kept Local")
+        let merged = local.merging(animals: [animal])
+        XCTAssertEqual(merged.last, "Kept Local")
+        XCTAssertEqual(merged.names, ["Kept Local", "Old Barn", "River Feed"])
+        let defaults = UserDefaults(suiteName: "RanchOSLivestock.supplier-test")!
+        defaults.removePersistentDomain(forName: "RanchOSLivestock.supplier-test")
+        merged.save(defaults: defaults)
+        XCTAssertEqual(LivestockSupplierDirectory.load(defaults: defaults), merged)
+        defaults.removePersistentDomain(forName: "RanchOSLivestock.supplier-test")
     }
 
     func testFutureIdentityProviderIsExplicitlyUnavailableWithoutFallback() async {

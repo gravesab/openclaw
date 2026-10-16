@@ -111,38 +111,46 @@ enum LivestockReadSession: Equatable, Sendable {
     }
 
     var statusTitle: String {
+        let stamp = LivestockBuildStamp.current
         switch self {
-        case .readOnly: "Live DEV read"
-        case .fixture: "Sample session"
-        case .unavailable, .cancelled: "No animals loaded"
+        case .readOnly: return "Live \(stamp.environment) read"
+        case .fixture: return "Sample session"
+        case .unavailable, .cancelled: return "\(stamp.environment) connection ended"
         }
     }
 
     var statusDetail: String {
+        let stamp = LivestockBuildStamp.current
         switch self {
         case .readOnly:
-            "These animals are stored in the DEV database. Tags, lifecycle, care, feed, and cost can be saved. Species, production type, and breed stay as recorded."
+            return "These animals are stored in the \(stamp.databaseLabel). Tags, lifecycle, care, feed, and cost can be saved. Species, production type, and breed stay as recorded."
         case .fixture:
-            "Juniper and Cedar can be edited here. Changes stay on this screen until you quit."
+            return "Juniper and Cedar can be edited here. Changes stay on this screen until you quit."
         case .unavailable, .cancelled:
-            "The live read is unavailable. Open the sample session to edit Juniper and Cedar."
+            return "The \(stamp.databaseLabel) is not connected. Add, care, feed, and cost save there, not in the sample session. Tap Reconnect after the \(stamp.serverLabel) is running."
         }
     }
 
     var statusFooter: String {
+        let stamp = LivestockBuildStamp.current
         switch self {
-        case .readOnly: "Tags, lifecycle, care, feed, and cost save in the DEV database."
-        case .fixture: "Sample session. Nothing is written to a database."
-        case .unavailable, .cancelled: "The live read is unavailable."
+        case .readOnly: return "Tags, lifecycle, care, feed, and cost save in the \(stamp.databaseLabel)."
+        case .fixture: return "Sample session. Nothing is written to a database."
+        case .unavailable, .cancelled: return "The live read is unavailable."
         }
     }
 }
 
-/// Read-only Livestock DEV connection. No endpoint, credentials, or write verb.
+/// Read-only live livestock connection. No endpoint, credentials, or write verb.
 struct LivestockReadConnection: Sendable {
     static let unavailableMessage = "The authorized Livestock read API is not available."
-    static let liveReadOnlyLabel = "Live DEV data · read only. Ranch OS Livestock cannot change records."
-    static let fixtureAsLiveMessage = "Fixture data cannot be presented as a live DEV read."
+    static var endedMessage: String { "\(LivestockBuildStamp.current.environment) connection ended" }
+    static var liveReadOnlyLabel: String {
+        "Live \(LivestockBuildStamp.current.environment) data · read only. Ranch OS Livestock cannot change records."
+    }
+    static var fixtureAsLiveMessage: String {
+        "Fixture data cannot be presented as a live \(LivestockBuildStamp.current.environment) read."
+    }
     static let writeRequestMethods: [String] = []
     static let prohibitedRequestMethods = ["POST", "PUT", "PATCH", "DELETE"]
 
@@ -190,9 +198,9 @@ struct LivestockReadConnection: Sendable {
 @Observable final class LivestockStore {
     let fixtureContext: FixturePresentationContext
     private let readModel: any LivestockReadModel
-    private let connection: LivestockReadConnection
+    private var connection: LivestockReadConnection
     let fixtureWriteRole: LivestockFixtureWriteRole
-    let liveRecords: LivestockDevLoopbackRead?
+    var liveRecords: LivestockDevLoopbackRead?
     var session: LivestockReadSession = .unavailable(LivestockReadConnection.unavailableMessage)
     var overview: HerdOverview?
     var animals: [Animal] = []
@@ -201,6 +209,7 @@ struct LivestockReadConnection: Sendable {
     var animalsState: FixtureLoadState = .loading
     var selectedAnimalID: Animal.ID?
     var saveNotice: LivestockSaveNotice?
+    private var createInFlight = false
 
     init(
         fixtureContext: FixturePresentationContext = .preview,
@@ -246,13 +255,32 @@ struct LivestockReadConnection: Sendable {
         }
     }
 
+    /// Reloads the on-disk ticket and asks the DEV server again. Does not open the sample session.
+    func reconnectToDev(fileURL: URL? = nil) async {
+        guard let ticket = LivestockDevLoopbackRead.load(fileURL: fileURL ?? LivestockDevLoopbackRead.ticketURL()) else {
+            liveRecords = nil
+            connection = LivestockReadConnection()
+            session = .unavailable(LivestockReadConnection.endedMessage)
+            overview = nil
+            animals = []
+            herds = []
+            overviewState = .error(message: LivestockReadConnection.endedMessage)
+            animalsState = .error(message: LivestockReadConnection.endedMessage)
+            selectedAnimalID = nil
+            return
+        }
+        liveRecords = ticket
+        connection = LivestockReadConnection(authorizedProvider: ticket)
+        await loadAuthorizedRead()
+    }
+
     func loadAuthorizedRead(keeping selection: Animal.ID? = nil) async {
         let (resolved, loadedHerds) = await connection.resolveLoaded()
         session = resolved
         switch resolved {
         case .readOnly(let loadedAnimals):
             herds = loadedHerds
-            overview = HerdOverview.from(animals: loadedAnimals)
+            overview = HerdOverview.from(animals: loadedAnimals, herds: loadedHerds)
             overviewState = .loaded
             animals = loadedAnimals
             animalsState = loadedAnimals.isEmpty ? .empty(message: "No authorized animals are available.") : .loaded
@@ -309,15 +337,25 @@ struct LivestockReadConnection: Sendable {
             status: "Active"
         )
         animals.append(animal)
+        if let herdID = draft.herdID,
+           let herd = herds.first(where: { $0.id == herdID && !$0.isRetired }),
+           let index = animals.firstIndex(where: { $0.id == animal.id }) {
+            animals[index] = animals[index].assigningHerd(id: herd.id, name: herd.name, at: Date())
+        }
         session = .fixture(animals)
         overview = HerdOverview.from(animals: animals)
         overviewState = .loaded
         animalsState = .loaded
         selectedAnimalID = animal.id
-        return .created(animal)
+        return .created(animals.first { $0.id == animal.id } ?? animal)
     }
 
     func createAnimal(_ draft: AddAnimalDraft) async -> LivestockCreateAnimalResult {
+        if createInFlight {
+            return .rejected("This animal is already being saved.")
+        }
+        createInFlight = true
+        defer { createInFlight = false }
         if draft.category == .pets, draft.species != .pet {
             return .rejected("A pet must use the Pets species.")
         }
@@ -353,6 +391,9 @@ struct LivestockReadConnection: Sendable {
                 petSpeciesOther: draft.petKind == .other ? draft.petSpeciesOther : ""
             )
             await reloadLiveAnimal(id)
+            if let herdID = draft.herdID {
+                _ = await assignHerd(animalID: id, herdID: herdID)
+            }
             return .created(Animal(
                 id: id,
                 displayName: name,
@@ -458,7 +499,8 @@ struct LivestockReadConnection: Sendable {
     func recordFixtureLifecycleEvent(
         animalID: Animal.ID,
         type: LivestockLifecycleEventType,
-        occurredAt: Date
+        occurredAt: Date,
+        weightPounds: Decimal? = nil
     ) -> LivestockLifecycleResult {
         guard case .fixture = session else {
             return .rejected(FixturePresentationBoundary.lifecycleUnavailableBoundary)
@@ -469,10 +511,22 @@ struct LivestockReadConnection: Sendable {
         guard let index = animals.firstIndex(where: { $0.id == animalID }) else {
             return .rejected(FixturePresentationBoundary.lifecycleUnavailableBoundary)
         }
+        if type == .weightRecorded {
+            guard let weightPounds, weightPounds > 0 else {
+                return .rejected("Enter the weight in pounds.")
+            }
+        } else if weightPounds != nil {
+            return .rejected("Only a weight record stores a weight.")
+        }
         if let latest = animals[index].lifecycleEvents.map(\.occurredAt).max(), occurredAt <= latest {
             return .rejected(FixturePresentationBoundary.lifecycleOrderBoundary)
         }
-        let recorded = LivestockLifecycleEvent(id: UUID(), type: type, occurredAt: occurredAt)
+        let recorded = LivestockLifecycleEvent(
+            id: UUID(),
+            type: type,
+            occurredAt: occurredAt,
+            weightPounds: type == .weightRecorded ? weightPounds : nil
+        )
         animals[index] = animals[index].replacingLifecycleEvents(animals[index].lifecycleEvents + [recorded])
         session = .fixture(animals)
         return .recorded(recorded)
@@ -514,6 +568,7 @@ struct LivestockReadConnection: Sendable {
             id: UUID(),
             type: target.type,
             occurredAt: occurredAt,
+            weightPounds: target.weightPounds,
             supersedesEventID: target.id,
             correctionReason: reason,
             isCurrent: true
@@ -623,8 +678,179 @@ struct LivestockReadConnection: Sendable {
         do {
             try await liveRecords.updateClassification(animalID: animalID, production: production, breed: breed)
             await reloadLiveAnimal(animalID)
-            return "Production type and breed saved to the DEV database."
+            return "Production type and breed saved to the \(LivestockBuildStamp.current.databaseLabel)."
         } catch {
+            return errorText(error)
+        }
+    }
+
+    func renameAnimal(animalID: Animal.ID, displayName: String) async -> String {
+        let cleaned = displayName.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !cleaned.isEmpty, cleaned.count <= 80 else { return "Display name is required." }
+        guard let index = animals.firstIndex(where: { $0.id == animalID }) else { return "The animal was not found." }
+        guard fixtureWriteRole.canAssignIdentifier else {
+            return FixturePresentationBoundary.viewerCannotAssignBoundary
+        }
+        if animals[index].displayName == cleaned { return "Name saved." }
+        if case .fixture = session {
+            animals[index] = animals[index].renaming(displayName: cleaned)
+            session = .fixture(animals)
+            overview = HerdOverview.from(animals: animals, herds: herds)
+            return "Name saved."
+        }
+        guard let liveRecords, session.isLive else {
+            return FixturePresentationBoundary.identifierUnavailableBoundary
+        }
+        do {
+            try await liveRecords.renameAnimal(animalID: animalID, displayName: cleaned)
+            await reloadLiveAnimal(animalID)
+            return "Name saved to the \(LivestockBuildStamp.current.databaseLabel)."
+        } catch {
+            return errorText(error)
+        }
+    }
+
+    func renameHerd(herdID: UUID, name: String) async -> String {
+        let cleaned = name.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        guard !cleaned.isEmpty, cleaned.count <= 80 else { return "Herd name is required." }
+        guard let index = herds.firstIndex(where: { $0.id == herdID }) else { return "That herd was not found." }
+        guard fixtureWriteRole.canAssignIdentifier else {
+            return FixturePresentationBoundary.viewerCannotAssignBoundary
+        }
+        if herds.contains(where: { $0.id != herdID && $0.name.caseInsensitiveCompare(cleaned) == .orderedSame }) {
+            return "That herd name is already used."
+        }
+        if herds[index].name == cleaned { return "Name saved." }
+        if case .fixture = session {
+            herds[index] = herds[index].renaming(cleaned)
+            animals = animals.map { animal in
+                animal.herdID == herdID ? animal.renamingHerd(cleaned) : animal
+            }
+            session = .fixture(animals)
+            overview = HerdOverview.from(animals: animals, herds: herds)
+            return "Name saved."
+        }
+        guard let liveRecords, session.isLive else {
+            return FixturePresentationBoundary.identifierUnavailableBoundary
+        }
+        do {
+            try await liveRecords.renameHerd(herdID: herdID, name: cleaned)
+            await reloadLiveAnimal(selectedAnimalID ?? animals.first?.id ?? UUID())
+            return "Name saved to the \(LivestockBuildStamp.current.databaseLabel)."
+        } catch {
+            return errorText(error)
+        }
+    }
+
+    /// Records feed on the herd. Quantity and cost are required. The record is not copied onto each animal.
+    func saveHerdFeed(
+        herdID: UUID,
+        lines: [LivestockFeedEntry],
+        observedAt: Date,
+        supplier: String,
+        batch: String
+    ) async -> String {
+        guard let liveRecords, session.isLive else {
+            return "Herd feed saves in the \(LivestockBuildStamp.current.databaseLabel). Connect to it first."
+        }
+        guard fixtureWriteRole.canAssignIdentifier else {
+            return FixturePresentationBoundary.viewerCannotAssignBoundary
+        }
+        guard let herd = herds.first(where: { $0.id == herdID }), !herd.isRetired else {
+            return "That herd was not found."
+        }
+        let filled = lines.filter { $0.hasQuantity || !$0.cost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        guard !filled.isEmpty else { return "Enter a quantity and a cost for the herd feed." }
+        for line in filled {
+            if let problem = LivestockFeedEntry.problem(quantity: line.quantity, cost: line.cost, feed: line.inputType.label) {
+                return problem
+            }
+        }
+        do {
+            for line in filled {
+                let consumptionID = try await liveRecords.recordConsumption(
+                    herdID: herdID,
+                    inputType: line.inputType,
+                    quantity: line.quantity,
+                    unit: line.unit,
+                    observedAt: observedAt,
+                    supplier: supplier,
+                    batch: batch,
+                    frequency: line.frequency
+                )
+                guard let consumptionID else {
+                    throw LivestockDevReadError.unavailable(
+                        "The \(LivestockBuildStamp.current.serverLabel) did not return the new feed record, so its cost was not linked. Restart the \(LivestockBuildStamp.current.serverLabel)."
+                    )
+                }
+                try await liveRecords.recordCost(
+                    herdID: herdID,
+                    amount: LivestockMoney.plain(line.annualFeedCost) ?? line.cost,
+                    financeReference: line.financeReference,
+                    confirmed: true,
+                    frequency: line.frequency,
+                    feedType: line.inputType,
+                    consumptionID: consumptionID
+                )
+            }
+            await loadAuthorizedRead(keeping: selectedAnimalID)
+            return "Herd feed saved in the \(LivestockBuildStamp.current.databaseLabel)."
+        } catch {
+            await loadAuthorizedRead(keeping: selectedAnimalID)
+            return errorText(error)
+        }
+    }
+
+    /// Records care on the herd. The record is not copied onto each animal.
+    func saveHerdCare(
+        herdID: UUID,
+        type: LivestockCareEventType,
+        occurredAt: Date,
+        itemName: String,
+        itemKind: String,
+        cost: String,
+        financeReference: String
+    ) async -> String {
+        guard let liveRecords, session.isLive else {
+            return "Herd care saves in the \(LivestockBuildStamp.current.databaseLabel). Connect to it first."
+        }
+        guard fixtureWriteRole.canAssignIdentifier else {
+            return FixturePresentationBoundary.viewerCannotAssignBoundary
+        }
+        guard let herd = herds.first(where: { $0.id == herdID }), !herd.isRetired else {
+            return "That herd was not found."
+        }
+        if !cost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let problem = LivestockMoney.requirement(cost, label: "\(type.label) cost", allowZero: false) {
+            return problem
+        }
+        do {
+            let eventID = try await liveRecords.recordCare(
+                herdID: herdID,
+                type: type,
+                occurredAt: occurredAt,
+                confirmed: type.needsConfirmation,
+                itemName: itemName,
+                itemKind: itemKind
+            )
+            if LivestockMoney.nonzeroText(cost) != nil {
+                guard let eventID else {
+                    throw LivestockDevReadError.unavailable(
+                        "The \(LivestockBuildStamp.current.serverLabel) did not return the new care record, so its cost was not linked. Restart the \(LivestockBuildStamp.current.serverLabel)."
+                    )
+                }
+                try await liveRecords.recordCost(
+                    herdID: herdID,
+                    amount: cost,
+                    financeReference: financeReference,
+                    confirmed: true,
+                    careEventID: eventID
+                )
+            }
+            await loadAuthorizedRead(keeping: selectedAnimalID)
+            return "Herd care saved in the \(LivestockBuildStamp.current.databaseLabel)."
+        } catch {
+            await loadAuthorizedRead(keeping: selectedAnimalID)
             return errorText(error)
         }
     }
@@ -651,7 +877,7 @@ struct LivestockReadConnection: Sendable {
         do {
             try await liveRecords.createHerd(name: cleaned, notes: recordedNotes)
             await reloadLiveAnimal(selectedAnimalID ?? animals.first?.id ?? UUID())
-            return "Herd saved to the DEV database."
+            return "Herd saved to the \(LivestockBuildStamp.current.databaseLabel)."
         } catch {
             return errorText(error)
         }
@@ -668,7 +894,7 @@ struct LivestockReadConnection: Sendable {
         if case .fixture = session {
             animals[index] = current.assigningHerd(id: herd.id, name: herd.name, at: Date())
             session = .fixture(animals)
-            overview = HerdOverview.from(animals: animals)
+            overview = HerdOverview.from(animals: animals, herds: herds)
             return "Herd assigned."
         }
         guard let liveRecords, session.isLive else {
@@ -677,7 +903,7 @@ struct LivestockReadConnection: Sendable {
         do {
             try await liveRecords.assignHerd(animalID: animalID, herdID: herdID)
             await reloadLiveAnimal(animalID)
-            return "Herd assigned in the DEV database."
+            return "Herd assigned in the \(LivestockBuildStamp.current.databaseLabel)."
         } catch {
             return errorText(error)
         }
@@ -692,7 +918,7 @@ struct LivestockReadConnection: Sendable {
         if case .fixture = session {
             animals[index] = animals[index].clearingHerd()
             session = .fixture(animals)
-            overview = HerdOverview.from(animals: animals)
+            overview = HerdOverview.from(animals: animals, herds: herds)
             return "Herd cleared."
         }
         guard let liveRecords, session.isLive else {
@@ -701,7 +927,7 @@ struct LivestockReadConnection: Sendable {
         do {
             try await liveRecords.clearHerd(animalID: animalID)
             await reloadLiveAnimal(animalID)
-            return "Herd cleared in the DEV database."
+            return "Herd cleared in the \(LivestockBuildStamp.current.databaseLabel)."
         } catch {
             return errorText(error)
         }
@@ -736,7 +962,7 @@ struct LivestockReadConnection: Sendable {
                 herds.append(LivestockHerd(id: herdID, name: retiredName, notes: retiredNotes, retiredAt: Date()))
                 herds.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
             }
-            return "Herd retired in the DEV database."
+            return "Herd retired in the \(LivestockBuildStamp.current.databaseLabel)."
         } catch {
             return errorText(error)
         }
@@ -772,7 +998,7 @@ struct LivestockReadConnection: Sendable {
             return .rejected(FixturePresentationBoundary.viewerCannotRecordLifecycleBoundary)
         }
         do {
-            try await liveRecords.recordLifecycle(animalID: animalID, type: type, occurredAt: occurredAt)
+            _ = try await liveRecords.recordLifecycle(animalID: animalID, type: type, occurredAt: occurredAt)
             await reloadLiveAnimal(animalID)
             return .recorded(LivestockLifecycleEvent(id: UUID(), type: type, occurredAt: occurredAt))
         } catch {
@@ -785,7 +1011,9 @@ struct LivestockReadConnection: Sendable {
         eventID: UUID,
         occurredAt: Date,
         reason: LivestockLifecycleCorrectionReason,
-        confirmed: Bool
+        confirmed: Bool,
+        weightPounds: String = "",
+        cost: LivestockCostFix? = nil
     ) async -> LivestockLifecycleResult {
         if case .fixture = session {
             return correctFixtureLifecycleEvent(
@@ -805,13 +1033,18 @@ struct LivestockReadConnection: Sendable {
         guard confirmed else {
             return .rejected(FixturePresentationBoundary.lifecycleCorrectionConfirmationBoundary)
         }
+        if let problem = cost?.problem(reason: reason) {
+            return .rejected(problem)
+        }
         let eventType = animals.first { $0.id == animalID }?.lifecycleEvents.first { $0.id == eventID }?.type ?? .intake
         do {
             try await liveRecords.correctLifecycle(
                 animalID: animalID,
                 eventID: eventID,
                 occurredAt: occurredAt,
-                reason: reason
+                reason: reason,
+                weightPounds: eventType == .weightRecorded ? weightPounds : "",
+                cost: cost
             )
             await reloadLiveAnimal(animalID)
             return .recorded(
@@ -828,12 +1061,71 @@ struct LivestockReadConnection: Sendable {
         }
     }
 
+    /// Returns nil when the correction was saved, otherwise the reason it was not.
+    func correctRecord(animalID: Animal.ID? = nil, herdID: UUID? = nil, _ correction: LivestockRecordCorrection) async -> String? {
+        guard let liveRecords, session.isLive else {
+            return "Corrections save in the \(LivestockBuildStamp.current.databaseLabel). Connect to it first."
+        }
+        guard fixtureWriteRole.canCorrectLifecycle else {
+            return "Only the owner can correct a saved record. You can record a new one."
+        }
+        if let problem = correction.problem {
+            return problem
+        }
+        do {
+            switch correction {
+            case let .care(eventID, occurredAt, reason, itemName, itemKind, cost):
+                try await liveRecords.correctCare(
+                    animalID: animalID,
+                    herdID: herdID,
+                    eventID: eventID,
+                    occurredAt: occurredAt,
+                    reason: reason,
+                    itemName: itemName,
+                    itemKind: itemKind,
+                    cost: cost
+                )
+            case let .feed(consumptionID, quantity, unit, frequency, observedAt, supplier, batch, reason, cost):
+                try await liveRecords.correctConsumption(
+                    animalID: animalID,
+                    herdID: herdID,
+                    consumptionID: consumptionID,
+                    quantity: quantity,
+                    unit: unit,
+                    frequency: frequency,
+                    observedAt: observedAt,
+                    supplier: supplier,
+                    batch: batch,
+                    reason: reason,
+                    cost: cost
+                )
+            case let .cost(costID, amount, reason):
+                try await liveRecords.correctCost(
+                    animalID: animalID,
+                    herdID: herdID,
+                    costID: costID,
+                    amount: amount,
+                    reason: reason
+                )
+            }
+        } catch {
+            return errorText(error)
+        }
+        if let animalID {
+            await reloadLiveAnimal(animalID)
+            saveNotice = LivestockSaveNotice(animalID: animalID, message: "Corrected. The earlier record stays.", succeeded: true)
+        } else {
+            await loadAuthorizedRead(keeping: selectedAnimalID)
+        }
+        return nil
+    }
+
     func recordCareEvent(animalID: Animal.ID, type: LivestockCareEventType, occurredAt: Date, confirmed: Bool) async -> String {
         guard let liveRecords, session.isLive, fixtureWriteRole.canAssignIdentifier else {
             return FixturePresentationBoundary.lifecycleUnavailableBoundary
         }
         do {
-            try await liveRecords.recordCare(animalID: animalID, type: type, occurredAt: occurredAt, confirmed: confirmed)
+            _ = try await liveRecords.recordCare(animalID: animalID, type: type, occurredAt: occurredAt, confirmed: confirmed)
             await reloadLiveAnimal(animalID)
             return FixturePresentationBoundary.databaseWriteBoundary
         } catch {
@@ -855,7 +1147,7 @@ struct LivestockReadConnection: Sendable {
             return FixturePresentationBoundary.lifecycleUnavailableBoundary
         }
         do {
-            try await liveRecords.recordConsumption(
+            _ = try await liveRecords.recordConsumption(
                 animalID: animalID,
                 inputType: inputType,
                 quantity: quantity,
@@ -913,14 +1205,14 @@ struct LivestockReadConnection: Sendable {
         if !fixtureWriteRole.canAssignIdentifier {
             return posted(LivestockAnimalSaveResult(message: FixturePresentationBoundary.viewerCannotAssignBoundary), animalID: animalID)
         }
-        if let problem = draft.costProblem() {
+        if let problem = draft.lifecycleProblem() ?? draft.costProblem() {
             return posted(LivestockAnimalSaveResult(message: problem), animalID: animalID)
         }
         var result = LivestockAnimalSaveResult(message: "")
         if case .fixture = session {
             if draft.careType != nil || draft.hasFeedActivity || draft.wantsCost || draft.hasActivityCost {
                 return posted(
-                    LivestockAnimalSaveResult(message: "Care, feed, and cost save in the DEV database."),
+                    LivestockAnimalSaveResult(message: "Care, feed, and cost save in the \(LivestockBuildStamp.current.databaseLabel)."),
                     animalID: animalID
                 )
             }
@@ -933,7 +1225,12 @@ struct LivestockReadConnection: Sendable {
                 result.savedIdentifier = true
             }
             if let lifecycleType = draft.lifecycleType {
-                let recorded = recordFixtureLifecycleEvent(animalID: animalID, type: lifecycleType, occurredAt: draft.lifecycleAt)
+                let recorded = recordFixtureLifecycleEvent(
+                    animalID: animalID,
+                    type: lifecycleType,
+                    occurredAt: draft.lifecycleAt,
+                    weightPounds: draft.parsedWeight
+                )
                 if case .rejected(let message) = recorded {
                     result.message = saveFailure(saved: result.savedLabels, label: "Lifecycle", reason: message)
                     return posted(result, animalID: animalID)
@@ -960,45 +1257,78 @@ struct LivestockReadConnection: Sendable {
             }
             if let lifecycleType = draft.lifecycleType {
                 step = "Lifecycle"
-                try await liveRecords.recordLifecycle(animalID: animalID, type: lifecycleType, occurredAt: draft.lifecycleAt)
+                let eventID = try await liveRecords.recordLifecycle(
+                    animalID: animalID,
+                    type: lifecycleType,
+                    occurredAt: draft.lifecycleAt,
+                    weightPounds: draft.lifecycleWeight
+                )
                 result.savedLifecycle = true
+                step = "\(lifecycleType.label) cost"
+                result.acceptedLifecycleCost = try await recordEventCost(
+                    liveRecords,
+                    animalID: animalID,
+                    amount: draft.lifecycleCost,
+                    eventID: eventID,
+                    lifecycle: true
+                )
             }
             if let careType = draft.careType {
                 step = "Care"
-                try await liveRecords.recordCare(
+                let eventID = try await liveRecords.recordCare(
                     animalID: animalID,
                     type: careType,
                     occurredAt: draft.careAt,
-                    confirmed: careType.needsConfirmation
+                    confirmed: careType.needsConfirmation,
+                    itemName: draft.careItemName,
+                    itemKind: draft.careItemKind
                 )
                 result.savedCare = true
-            }
-            if draft.careType != nil || LivestockMoney.nonzeroText(draft.careCost) != nil {
+                step = "\(careType.label) cost"
+                result.acceptedCareCost = try await recordEventCost(
+                    liveRecords,
+                    animalID: animalID,
+                    amount: draft.careCost,
+                    eventID: eventID,
+                    lifecycle: false,
+                    financeReference: draft.careFinanceReference
+                )
+            } else if LivestockMoney.nonzeroText(draft.careCost) != nil {
                 step = "Care cost"
-                result.acceptedCareCost = try await recordOptionalCost(liveRecords, animalID: animalID, amount: draft.careCost)
+                result.acceptedCareCost = try await recordOptionalCost(
+                    liveRecords,
+                    animalID: animalID,
+                    amount: draft.careCost,
+                    financeReference: draft.careFinanceReference
+                )
             }
-            for line in draft.feedLines where line.hasQuantity || LivestockMoney.nonzeroText(line.cost) != nil {
-                if line.hasQuantity {
-                    step = line.inputType.label
-                    try await liveRecords.recordConsumption(
-                        animalID: animalID,
-                        inputType: line.inputType,
-                        quantity: line.quantity,
-                        unit: line.unit,
-                        observedAt: draft.feedAt,
-                        supplier: draft.supplier,
-                        batch: draft.batch,
-                        frequency: line.frequency
+            for line in draft.feedLines where line.hasQuantity {
+                step = line.inputType.label
+                let consumptionID = try await liveRecords.recordConsumption(
+                    animalID: animalID,
+                    inputType: line.inputType,
+                    quantity: line.quantity,
+                    unit: line.unit,
+                    observedAt: draft.feedAt,
+                    supplier: draft.supplier,
+                    batch: draft.batch,
+                    frequency: line.frequency
+                )
+                result.savedFeed = true
+                guard let consumptionID else {
+                    throw LivestockDevReadError.unavailable(
+                        "The \(LivestockBuildStamp.current.serverLabel) did not return the new feed record, so its cost was not linked. Restart the \(LivestockBuildStamp.current.serverLabel)."
                     )
-                    result.savedFeed = true
                 }
                 step = "\(line.inputType.label) cost"
                 let accepted = try await recordOptionalCost(
                     liveRecords,
                     animalID: animalID,
-                    amount: line.cost,
+                    amount: LivestockMoney.plain(line.annualFeedCost) ?? "0",
                     frequency: line.frequency,
-                    feedType: line.inputType
+                    feedType: line.inputType,
+                    financeReference: line.financeReference,
+                    consumptionID: consumptionID
                 )
                 result.acceptedFeedCost = result.acceptedFeedCost || accepted
             }
@@ -1036,16 +1366,42 @@ struct LivestockReadConnection: Sendable {
         animalID: Animal.ID,
         amount: String,
         frequency: LivestockCostFrequency? = nil,
-        feedType: LivestockInputType? = nil
+        feedType: LivestockInputType? = nil,
+        financeReference: String = "",
+        consumptionID: UUID? = nil
     ) async throws -> Bool {
         guard let amountText = LivestockMoney.nonzeroText(amount) else { return true }
         try await liveRecords.recordCost(
             animalID: animalID,
             amount: amountText,
-            financeReference: "",
+            financeReference: financeReference,
             confirmed: true,
             frequency: frequency,
-            feedType: feedType
+            feedType: feedType,
+            consumptionID: consumptionID
+        )
+        return true
+    }
+
+    private func recordEventCost(
+        _ liveRecords: LivestockDevLoopbackRead,
+        animalID: Animal.ID,
+        amount: String,
+        eventID: UUID?,
+        lifecycle: Bool,
+        financeReference: String = ""
+    ) async throws -> Bool {
+        guard let amountText = LivestockMoney.nonzeroText(amount) else { return true }
+        guard let eventID else {
+            throw LivestockDevReadError.unavailable("The \(LivestockBuildStamp.current.serverLabel) did not return the new event, so its cost was not linked. Restart the \(LivestockBuildStamp.current.serverLabel).")
+        }
+        try await liveRecords.recordCost(
+            animalID: animalID,
+            amount: amountText,
+            financeReference: financeReference,
+            confirmed: true,
+            lifecycleEventID: lifecycle ? eventID : nil,
+            careEventID: lifecycle ? nil : eventID
         )
         return true
     }
@@ -1063,7 +1419,7 @@ struct LivestockReadConnection: Sendable {
         if !description.isEmpty {
             return description
         }
-        return "The DEV livestock database did not save the change."
+        return "The \(LivestockBuildStamp.current.databaseLabel) did not save the change."
     }
 
     private func activeIdentifierCollision(kind: LivestockIdentifierKind, value: String) -> Bool {
@@ -1103,8 +1459,13 @@ struct LivestockAnimalSaveDraft: Equatable, Sendable {
     var identifierValue = ""
     var lifecycleType: LivestockLifecycleEventType?
     var lifecycleAt = Date()
+    var lifecycleWeight = ""
+    var lifecycleCost = ""
     var careType: LivestockCareEventType?
     var careAt = Date()
+    var careItemName = ""
+    var careItemKind = ""
+    var careFinanceReference = ""
     var feedLines: [LivestockFeedEntry] = [LivestockFeedEntry(inputType: .feed)]
     var feedAt = Date()
     var supplier = ""
@@ -1138,19 +1499,33 @@ struct LivestockAnimalSaveDraft: Equatable, Sendable {
 
     var hasActivityCost: Bool {
         LivestockMoney.nonzeroText(identifierCost) != nil
+            || (lifecycleType != nil && LivestockMoney.nonzeroText(lifecycleCost) != nil)
             || LivestockMoney.nonzeroText(careCost) != nil
             || feedLines.contains { LivestockMoney.nonzeroText($0.cost) != nil }
+    }
+
+    var parsedWeight: Decimal? {
+        guard lifecycleType == .weightRecorded else { return nil }
+        return LivestockWeight.decimal(lifecycleWeight)
+    }
+
+    func lifecycleProblem() -> String? {
+        guard lifecycleType == .weightRecorded else { return nil }
+        return LivestockWeight.requirement(lifecycleWeight)
     }
 
     func costProblem() -> String? {
         if let problem = activityCostProblem(identifierCost, label: "Identifier cost", required: wantsIdentifier) {
             return problem
         }
-        if let problem = activityCostProblem(careCost, label: "Care cost", required: careType != nil) {
+        if lifecycleType != nil, let problem = activityCostProblem(lifecycleCost, label: "Event cost", required: false) {
+            return problem
+        }
+        if let problem = activityCostProblem(careCost, label: "Average cost", required: careType != nil) {
             return problem
         }
         for line in feedLines where line.hasQuantity || !line.cost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            if let problem = activityCostProblem(line.cost, label: "\(line.inputType.label) cost", required: line.hasQuantity) {
+            if let problem = LivestockFeedEntry.problem(quantity: line.quantity, cost: line.cost, feed: line.inputType.label) {
                 return problem
             }
         }
@@ -1167,6 +1542,7 @@ struct LivestockAnimalSaveDraft: Equatable, Sendable {
         var types: [String: LivestockInputType] = [:]
         var frequencies: [String: LivestockCostFrequency] = [:]
         var other = LivestockMoney.signed(identifierCost)
+            + (lifecycleType == nil ? 0 : LivestockMoney.signed(lifecycleCost))
             + LivestockMoney.signed(careCost)
             + LivestockMoney.signed(costAmount)
         func addFeed(_ amount: Decimal, type: LivestockInputType, frequency: LivestockCostFrequency) {
@@ -1177,7 +1553,7 @@ struct LivestockAnimalSaveDraft: Equatable, Sendable {
             frequencies[key] = frequency
         }
         for line in feedLines {
-            addFeed(LivestockMoney.signed(line.cost), type: line.inputType, frequency: line.frequency)
+            addFeed(line.annualFeedCost, type: line.inputType, frequency: line.frequency)
         }
         for item in recorded {
             let amount = LivestockMoney.signed(item.amount)
@@ -1219,6 +1595,66 @@ struct LivestockAnimalSaveDraft: Equatable, Sendable {
     }
 }
 
+/// The cost corrected together with a lifecycle, care, or feed record. A nil cost id adds the
+/// first cost to that record.
+struct LivestockCostFix: Equatable, Sendable {
+    var costID: UUID?
+    var amount: String
+
+    /// Nil when the corrected cost was left blank, which keeps the saved cost as it is.
+    static func entered(costID: UUID?, amount: String) -> LivestockCostFix? {
+        amount.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : LivestockCostFix(costID: costID, amount: amount)
+    }
+
+    func problem(reason: LivestockLifecycleCorrectionReason) -> String? {
+        if reason == .duplicateEntry {
+            return "A duplicate takes its cost with it. Leave the corrected cost blank."
+        }
+        return LivestockMoney.requirement(amount, label: "Corrected cost", allowZero: false, allowNegative: true)
+    }
+}
+
+enum LivestockRecordCorrection: Equatable, Sendable {
+    case care(
+        eventID: UUID,
+        occurredAt: Date,
+        reason: LivestockLifecycleCorrectionReason,
+        itemName: String,
+        itemKind: String,
+        cost: LivestockCostFix? = nil
+    )
+    case feed(
+        consumptionID: UUID,
+        quantity: String,
+        unit: LivestockInputUnit,
+        frequency: LivestockCostFrequency,
+        observedAt: Date,
+        supplier: String,
+        batch: String,
+        reason: LivestockLifecycleCorrectionReason,
+        cost: LivestockCostFix? = nil
+    )
+    case cost(costID: UUID, amount: String, reason: LivestockLifecycleCorrectionReason)
+
+    var problem: String? {
+        switch self {
+        case let .care(_, _, reason, _, _, cost):
+            return cost?.problem(reason: reason)
+        case let .feed(_, quantity, _, _, _, _, _, reason, cost):
+            guard reason != .duplicateEntry else { return cost?.problem(reason: reason) }
+            guard let value = Int(quantity), value > 0 else { return "Enter a quantity of 1 or more." }
+            guard let cost else { return nil }
+            return LivestockMoney.requirement(cost.amount, label: "Feed cost", allowZero: false)
+        case let .cost(_, amount, reason):
+            guard reason != .duplicateEntry else { return nil }
+            guard LivestockLifecycleCorrectionReason.costChoices.contains(reason) else {
+                return "A cost can be corrected for a wrong amount or a duplicate."
+            }
+            return LivestockMoney.requirement(amount, label: "Corrected amount", allowZero: false, allowNegative: true)
+        }
+    }
+}
+
 struct LivestockSaveNotice: Equatable, Sendable {
     var animalID: Animal.ID
     var message: String
@@ -1232,13 +1668,14 @@ struct LivestockAnimalSaveResult: Equatable, Sendable {
     var savedFeed = false
     var savedCost = false
     var acceptedIdentifierCost = false
+    var acceptedLifecycleCost = false
     var acceptedCareCost = false
     var acceptedFeedCost = false
     var message: String
 
     var savedAnything: Bool {
         savedIdentifier || savedLifecycle || savedCare || savedFeed || savedCost
-            || acceptedIdentifierCost || acceptedCareCost || acceptedFeedCost
+            || acceptedIdentifierCost || acceptedLifecycleCost || acceptedCareCost || acceptedFeedCost
     }
 
     var savedLabels: [String] {
@@ -1307,6 +1744,7 @@ struct AddAnimalDraft: Equatable {
     var mixBreedTwo = ""
     var petKind: PetKind?
     var petSpeciesOther = ""
+    var herdID: UUID?
 
     var petFormProblem: String? {
         guard category == .pets else { return nil }
@@ -1333,9 +1771,6 @@ struct AddAnimalDraft: Equatable {
             return "Type a breed, or choose one from the list."
         }
         if petBreedChoice == "mixed" {
-            if petKind != .dog {
-                return "A mixed breed is for a dog."
-            }
             if mixBreedOne.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || mixBreedTwo.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 return "Enter both breeds in the mix."
@@ -1376,9 +1811,6 @@ struct AddAnimalDraft: Equatable {
         if kind == .other {
             petBreedChoice = "typed"
             return
-        }
-        if kind != .dog, petBreedChoice == "mixed" {
-            petBreedChoice = ""
         }
         if petBreedChoice != "typed", petBreedChoice != "mixed", !LivestockCatalog.petBreeds(for: kind).contains(petBreedChoice) {
             petBreedChoice = ""
@@ -1430,6 +1862,23 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
     let baseURL: URL
     let token: String
     let tenantID: String
+    let expiresAt: Date
+
+    static func connectedUntilCaption(
+        _ expiresAt: Date,
+        environment: String = LivestockBuildStamp.current.environment,
+        now: Date = Date(),
+        calendar: Calendar = .current
+    ) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        if calendar.isDate(expiresAt, inSameDayAs: now) {
+            formatter.dateStyle = .none
+        } else {
+            formatter.dateStyle = .medium
+        }
+        return "Connected to \(environment) until \(formatter.string(from: expiresAt))."
+    }
 
     static func ticketURL() -> URL {
         #if os(iOS)
@@ -1450,7 +1899,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
             let token = object["token"] as? String,
             let tenantID = object["tenantID"] as? String,
             let expiresAt = object["expiresAt"] as? String,
-            let expiry = iso8601.date(from: expiresAt),
+            let expiry = ticketExpiry(expiresAt),
             expiry > now,
             !token.isEmpty,
             !tenantID.isEmpty,
@@ -1459,7 +1908,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         else {
             return nil
         }
-        return LivestockDevLoopbackRead(baseURL: parsed, token: token, tenantID: tenantID)
+        return LivestockDevLoopbackRead(baseURL: parsed, token: token, tenantID: tenantID, expiresAt: expiry)
     }
 
     func readAnimals() async throws -> LivestockAuthorizedAnimalPage {
@@ -1478,7 +1927,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         request.setValue(tenantID, forHTTPHeaderField: "X-RanchOS-Tenant")
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw LivestockDevReadError.unavailable("The DEV livestock database did not return animals.")
+            throw LivestockDevReadError.unavailable("The \(LivestockBuildStamp.current.databaseLabel) did not return animals.")
         }
         return try Self.decode(data)
     }
@@ -1490,7 +1939,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
             let body = object["body"] as? [String: Any],
             let rows = body["animals"] as? [[String: Any]]
         else {
-            throw LivestockDevReadError.unavailable("The DEV livestock database returned an unreadable animal list.")
+            throw LivestockDevReadError.unavailable("The \(LivestockBuildStamp.current.databaseLabel) returned an unreadable animal list.")
         }
         let animals = try rows.map(animal(from:))
         let herds = (body["herds"] as? [[String: Any]] ?? []).compactMap { item -> LivestockHerd? in
@@ -1504,7 +1953,10 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 id: id,
                 name: name,
                 notes: item["notes"] as? String ?? "",
-                retiredAt: stamp.date(from: Self.text(item["retired_at"]))
+                retiredAt: stamp.date(from: Self.text(item["retired_at"])),
+                careEvents: careEvents(from: item),
+                consumptions: consumptions(from: item),
+                costs: costs(from: item)
             )
         }
         return LivestockAuthorizedAnimalPage(origin: .live, animals: animals, herds: herds)
@@ -1541,14 +1993,14 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
             let production = ProductionType(rawValue: productionCode),
             LivestockCatalog.accepts(species: species, production: production, breed: nil)
         else {
-            throw LivestockDevReadError.unavailable("An animal from the DEV livestock database could not be read.")
+            throw LivestockDevReadError.unavailable("An animal from the \(LivestockBuildStamp.current.databaseLabel) could not be read.")
         }
         let breedCode = row["breed_code"] as? String
         let breed = breedCode.flatMap { code in
             LivestockCatalog.breeds.first { $0.code == code && $0.species == species }
         }
         guard LivestockCatalog.accepts(species: species, production: production, breed: breed) else {
-            throw LivestockDevReadError.unavailable("An animal from the DEV livestock database could not be read.")
+            throw LivestockDevReadError.unavailable("An animal from the \(LivestockBuildStamp.current.databaseLabel) could not be read.")
         }
         let identifiers = Self.identifiers(from: row)
         let lifecycleEvents = Self.lifecycleEvents(from: row)
@@ -1605,7 +2057,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
             ]
         )
         guard let idText = body["animal_id"] as? String, let id = UUID(uuidString: idText) else {
-            throw LivestockDevReadError.unavailable("The DEV livestock database did not return the new animal.")
+            throw LivestockDevReadError.unavailable("The \(LivestockBuildStamp.current.databaseLabel) did not return the new animal.")
         }
         return id
     }
@@ -1637,6 +2089,14 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         try await post(path: "\(Self.animalsPath)/herds", body: ["name": name, "notes": notes])
     }
 
+    func renameAnimal(animalID: Animal.ID, displayName: String) async throws {
+        try await post(path: "\(Self.animalsPath)/\(animalID.uuidString)/name", body: ["display_name": displayName])
+    }
+
+    func renameHerd(herdID: UUID, name: String) async throws {
+        try await post(path: "\(Self.animalsPath)/herds/\(herdID.uuidString)/name", body: ["name": name])
+    }
+
     func assignHerd(animalID: Animal.ID, herdID: UUID) async throws {
         try await post(
             path: "\(Self.animalsPath)/\(animalID.uuidString)/herd",
@@ -1662,15 +2122,31 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         )
     }
 
-    func recordCare(animalID: Animal.ID, type: LivestockCareEventType, occurredAt: Date, confirmed: Bool) async throws {
-        try await post(
-            path: "\(Self.animalsPath)/\(animalID.uuidString)/care",
-            body: ["type": type.rawValue, "occurred_at": Self.stamp.string(from: occurredAt), "confirmed": confirmed]
+    func recordCare(
+        animalID: Animal.ID? = nil,
+        herdID: UUID? = nil,
+        type: LivestockCareEventType,
+        occurredAt: Date,
+        confirmed: Bool,
+        itemName: String = "",
+        itemKind: String = ""
+    ) async throws -> UUID? {
+        let reply = try await post(
+            path: "\(Self.animalsPath)/\(try Self.ownerPath(animalID: animalID, herdID: herdID))/care",
+            body: [
+                "type": type.rawValue,
+                "occurred_at": Self.stamp.string(from: occurredAt),
+                "confirmed": confirmed,
+                "item_name": itemName,
+                "item_kind": itemKind,
+            ]
         )
+        return (reply["event_id"] as? String).flatMap(UUID.init(uuidString:))
     }
 
     func recordConsumption(
-        animalID: Animal.ID,
+        animalID: Animal.ID? = nil,
+        herdID: UUID? = nil,
         inputType: LivestockInputType,
         quantity: String,
         unit: LivestockInputUnit,
@@ -1678,9 +2154,9 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         supplier: String,
         batch: String,
         frequency: LivestockCostFrequency
-    ) async throws {
-        try await post(
-            path: "\(Self.animalsPath)/\(animalID.uuidString)/consumption",
+    ) async throws -> UUID? {
+        let reply = try await post(
+            path: "\(Self.animalsPath)/\(try Self.ownerPath(animalID: animalID, herdID: herdID))/consumption",
             body: [
                 "input_type": inputType.rawValue,
                 "quantity": quantity,
@@ -1691,49 +2167,154 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 "frequency": frequency.rawValue,
             ]
         )
+        return (reply["event_id"] as? String).flatMap(UUID.init(uuidString:))
     }
 
     func recordCost(
-        animalID: Animal.ID,
+        animalID: Animal.ID? = nil,
+        herdID: UUID? = nil,
         amount: String,
         financeReference: String,
         confirmed: Bool,
         frequency: LivestockCostFrequency? = nil,
-        feedType: LivestockInputType? = nil
+        feedType: LivestockInputType? = nil,
+        lifecycleEventID: UUID? = nil,
+        careEventID: UUID? = nil,
+        consumptionID: UUID? = nil
     ) async throws {
         try await post(
-            path: "\(Self.animalsPath)/\(animalID.uuidString)/costs",
+            path: "\(Self.animalsPath)/\(try Self.ownerPath(animalID: animalID, herdID: herdID))/costs",
             body: [
                 "amount": amount,
                 "finance_reference": financeReference,
                 "confirmed": confirmed,
                 "frequency": frequency?.rawValue ?? "",
                 "feed_type": feedType?.rawValue ?? "",
+                "lifecycle_event_id": lifecycleEventID?.uuidString.lowercased() ?? "",
+                "care_event_id": careEventID?.uuidString.lowercased() ?? "",
+                "consumption_id": consumptionID?.uuidString.lowercased() ?? "",
             ]
         )
     }
 
-    func recordLifecycle(animalID: Animal.ID, type: LivestockLifecycleEventType, occurredAt: Date) async throws {
-        try await post(
+    func recordLifecycle(
+        animalID: Animal.ID,
+        type: LivestockLifecycleEventType,
+        occurredAt: Date,
+        weightPounds: String = ""
+    ) async throws -> UUID? {
+        var body: [String: Any] = [
+            "type": type.rawValue,
+            "occurred_at": Self.stamp.string(from: occurredAt),
+        ]
+        if type == .weightRecorded {
+            body["weight_pounds"] = weightPounds.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let reply = try await post(
             path: "\(Self.animalsPath)/\(animalID.uuidString)/lifecycle",
-            body: ["type": type.rawValue, "occurred_at": Self.stamp.string(from: occurredAt)]
+            body: body
         )
+        return (reply["event_id"] as? String).flatMap(UUID.init(uuidString:))
     }
 
     func correctLifecycle(
         animalID: Animal.ID,
         eventID: UUID,
         occurredAt: Date,
-        reason: LivestockLifecycleCorrectionReason
+        reason: LivestockLifecycleCorrectionReason,
+        weightPounds: String = "",
+        cost: LivestockCostFix? = nil
     ) async throws {
         try await post(
             path: "\(Self.animalsPath)/\(animalID.uuidString)/lifecycle/\(eventID.uuidString)/correct",
-            body: [
+            body: Self.withCost([
                 "occurred_at": Self.stamp.string(from: occurredAt),
+                "reason": reason.rawValue,
+                "confirmed": true,
+                "weight_pounds": weightPounds.trimmingCharacters(in: .whitespacesAndNewlines),
+            ], cost)
+        )
+    }
+
+    func correctCare(
+        animalID: Animal.ID? = nil,
+        herdID: UUID? = nil,
+        eventID: UUID,
+        occurredAt: Date,
+        reason: LivestockLifecycleCorrectionReason,
+        itemName: String,
+        itemKind: String,
+        cost: LivestockCostFix? = nil
+    ) async throws {
+        try await post(
+            path: "\(Self.animalsPath)/\(try Self.ownerPath(animalID: animalID, herdID: herdID))/care/\(eventID.uuidString)/correct",
+            body: Self.withCost([
+                "occurred_at": Self.stamp.string(from: occurredAt),
+                "reason": reason.rawValue,
+                "confirmed": true,
+                "item_name": itemName,
+                "item_kind": itemKind,
+            ], cost)
+        )
+    }
+
+    private static func withCost(_ body: [String: Any], _ cost: LivestockCostFix?) -> [String: Any] {
+        guard let cost else { return body }
+        var merged = body
+        merged["cost_id"] = cost.costID?.uuidString.lowercased() ?? ""
+        merged["cost_amount"] = cost.amount.trimmingCharacters(in: .whitespacesAndNewlines)
+        return merged
+    }
+
+    func correctConsumption(
+        animalID: Animal.ID? = nil,
+        herdID: UUID? = nil,
+        consumptionID: UUID,
+        quantity: String,
+        unit: LivestockInputUnit,
+        frequency: LivestockCostFrequency,
+        observedAt: Date,
+        supplier: String,
+        batch: String,
+        reason: LivestockLifecycleCorrectionReason,
+        cost: LivestockCostFix? = nil
+    ) async throws {
+        try await post(
+            path: "\(Self.animalsPath)/\(try Self.ownerPath(animalID: animalID, herdID: herdID))/consumption/\(consumptionID.uuidString)/correct",
+            body: Self.withCost([
+                "quantity": quantity,
+                "unit": unit.rawValue,
+                "frequency": frequency.rawValue,
+                "observed_at": Self.stamp.string(from: observedAt),
+                "supplier": supplier,
+                "batch": batch,
+                "reason": reason.rawValue,
+                "confirmed": true,
+            ], cost)
+        )
+    }
+
+    func correctCost(
+        animalID: Animal.ID? = nil,
+        herdID: UUID? = nil,
+        costID: UUID,
+        amount: String,
+        reason: LivestockLifecycleCorrectionReason
+    ) async throws {
+        try await post(
+            path: "\(Self.animalsPath)/\(try Self.ownerPath(animalID: animalID, herdID: herdID))/costs/\(costID.uuidString)/correct",
+            body: [
+                "amount": amount,
                 "reason": reason.rawValue,
                 "confirmed": true,
             ]
         )
+    }
+
+    private static func ownerPath(animalID: Animal.ID?, herdID: UUID?) throws -> String {
+        if let herdID { return "herds/\(herdID.uuidString)" }
+        if let animalID { return animalID.uuidString }
+        throw LivestockDevReadError.unavailable("Feed belongs to one animal or one herd.")
     }
 
     @discardableResult
@@ -1755,11 +2336,11 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse else {
-            throw LivestockDevReadError.unavailable("The DEV livestock database did not answer.")
+            throw LivestockDevReadError.unavailable("The \(LivestockBuildStamp.current.databaseLabel) did not answer.")
         }
         guard http.statusCode == 200 else {
             let message = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["error"] as? String
-            throw LivestockDevReadError.unavailable(message ?? "The DEV livestock database did not save the change.")
+            throw LivestockDevReadError.unavailable(message ?? "The \(LivestockBuildStamp.current.databaseLabel) did not save the change.")
         }
         return (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
     }
@@ -1811,11 +2392,22 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 id: id,
                 type: type,
                 occurredAt: occurredAt,
+                weightPounds: Self.weightPounds(from: item["weight_pounds"]),
                 supersedesEventID: supersedes,
                 correctionReason: reason,
                 isCurrent: isCurrent
             )
         }
+    }
+
+    private static func weightPounds(from value: Any?) -> Decimal? {
+        if let text = value as? String {
+            return Decimal(string: text, locale: Locale(identifier: "en_US_POSIX"))
+        }
+        if let number = value as? NSNumber {
+            return number.decimalValue
+        }
+        return nil
     }
 
     private static func careEvents(from row: [String: Any]) -> [LivestockCareEvent] {
@@ -1829,7 +2421,16 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 let occurred = item["occurred_at"] as? String,
                 let occurredAt = stamp.date(from: occurred)
             else { return nil }
-            return LivestockCareEvent(id: id, type: type, occurredAt: occurredAt)
+            return LivestockCareEvent(
+                id: id,
+                type: type,
+                occurredAt: occurredAt,
+                itemName: item["item_name"] as? String,
+                itemKind: item["item_kind"] as? String,
+                supersedesID: (item["supersedes_id"] as? String).flatMap(UUID.init(uuidString:)),
+                correctionReason: (item["correction_reason"] as? String).flatMap(LivestockLifecycleCorrectionReason.init(rawValue:)),
+                isCurrent: item["current"] as? Bool ?? true
+            )
         }
     }
 
@@ -1854,7 +2455,10 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 observedAt: observedAt,
                 supplier: item["supplier"] as? String,
                 batch: item["batch"] as? String,
-                frequency: (item["frequency"] as? String).flatMap(LivestockCostFrequency.init(rawValue:))
+                frequency: (item["frequency"] as? String).flatMap(LivestockCostFrequency.init(rawValue:)),
+                supersedesID: (item["supersedes_id"] as? String).flatMap(UUID.init(uuidString:)),
+                correctionReason: (item["correction_reason"] as? String).flatMap(LivestockLifecycleCorrectionReason.init(rawValue:)),
+                isCurrent: item["current"] as? Bool ?? true
             )
         }
     }
@@ -1874,7 +2478,14 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 financeReference: item["finance_reference"] as? String,
                 recordedAt: recordedAt,
                 frequency: (item["frequency"] as? String).flatMap(LivestockCostFrequency.init(rawValue:)),
-                feedType: (item["feed_type"] as? String).flatMap(LivestockInputType.init(rawValue:))
+                feedType: (item["feed_type"] as? String).flatMap(LivestockInputType.init(rawValue:)),
+                lifecycleEventID: (item["lifecycle_event_id"] as? String).flatMap(UUID.init(uuidString:)),
+                careEventID: (item["care_event_id"] as? String).flatMap(UUID.init(uuidString:)),
+                consumptionID: (item["consumption_id"] as? String).flatMap(UUID.init(uuidString:)),
+                supersedesID: (item["supersedes_id"] as? String).flatMap(UUID.init(uuidString:)),
+                correctionReason: (item["correction_reason"] as? String).flatMap(LivestockLifecycleCorrectionReason.init(rawValue:)),
+                isCurrent: item["current"] as? Bool ?? true,
+                basisCode: item["basis"] as? String ?? "per_animal"
             )
         }
     }
@@ -1907,3 +2518,13 @@ private let iso8601: ISO8601DateFormatter = {
     formatter.formatOptions = [.withInternetDateTime]
     return formatter
 }()
+
+private let iso8601Offset: ISO8601DateFormatter = {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withColonSeparatorInTimeZone]
+    return formatter
+}()
+
+private func ticketExpiry(_ text: String) -> Date? {
+    iso8601.date(from: text) ?? iso8601Offset.date(from: text)
+}

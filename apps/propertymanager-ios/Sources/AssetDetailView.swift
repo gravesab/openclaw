@@ -334,6 +334,7 @@ struct AssetDetailView: View {
             }
             await loadReadings()
         } catch {
+            guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -356,6 +357,7 @@ struct AssetDetailView: View {
         do {
             readings = try await store.client.fetchMeterReadings(assetId: assetId)
         } catch {
+            guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription
         }
     }

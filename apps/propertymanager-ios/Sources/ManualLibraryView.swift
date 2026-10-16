@@ -240,6 +240,7 @@ struct ManualLibraryView: View {
             manuals = fetched
             loadError = nil
         } catch {
+            guard !error.isCancellation else { return }
             loadError = error.localizedDescription
         }
     }
@@ -253,6 +254,7 @@ struct ManualLibraryView: View {
             )
             libraryError = nil
         } catch {
+            guard !error.isCancellation else { return }
             libraryError = error.localizedDescription
         }
     }

@@ -215,6 +215,7 @@ final class PropertyStore: ObservableObject {
             let label = health.status ?? "ok"
             statusMessage = "Online — \(label) · \(tasks.count) tasks, \(assets.count) assets"
         } catch {
+            guard !error.isCancellation else { return }
             statusMessage = nil
             errorMessage = error.localizedDescription
         }
@@ -235,6 +236,7 @@ final class PropertyStore: ObservableObject {
             tasks = try await fetchedTasks
             statusMessage = "Updated \(tasks.count) tasks"
         } catch {
+            guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -254,6 +256,7 @@ final class PropertyStore: ObservableObject {
                 statusMessage = "Updated \(tasks.count) tasks, \(assets.count) assets"
             }
         } catch {
+            guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -267,6 +270,7 @@ final class PropertyStore: ObservableObject {
                     let asset = try await client.fetchAssetByQR(token: token)
                     deepLinkAssetId = asset.id
                 } catch {
+                    guard !error.isCancellation else { return }
                     errorMessage = error.localizedDescription
                 }
             }

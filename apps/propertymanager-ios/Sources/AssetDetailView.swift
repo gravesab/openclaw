@@ -445,7 +445,11 @@ struct AssetDetailView: View {
             if let placedInServiceDate = asset?.placedInServiceDate {
                 self.placedInServiceDate = placedInServiceDate
             }
-            await loadReadings()
+            if asset?.isPseudo == true {
+                readings = []
+            } else {
+                await loadReadings()
+            }
         } catch {
             guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription

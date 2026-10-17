@@ -20,6 +20,7 @@ from uuid import UUID, uuid4
 from flask import Flask, g, jsonify, request
 
 import db as pm_db
+from assets_api import reject_if_pseudo_asset
 from auth import auth_required, review_required, server_submitter_identity
 from errors import error_response, validation_error
 
@@ -405,6 +406,8 @@ def register_work_request_routes(app: Flask) -> None:
             asset_id = _normalize_uuid(asset_id, field="asset_id")
         except ValueError as exc:
             return validation_error(str(exc), field="asset_id")
+        if (pseudo_err := reject_if_pseudo_asset(asset_id)) is not None:
+            return pseudo_err
         area = str(payload.get("area") or "").strip()
         try:
             materials = _normalize_materials(payload.get("materials"))
@@ -537,6 +540,8 @@ def register_work_request_routes(app: Flask) -> None:
             asset_id = _normalize_uuid(asset_id, field="asset_id")
         except ValueError as exc:
             return validation_error(str(exc), field="asset_id")
+        if (pseudo_err := reject_if_pseudo_asset(asset_id)) is not None:
+            return pseudo_err
         triaged = pm_db.execute_top_level_one_json(
             """WITH triaged_request AS (
                    UPDATE propertymanager.maintenance_tasks

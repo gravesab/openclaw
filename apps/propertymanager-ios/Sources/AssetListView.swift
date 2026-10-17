@@ -5,6 +5,7 @@ struct AssetListView: View {
     @State private var selectedAsset: RanchAsset?
     @State private var assetPendingDeactivate: RanchAsset?
     @State private var showDeactivateConfirm = false
+    @State private var showNewGroup = false
     @State private var searchText = ""
 
     var body: some View {
@@ -29,6 +30,15 @@ struct AssetListView: View {
             }
         }
         .navigationTitle("Assets")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showNewGroup = true
+                } label: {
+                    Label("New Group", systemImage: "square.stack.3d.up")
+                }
+            }
+        }
         .searchable(
             text: $searchText,
             placement: .navigationBarDrawer(displayMode: .always),
@@ -36,6 +46,9 @@ struct AssetListView: View {
         )
         .navigationDestination(for: UUID.self) { assetId in
             AssetDetailView(assetId: assetId)
+        }
+        .sheet(isPresented: $showNewGroup) {
+            NewPseudoGroupSheet()
         }
         .confirmationDialog(
             assetPendingDeactivate.map { "Deactivate \($0.name)?" } ?? "Deactivate asset?",
@@ -71,9 +84,24 @@ struct AssetRowView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(asset.name)
-                .font(.headline)
-            if let hostName = asset.host?.name {
+            HStack(spacing: 6) {
+                Text(asset.name)
+                    .font(.headline)
+                if asset.isPseudo {
+                    Text("Group")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+            }
+            if asset.isPseudo {
+                let count = asset.attachments?.count ?? 0
+                Text(count == 1 ? "1 asset" : "\(count) assets")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if let hostName = asset.host?.name {
                 Text("Attached to \(hostName)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -90,19 +118,21 @@ struct AssetRowView: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
-            if let meter = asset.meter, meter.hasMeter {
-                Text("\(formatValue(meter.currentValue)) \(meter.unit)")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("Frequency-based maintenance")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-            }
-            if let overdue = asset.pmSummary?.overdueMeterCount, overdue > 0 {
-                Text("\(overdue) overdue service\(overdue == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundStyle(.red)
+            if !asset.isPseudo {
+                if let meter = asset.meter, meter.hasMeter {
+                    Text("\(formatValue(meter.currentValue)) \(meter.unit)")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text("Frequency-based maintenance")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                if let overdue = asset.pmSummary?.overdueMeterCount, overdue > 0 {
+                    Text("\(overdue) overdue service\(overdue == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                }
             }
         }
         .padding(.vertical, 4)
@@ -111,5 +141,82 @@ struct AssetRowView: View {
     private func formatValue(_ value: Double?) -> String {
         guard let value else { return "—" }
         return value.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    }
+}
+
+struct NewPseudoGroupSheet: View {
+    @EnvironmentObject private var store: PropertyStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var category = "Equipment"
+    @State private var errorText: String?
+    @State private var saving = false
+
+    private var normalizedName: String {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+    }
+
+    private var existingNames: Set<String> {
+        Set(store.assets.map { $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() })
+    }
+
+    private var categoryChoices: [String] {
+        let values = Set(store.assets.compactMap(\.category) + ["Equipment", "Vehicle", "House", "Property"])
+        return values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("Group name", text: $name)
+                    Picker("Category", selection: $category) {
+                        ForEach(categoryChoices, id: \.self) { Text($0).tag($0) }
+                    }
+                } footer: {
+                    Text("Groups are for display only. Attach real assets with Attached to. Groups have no meter or tasks.")
+                }
+                if existingNames.contains(normalizedName), !normalizedName.isEmpty {
+                    Text("An asset with this name already exists.")
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                }
+                if let errorText {
+                    Text(errorText)
+                        .foregroundStyle(.red)
+                        .font(.caption)
+                }
+            }
+            .navigationTitle("New Group")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Create") {
+                        Task { await create() }
+                    }
+                    .disabled(
+                        saving || normalizedName.isEmpty || existingNames.contains(normalizedName)
+                    )
+                }
+            }
+        }
+    }
+
+    private func create() async {
+        saving = true
+        errorText = nil
+        defer { saving = false }
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        do {
+            let created = try await store.client.createPseudoGroup(name: trimmed, category: category)
+            await store.refreshAssets()
+            store.selectedTaskAssetId = created.id
+            dismiss()
+        } catch {
+            errorText = error.localizedDescription
+        }
     }
 }

@@ -21,10 +21,12 @@ import meter_schedule as ms
 ASSET_COLUMNS = """
     a.id, a.external_id, a.ranchbrain_guid, a.name, a.manufacturer, a.model,
     a.category, a.location, a.aliases, a.qr_token, a.is_active,
-    a.placed_in_service_date, a.host_asset_id,
+    a.placed_in_service_date, a.host_asset_id, a.is_pseudo,
     a.meter_proposed_type, a.meter_proposed_unit, a.meter_activated_at,
     a.created_at, a.updated_at
 """
+
+PSEUDO_ASSET_WORK_ERROR = "Pseudo asset groups cannot have meters or maintenance tasks"
 
 METER_COLUMNS = """
     m.asset_id, m.meter_type, m.current_value, m.unit, m.latest_reading_at,
@@ -179,6 +181,39 @@ def _normalize_asset_id(value: Any) -> str | None:
     return text or None
 
 
+def parse_is_pseudo(value: Any) -> bool:
+    if value is None or value is False:
+        return False
+    if value is True:
+        return True
+    if isinstance(value, (int, float)) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in ("true", "1", "yes"):
+            return True
+        if lowered in ("false", "0", "no", ""):
+            return False
+    raise ValueError("is_pseudo must be a boolean")
+
+
+def asset_is_pseudo(asset_id: str) -> bool:
+    row = pm_db.execute_one_json(
+        "SELECT is_pseudo FROM propertymanager.assets WHERE id = %s",
+        (asset_id,),
+    )
+    if row is None:
+        return False
+    return bool(row.get("is_pseudo"))
+
+
+def reject_if_pseudo_asset(asset_id: str, *, field: str = "asset_id"):
+    """Return a validation response when asset_id is a pseudo group; else None."""
+    if asset_is_pseudo(asset_id):
+        return validation_error(PSEUDO_ASSET_WORK_ERROR, field=field)
+    return None
+
+
 def parse_host_asset_id(value: Any) -> str | None:
     """Accept a UUID string or null to clear the host link."""
     if value is None:
@@ -259,6 +294,7 @@ def enrich_asset(
             else placed_in_service_date.isoformat()
         )
     asset_id = str(item["id"])
+    item["is_pseudo"] = bool(item.get("is_pseudo"))
     host_asset_id = _normalize_asset_id(item.get("host_asset_id"))
     item["host_asset_id"] = host_asset_id
     if host_by_id is not None:
@@ -427,55 +463,79 @@ def create_asset():
     if asset_name_conflicts(name):
         return duplicate_asset_name_response()
 
+    try:
+        is_pseudo = parse_is_pseudo(payload.get("is_pseudo"))
+    except ValueError as exc:
+        return validation_error(str(exc), field="is_pseudo")
+
     asset_id = str(payload.get("id") or uuid4())
     qr_token = str(payload.get("qr_token") or uuid4().hex)
     category = str(payload.get("category") or "")
-    proposed_type = str(payload.get("meter_proposed_type") or ms.default_meter_type_for_category(category))
-    proposed_unit = str(payload.get("meter_proposed_unit") or ms.meter_unit_for_type(proposed_type))
-    if proposed_type not in ms.METER_TYPES:
-        return validation_error(f"meter_proposed_type must be one of {sorted(ms.METER_TYPES)}", field="meter_proposed_type")
-
     aliases = payload.get("aliases") or []
     if not isinstance(aliases, list):
         aliases = []
-    try:
-        placed_in_service_date = parse_placed_in_service_date(payload.get("placed_in_service_date"))
-    except ValueError as exc:
-        return validation_error(str(exc), field="placed_in_service_date")
+
+    if is_pseudo:
+        # Groups are display-only roots: ignore equipment / meter intake fields.
+        manufacturer = ""
+        model = ""
+        location = ""
+        proposed_type = "none"
+        proposed_unit = ""
+        placed_in_service_date = None
+    else:
+        proposed_type = str(
+            payload.get("meter_proposed_type") or ms.default_meter_type_for_category(category)
+        )
+        proposed_unit = str(payload.get("meter_proposed_unit") or ms.meter_unit_for_type(proposed_type))
+        if proposed_type not in ms.METER_TYPES:
+            return validation_error(
+                f"meter_proposed_type must be one of {sorted(ms.METER_TYPES)}",
+                field="meter_proposed_type",
+            )
+        manufacturer = str(payload.get("manufacturer") or "")
+        model = str(payload.get("model") or "")
+        location = str(payload.get("location") or "")
+        try:
+            placed_in_service_date = parse_placed_in_service_date(payload.get("placed_in_service_date"))
+        except ValueError as exc:
+            return validation_error(str(exc), field="placed_in_service_date")
 
     pm_db.execute(
         """
         INSERT INTO propertymanager.assets
             (id, external_id, ranchbrain_guid, name, manufacturer, model, category,
-             location, aliases, qr_token, is_active, meter_proposed_type, meter_proposed_unit,
+             location, aliases, qr_token, is_active, is_pseudo, meter_proposed_type, meter_proposed_unit,
              placed_in_service_date, created_at, updated_at)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, true, %s, %s, %s, now(), now())
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, true, %s, %s, %s, %s, now(), now())
         """,
         (
             asset_id,
             external_id,
             payload.get("ranchbrain_guid"),
             name,
-            str(payload.get("manufacturer") or ""),
-            str(payload.get("model") or ""),
+            manufacturer,
+            model,
             category,
-            str(payload.get("location") or ""),
+            location,
             json.dumps(aliases),
             qr_token,
+            is_pseudo,
             proposed_type,
             proposed_unit,
             placed_in_service_date,
         ),
     )
-    pm_db.execute(
-        """
-        INSERT INTO propertymanager.asset_meter
-            (asset_id, meter_type, current_value, unit, meter_epoch, row_version, updated_at)
-        VALUES (%s, 'none', 0, '', 1, 1, now())
-        ON CONFLICT (asset_id) DO NOTHING
-        """,
-        (asset_id,),
-    )
+    if not is_pseudo:
+        pm_db.execute(
+            """
+            INSERT INTO propertymanager.asset_meter
+                (asset_id, meter_type, current_value, unit, meter_epoch, row_version, updated_at)
+            VALUES (%s, 'none', 0, '', 1, 1, now())
+            ON CONFLICT (asset_id) DO NOTHING
+            """,
+            (asset_id,),
+        )
     row = fetch_asset_or_404(asset_id)
     return jsonify(row), 201
 
@@ -502,11 +562,12 @@ def patch_asset(asset_id: str):
         return validation_error(f"Unsupported fields: {', '.join(unknown)}")
 
     exists = pm_db.execute_one_json(
-        "SELECT id FROM propertymanager.assets WHERE id = %s",
+        "SELECT id, is_pseudo FROM propertymanager.assets WHERE id = %s",
         (asset_id,),
     )
     if exists is None:
         return error_response("NOT_FOUND", "Asset not found", status=404)
+    target_is_pseudo = bool(exists.get("is_pseudo"))
 
     if "name" in payload:
         name = str(payload.get("name") or "").strip()
@@ -523,6 +584,11 @@ def patch_asset(asset_id: str):
             return validation_error(str(exc), field="placed_in_service_date")
 
     if "host_asset_id" in payload:
+        if target_is_pseudo:
+            return validation_error(
+                "Pseudo asset groups cannot be attached to a host",
+                field="host_asset_id",
+            )
         try:
             host_asset_id = parse_host_asset_id(payload["host_asset_id"])
         except ValueError as exc:
@@ -581,6 +647,8 @@ def activate_meter(asset_id: str):
     payload = request.get_json(silent=True) or {}
     if fetch_asset_or_404(asset_id) is None:
         return error_response("NOT_FOUND", "Asset not found", status=404)
+    if (pseudo_err := reject_if_pseudo_asset(asset_id)) is not None:
+        return pseudo_err
 
     row_version = payload.get("row_version")
     if row_version is None:
@@ -658,6 +726,8 @@ def create_meter_reading(asset_id: str):
     asset = fetch_asset_or_404(asset_id)
     if asset is None:
         return error_response("NOT_FOUND", "Asset not found", status=404)
+    if (pseudo_err := reject_if_pseudo_asset(asset_id)) is not None:
+        return pseudo_err
 
     payload = request.get_json(silent=True) or {}
     try:
@@ -769,6 +839,8 @@ def create_meter_reading(asset_id: str):
 def confirm_meter_reading(asset_id: str):
     if fetch_asset_or_404(asset_id) is None:
         return error_response("NOT_FOUND", "Asset not found", status=404)
+    if (pseudo_err := reject_if_pseudo_asset(asset_id)) is not None:
+        return pseudo_err
 
     payload = request.get_json(silent=True) or {}
     preview_token = str(payload.get("preview_token") or "").strip()

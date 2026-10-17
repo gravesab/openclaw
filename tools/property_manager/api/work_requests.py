@@ -399,14 +399,13 @@ def register_work_request_routes(app: Flask) -> None:
         if not description or len(description) > MAX_DESCRIPTION_CHARS:
             return validation_error("description is required and must be at most 12000 characters", field="description")
         asset_id = str(payload.get("asset_id") or "").strip() or None
-        if asset_id:
-            try:
-                asset_id = _normalize_uuid(asset_id, field="asset_id")
-            except ValueError as exc:
-                return validation_error(str(exc), field="asset_id")
+        if not asset_id:
+            return validation_error("asset_id is required", field="asset_id")
+        try:
+            asset_id = _normalize_uuid(asset_id, field="asset_id")
+        except ValueError as exc:
+            return validation_error(str(exc), field="asset_id")
         area = str(payload.get("area") or "").strip()
-        if not asset_id and not area:
-            return validation_error("area is required when asset_id is not supplied", field="area")
         try:
             materials = _normalize_materials(payload.get("materials"))
         except ValueError as exc:

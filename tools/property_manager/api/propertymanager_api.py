@@ -44,7 +44,7 @@ ATTACHMENTS_ROOT = os.environ.get(
 )
 
 logger = logging.getLogger("propertymanager_api")
-EXPECTED_SCHEMA_VERSION = "016"
+EXPECTED_SCHEMA_VERSION = "017"
 MAX_TASK_PHOTO_BYTES = 25 * 1024 * 1024
 MAX_COMPLETION_HISTORY_ENTRIES = 100
 MAX_COMPLETION_HISTORY_ENTRY_BYTES = 4 * 1024
@@ -884,6 +884,8 @@ def upsert_task():
     asset_id = payload.get("asset_id")
     if asset_id is not None and str(asset_id).strip() == "":
         asset_id = None
+    if asset_id is None:
+        return validation_error("asset_id is required", field="asset_id")
 
     area, item = normalize_written_task_title(
         area=str(payload.get("area") or "House"),
@@ -1115,6 +1117,9 @@ def patch_task(task_id: str):
     existing = fetch_task_or_404(task_id)
     if existing is None:
         return jsonify({"error": "Task not found"}), 404
+
+    if "asset_id" in updates and updates.get("asset_id") is None:
+        return validation_error("asset_id is required", field="asset_id")
 
     # Re-canonicalize title when area/item/asset_id participate in the patch.
     if {"area", "item", "asset_id"} & set(updates):

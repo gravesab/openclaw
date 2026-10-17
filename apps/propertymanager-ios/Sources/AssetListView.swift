@@ -161,7 +161,9 @@ struct NewPseudoGroupSheet: View {
     }
 
     private var categoryChoices: [String] {
-        let values = Set(store.assets.compactMap(\.category) + ["Equipment", "Vehicle", "House", "Property"])
+        let excluded = Set(["house", "home", "vehicle"])
+        let values = Set(store.assets.compactMap(\.category) + ["Equipment", "Property"])
+            .filter { !excluded.contains($0.lowercased()) }
         return values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 

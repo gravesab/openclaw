@@ -222,7 +222,9 @@ private struct NewAssetSheet: View {
     }
 
     private var categoryChoices: [String] {
-        let values = Set(categories + ["Equipment", "Vehicle", "House", "Property"])
+        let excluded = Set(["house", "home", "vehicle"])
+        let values = Set(categories + ["Equipment", "Property"])
+            .filter { !excluded.contains($0.lowercased()) }
         return values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 

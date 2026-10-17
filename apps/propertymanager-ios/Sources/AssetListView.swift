@@ -35,7 +35,7 @@ struct AssetListView: View {
                 Button {
                     showNewGroup = true
                 } label: {
-                    Label("New Group", systemImage: "square.stack.3d.up")
+                    Label("New Pseudo Asset", systemImage: "square.stack.3d.up")
                 }
             }
         }
@@ -169,12 +169,12 @@ struct NewPseudoGroupSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("Group name", text: $name)
+                    TextField("Name", text: $name)
                     Picker("Category", selection: $category) {
                         ForEach(categoryChoices, id: \.self) { Text($0).tag($0) }
                     }
                 } footer: {
-                    Text("Groups are for display only. Attach real assets with Attached to. Groups have no meter or tasks.")
+                    Text("A pseudo asset is a display group (for example Mowers). Only name and category are required. Attach real assets with Attached to. No meter, manufacturer, or tasks.")
                 }
                 if existingNames.contains(normalizedName), !normalizedName.isEmpty {
                     Text("An asset with this name already exists.")
@@ -187,7 +187,7 @@ struct NewPseudoGroupSheet: View {
                         .font(.caption)
                 }
             }
-            .navigationTitle("New Group")
+            .navigationTitle("New Pseudo Asset")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

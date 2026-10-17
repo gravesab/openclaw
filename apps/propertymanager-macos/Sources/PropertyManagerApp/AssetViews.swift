@@ -3,7 +3,6 @@ import SwiftUI
 struct MacAssetsPanel: View {
     @ObservedObject var store: MaintenanceStore
     @State private var showingNewAsset = false
-    @State private var showingNewGroup = false
     @State private var assetSearchText = ""
 
     private var assetMatches: [MacAssetSearchMatch] {
@@ -42,11 +41,6 @@ struct MacAssetsPanel: View {
                 Text("Assets")
                     .font(.title2.bold())
                 Spacer()
-                Button {
-                    showingNewGroup = true
-                } label: {
-                    Label("New Group", systemImage: "square.stack.3d.up")
-                }
                 Button {
                     showingNewAsset = true
                 } label: {
@@ -173,30 +167,22 @@ struct MacAssetsPanel: View {
                     $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 }),
                 createAction: { draft in
-                    let created = try await store.apiClient.createAsset(
-                        name: draft.name,
-                        category: draft.category,
-                        manufacturer: draft.manufacturer,
-                        model: draft.model,
-                        location: draft.location,
-                        proposedMeterType: draft.meterType
-                    )
-                    await store.refreshAssets()
-                    store.selectedTaskAssetId = created.id
-                }
-            )
-        }
-        .sheet(isPresented: $showingNewGroup) {
-            NewPseudoGroupSheet(
-                categories: store.categories.map(\.name),
-                existingNames: Set(store.assets.map {
-                    $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                }),
-                createAction: { draft in
-                    let created = try await store.apiClient.createPseudoGroup(
-                        name: draft.name,
-                        category: draft.category
-                    )
+                    let created: MacRanchAsset
+                    if draft.isPseudo {
+                        created = try await store.apiClient.createPseudoGroup(
+                            name: draft.name,
+                            category: draft.category
+                        )
+                    } else {
+                        created = try await store.apiClient.createAsset(
+                            name: draft.name,
+                            category: draft.category,
+                            manufacturer: draft.manufacturer,
+                            model: draft.model,
+                            location: draft.location,
+                            proposedMeterType: draft.meterType
+                        )
+                    }
                     await store.refreshAssets()
                     store.selectedTaskAssetId = created.id
                 }
@@ -217,6 +203,8 @@ private struct NewAssetDraft {
     var model = ""
     var location = ""
     var meterType = "none"
+    /// Display-only group (e.g. Mowers); no meter / manufacturer intake.
+    var isPseudo = false
 }
 
 private struct NewAssetSheet: View {
@@ -241,38 +229,47 @@ private struct NewAssetSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New Asset").font(.title2.bold())
-            Text("Create the asset once, then link its maintenance tasks from each task's Linked Asset field.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Text(
+                draft.isPseudo
+                    ? "A group is for display only (for example Mowers). Attach real assets to it with Attached to. Groups have no meter or tasks."
+                    : "Create the asset once, then link its maintenance tasks from each task's Linked Asset field."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
 
-            TextField("Asset name", text: $draft.name)
+            TextField(draft.isPseudo ? "Group name" : "Asset name", text: $draft.name)
                 .textFieldStyle(.roundedBorder)
                 .voiceInput($draft.name)
+
+            Toggle("Pseudo asset (group)", isOn: $draft.isPseudo)
+                .help("Groups only need a name and category. Members join later via Attached to.")
 
             Picker("Category", selection: $draft.category) {
                 ForEach(categoryChoices, id: \.self) { Text($0).tag($0) }
             }
 
-            HStack {
-                TextField("Manufacturer", text: $draft.manufacturer)
-                    .voiceInput($draft.manufacturer)
-                TextField("Model", text: $draft.model)
-                    .voiceInput($draft.model)
-            }
-            HStack {
-                TextField("Location", text: $draft.location)
-                    .voiceInput($draft.location)
-                Picker("Operating meter", selection: $draft.meterType) {
-                    Text("Runtime hours").tag("runtime_hours")
-                    Text("Mileage").tag("mileage")
-                    Text("Cycles").tag("cycles")
-                    Text("None").tag("none")
+            if !draft.isPseudo {
+                HStack {
+                    TextField("Manufacturer", text: $draft.manufacturer)
+                        .voiceInput($draft.manufacturer)
+                    TextField("Model", text: $draft.model)
+                        .voiceInput($draft.model)
                 }
-            }
+                HStack {
+                    TextField("Location", text: $draft.location)
+                        .voiceInput($draft.location)
+                    Picker("Operating meter", selection: $draft.meterType) {
+                        Text("Runtime hours").tag("runtime_hours")
+                        Text("Mileage").tag("mileage")
+                        Text("Cycles").tag("cycles")
+                        Text("None").tag("none")
+                    }
+                }
 
-            Text("Choose the operating meter independently of category. Any asset may use runtime hours, mileage, cycles, or no meter.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text("Choose the operating meter independently of category. Any asset may use runtime hours, mileage, cycles, or no meter.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if existingNames.contains(normalizedName), !normalizedName.isEmpty {
                 Text("An asset with this name already exists. Asset names must be unique.")
@@ -286,7 +283,7 @@ private struct NewAssetSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                 Spacer()
-                Button("Create Asset") {
+                Button(draft.isPseudo ? "Create Group" : "Create Asset") {
                     Task { await create() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -298,84 +295,7 @@ private struct NewAssetSheet: View {
         .textFieldStyle(.roundedBorder)
         .padding(24)
         .frame(width: 560)
-    }
-
-    private func create() async {
-        saving = true
-        errorText = nil
-        defer { saving = false }
-        draft.name = draft.name.trimmingCharacters(in: .whitespacesAndNewlines)
-        do {
-            try await createAction(draft)
-            dismiss()
-        } catch {
-            errorText = error.localizedDescription
-        }
-    }
-}
-
-private struct NewPseudoGroupDraft {
-    var name = ""
-    var category = "Equipment"
-}
-
-private struct NewPseudoGroupSheet: View {
-    let categories: [String]
-    let existingNames: Set<String>
-    let createAction: (NewPseudoGroupDraft) async throws -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var draft = NewPseudoGroupDraft()
-    @State private var errorText: String?
-    @State private var saving = false
-
-    private var normalizedName: String {
-        draft.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-    }
-
-    private var categoryChoices: [String] {
-        let values = Set(categories + ["Equipment", "Vehicle", "House", "Property"])
-        return values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("New Group").font(.title2.bold())
-            Text("Create a display group (for example Mowers). Attach real assets to it with Attached to. Groups have no meter or tasks.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            TextField("Group name", text: $draft.name)
-                .textFieldStyle(.roundedBorder)
-                .voiceInput($draft.name)
-
-            Picker("Category", selection: $draft.category) {
-                ForEach(categoryChoices, id: \.self) { Text($0).tag($0) }
-            }
-
-            if existingNames.contains(normalizedName), !normalizedName.isEmpty {
-                Text("An asset with this name already exists. Names must be unique.")
-                    .font(.caption)
-                    .foregroundStyle(.red)
-            }
-            if let errorText {
-                Text(errorText).font(.caption).foregroundStyle(.red)
-            }
-
-            HStack {
-                Button("Cancel") { dismiss() }
-                Spacer()
-                Button("Create Group") {
-                    Task { await create() }
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(
-                    saving || normalizedName.isEmpty || existingNames.contains(normalizedName)
-                )
-            }
-        }
-        .padding(24)
-        .frame(width: 480)
+        .animation(.default, value: draft.isPseudo)
     }
 
     private func create() async {

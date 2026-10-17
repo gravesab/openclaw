@@ -7,6 +7,19 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		D7FA249C31BD01B6F1CCD55F /* RanchOSFinanceEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58DD357E5D8DC3DDA8DE146E /* RanchOSFinanceEntry.swift */; };
+		DD4BD737F740B628AB988572 /* RanchOSFinanceEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58DD357E5D8DC3DDA8DE146E /* RanchOSFinanceEntry.swift */; };
+		7BAF19089A6D9B67B19ED62E /* RanchOSFinanceEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58DD357E5D8DC3DDA8DE146E /* RanchOSFinanceEntry.swift */; };
+		47CEE453629A5E172C1CE423 /* RanchOSFinanceEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = 58DD357E5D8DC3DDA8DE146E /* RanchOSFinanceEntry.swift */; };
+		1C229DF7E5B8A4E15029ABE0 /* RanchOSFinanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F087E6E314CF6D690EB2E27F /* RanchOSFinanceReport.swift */; };
+		5233C5F9121F2E2442AAB8C3 /* RanchOSFinanceReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9FC34CE6C4AA3D22EC2277 /* RanchOSFinanceReportView.swift */; };
+		3718EDC85906FE34DE6978F2 /* RanchOSFinanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F087E6E314CF6D690EB2E27F /* RanchOSFinanceReport.swift */; };
+		AB76E6F36262AC5B7081443E /* RanchOSFinanceReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9FC34CE6C4AA3D22EC2277 /* RanchOSFinanceReportView.swift */; };
+		6BF4BDD5AE06B2013A410843 /* RanchOSFinanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F087E6E314CF6D690EB2E27F /* RanchOSFinanceReport.swift */; };
+		FC597B03193841ACE7D2072A /* RanchOSFinanceReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9FC34CE6C4AA3D22EC2277 /* RanchOSFinanceReportView.swift */; };
+		14F50DBB89862432374E3FD0 /* RanchOSFinanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = F087E6E314CF6D690EB2E27F /* RanchOSFinanceReport.swift */; };
+		5330C446700134AE19D05277 /* RanchOSFinanceReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1D9FC34CE6C4AA3D22EC2277 /* RanchOSFinanceReportView.swift */; };
+		A39F7410327F9F85EF8039EC /* RanchOSFinanceReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAEEE45A3D605C4B2E5BC04D /* RanchOSFinanceReportTests.swift */; };
 		0552E8767A62E4C3851ED3D5 /* RanchOSFinanceCSV.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB9EAF977C61BC9BAA4D5A4 /* RanchOSFinanceCSV.swift */; };
 		0E61120FCE9229A9A00BD0D1 /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
 		232C0D73D888423130882D6B /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
@@ -57,6 +70,10 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		58DD357E5D8DC3DDA8DE146E /* RanchOSFinanceEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceEntry.swift; sourceTree = "<group>"; };
+		F087E6E314CF6D690EB2E27F /* RanchOSFinanceReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceReport.swift; sourceTree = "<group>"; };
+		1D9FC34CE6C4AA3D22EC2277 /* RanchOSFinanceReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceReportView.swift; sourceTree = "<group>"; };
+		FAEEE45A3D605C4B2E5BC04D /* RanchOSFinanceReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceReportTests.swift; sourceTree = "<group>"; };
 		1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSTVHomeView.swift; sourceTree = "<group>"; };
 		1E836A3D05F3F9E1FC1CED60 /* FinanceSampleBank.csv */ = {isa = PBXFileReference; path = FinanceSampleBank.csv; sourceTree = "<group>"; };
 		454C7A8A973451ABCEB01A80 /* RanchOSiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -89,6 +106,9 @@
 				A406FEC6CD35B245385A73C2 /* RanchOSFinanceCategorizer.swift */,
 				45B9E255E0AD692B20722102 /* RanchOSFinanceCost.swift */,
 				E1547459DCEE58595B0A3D6D /* RanchOSFinanceCostView.swift */,
+				F087E6E314CF6D690EB2E27F /* RanchOSFinanceReport.swift */,
+				1D9FC34CE6C4AA3D22EC2277 /* RanchOSFinanceReportView.swift */,
+				58DD357E5D8DC3DDA8DE146E /* RanchOSFinanceEntry.swift */,
 				ACB9EAF977C61BC9BAA4D5A4 /* RanchOSFinanceCSV.swift */,
 				CF4976BA277D6CC9BE9EDCAF /* RanchOSFinanceStore.swift */,
 				80CAF4956A3CCA014E019216 /* RanchOSFinanceView.swift */,
@@ -116,6 +136,7 @@
 				1E836A3D05F3F9E1FC1CED60 /* FinanceSampleBank.csv */,
 				84BB17DD5FF18D3AA7C0E58B /* RanchOSFinanceCategoriesTests.swift */,
 				82A491F327912A78A316A3AE /* RanchOSFinanceCostTests.swift */,
+				FAEEE45A3D605C4B2E5BC04D /* RanchOSFinanceReportTests.swift */,
 				A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */,
 			);
 			path = HubTests;
@@ -304,6 +325,9 @@
 				4CD09A270C13FBEFF535BF44 /* RanchOSFinanceCategorizer.swift in Sources */,
 				306460C8AB2B2A1F69941E8F /* RanchOSFinanceCost.swift in Sources */,
 				BBFDD860C96340FCF7B04774 /* RanchOSFinanceCostView.swift in Sources */,
+				D7FA249C31BD01B6F1CCD55F /* RanchOSFinanceEntry.swift in Sources */,
+				1C229DF7E5B8A4E15029ABE0 /* RanchOSFinanceReport.swift in Sources */,
+				5233C5F9121F2E2442AAB8C3 /* RanchOSFinanceReportView.swift in Sources */,
 				B14334F6E2A3CDDAE747C82A /* RanchOSFinanceStore.swift in Sources */,
 				A7506C01C334F20D0B03FB2B /* RanchOSFinanceView.swift in Sources */,
 				37B2FB76EC4C2819D2969DBA /* RanchOSHomeView.swift in Sources */,
@@ -321,6 +345,9 @@
 				A42815CBF6A16B024FA03ABC /* RanchOSFinanceCategorizer.swift in Sources */,
 				A454D0FFD3BDAA0046FCA73A /* RanchOSFinanceCost.swift in Sources */,
 				A61923E7F3E1AA5483DE40D8 /* RanchOSFinanceCostView.swift in Sources */,
+				DD4BD737F740B628AB988572 /* RanchOSFinanceEntry.swift in Sources */,
+				3718EDC85906FE34DE6978F2 /* RanchOSFinanceReport.swift in Sources */,
+				AB76E6F36262AC5B7081443E /* RanchOSFinanceReportView.swift in Sources */,
 				51AD625090DBBB9A7824C685 /* RanchOSFinanceStore.swift in Sources */,
 				706AFEC795AAADEC44F9D2AB /* RanchOSFinanceView.swift in Sources */,
 				7ABE342D35D442172B63444C /* RanchOSHomeView.swift in Sources */,
@@ -338,7 +365,11 @@
 				37BD36805EF8AB0017E030C7 /* RanchOSFinanceCategorizer.swift in Sources */,
 				979D3819C3A9C417ECCC6F7D /* RanchOSFinanceCost.swift in Sources */,
 				5B08986A5869B4801AF44523 /* RanchOSFinanceCostTests.swift in Sources */,
+				A39F7410327F9F85EF8039EC /* RanchOSFinanceReportTests.swift in Sources */,
 				2C65E53089395036F092C89B /* RanchOSFinanceCostView.swift in Sources */,
+				7BAF19089A6D9B67B19ED62E /* RanchOSFinanceEntry.swift in Sources */,
+				6BF4BDD5AE06B2013A410843 /* RanchOSFinanceReport.swift in Sources */,
+				FC597B03193841ACE7D2072A /* RanchOSFinanceReportView.swift in Sources */,
 				EAB3FC372BD82D999F5CB022 /* RanchOSFinanceStore.swift in Sources */,
 				5EF1C52FFE2B06B3D54F0E06 /* RanchOSFinanceView.swift in Sources */,
 				C63530FD2A422C672ACB6D8A /* RanchOSHubModel.swift in Sources */,
@@ -355,6 +386,9 @@
 				5C12CF4A6F124CF42FDF5EFF /* RanchOSFinanceCategorizer.swift in Sources */,
 				EA86B807D39E40EF757EDA43 /* RanchOSFinanceCost.swift in Sources */,
 				8E915D3CCD3CF500B016C1BF /* RanchOSFinanceCostView.swift in Sources */,
+				47CEE453629A5E172C1CE423 /* RanchOSFinanceEntry.swift in Sources */,
+				14F50DBB89862432374E3FD0 /* RanchOSFinanceReport.swift in Sources */,
+				5330C446700134AE19D05277 /* RanchOSFinanceReportView.swift in Sources */,
 				CB2EA9D9E8233519DAEDCE92 /* RanchOSFinanceStore.swift in Sources */,
 				2D77A498B9F69F750008F196 /* RanchOSFinanceView.swift in Sources */,
 				DEFDE9802034BCAC2720FA29 /* RanchOSHomeView.swift in Sources */,
@@ -394,6 +428,9 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				INFOPLIST_KEY_CFBundleDisplayName = "RanchOS DEV";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "RanchOS uses the microphone so you can dictate into a text field. Speech stays on this device.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "RanchOS turns what you say into text on this device.";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.macos.dev;
 				PRODUCT_NAME = RanchOS;
@@ -515,6 +552,9 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				INFOPLIST_KEY_CFBundleDisplayName = "RanchOS DEV";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "RanchOS uses the microphone so you can dictate into a text field. Speech stays on this device.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "RanchOS turns what you say into text on this device.";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.macos.dev;
 				PRODUCT_NAME = RanchOS;

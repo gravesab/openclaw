@@ -80,6 +80,9 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.macos.dev
         PRODUCT_NAME: RanchOS
         GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: RanchOS DEV
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: RanchOS uses the microphone so you can dictate into a text field. Speech stays on this device.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: RanchOS turns what you say into text on this device.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MACOSX_DEPLOYMENT_TARGET: "15.0"
   RanchOSTV:
@@ -107,6 +110,9 @@ targets:
       - path: HubSources/RanchOSFinanceView.swift
       - path: HubSources/RanchOSFinanceCost.swift
       - path: HubSources/RanchOSFinanceCostView.swift
+      - path: HubSources/RanchOSFinanceReport.swift
+      - path: HubSources/RanchOSFinanceReportView.swift
+      - path: HubSources/RanchOSFinanceEntry.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests

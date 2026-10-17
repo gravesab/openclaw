@@ -102,11 +102,26 @@ struct MacAssetsPanel: View {
                                     Text(count == 1 ? "1 asset" : "\(count) assets")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                } else if let hostName = asset.host?.name {
-                                    Text("Attached to \(hostName)")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
+                                } else if let host = resolvedHost(for: asset) {
+                                    if host.isPseudo {
+                                        HStack(spacing: 6) {
+                                            Text("Group")
+                                                .font(.caption2.weight(.semibold))
+                                                .padding(.horizontal, 6)
+                                                .padding(.vertical, 2)
+                                                .background(Color.accentColor.opacity(0.15))
+                                                .clipShape(Capsule())
+                                            Text(host.name)
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                                .lineLimit(1)
+                                        }
+                                    } else {
+                                        Text("Attached to \(host.name)")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                            .lineLimit(1)
+                                    }
                                 }
                                 if !match.matchingTaskTitles.isEmpty {
                                     Text(match.matchingTaskTitles.prefix(3).joined(separator: " • "))
@@ -193,6 +208,18 @@ struct MacAssetsPanel: View {
     private func format(_ value: Double?) -> String {
         guard let value else { return "—" }
         return value.truncatingRemainder(dividingBy: 1) == 0 ? String(format: "%.0f", value) : String(format: "%.1f", value)
+    }
+
+    /// Prefer the live asset row (includes `isPseudo`) over the nested host ref.
+    private func resolvedHost(for asset: MacRanchAsset) -> (name: String, isPseudo: Bool)? {
+        let hostId = asset.hostAssetId ?? asset.host?.id
+        if let hostId, let match = store.assets.first(where: { $0.id == hostId }) {
+            return (match.name, match.isPseudo)
+        }
+        if let host = asset.host {
+            return (host.name, host.isPseudo)
+        }
+        return nil
     }
 }
 

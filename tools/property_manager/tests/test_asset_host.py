@@ -82,16 +82,24 @@ class EnrichHostTests(unittest.TestCase):
 
     def test_list_maps_build_reverse_attachments(self) -> None:
         rows = [
-            {"id": "tractor", "name": "John Deere 1025R", "host_asset_id": None},
-            {"id": "tiller", "name": "JD rototiller", "host_asset_id": "tractor"},
-            {"id": "blade", "name": "Box blade", "host_asset_id": "tractor"},
+            {"id": "tractor", "name": "John Deere 1025R", "host_asset_id": None, "is_pseudo": False},
+            {"id": "mowers", "name": "Mowers", "host_asset_id": None, "is_pseudo": True},
+            {"id": "tiller", "name": "JD rototiller", "host_asset_id": "tractor", "is_pseudo": False},
+            {"id": "blade", "name": "Box blade", "host_asset_id": "tractor", "is_pseudo": False},
+            {"id": "toro", "name": "Toro", "host_asset_id": "mowers", "is_pseudo": False},
         ]
         with mock.patch.object(assets_api.pm_db, "execute_json", return_value=[]):
             host_by_id, attachments_by_host = assets_api._host_maps_for_rows(rows)
         self.assertEqual(host_by_id["tractor"]["name"], "John Deere 1025R")
+        self.assertFalse(host_by_id["tractor"]["is_pseudo"])
+        self.assertTrue(host_by_id["mowers"]["is_pseudo"])
         self.assertEqual(
             [item["name"] for item in attachments_by_host["tractor"]],
             ["Box blade", "JD rototiller"],
+        )
+        self.assertEqual(
+            [item["name"] for item in attachments_by_host["mowers"]],
+            ["Toro"],
         )
 
 

@@ -101,6 +101,7 @@ targets:
     sources:
       - path: HubTests
       - path: HubSources/RanchOSHubModel.swift
+      - path: HubSources/RanchOSFinanceImportResult.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests

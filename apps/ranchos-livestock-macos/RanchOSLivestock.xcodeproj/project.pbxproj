@@ -7,11 +7,35 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0201F71867CAC94B03AA4A64 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
+		109D1003B07CD7162FAC11BD /* AppleIntelligenceDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77858221A7265B444C32E871 /* AppleIntelligenceDictation.swift */; };
+		206D7EA2E32C614DF60056D9 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
+		260E228581B751495A16C7C0 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
 		33ECEE1751A8A518AAA2E479 /* LivestockFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */; };
+		445F8030555C56724F790949 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
+		493479452E04246E267F552C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
+		4DFCE36B1BBBC83B21CF4908 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
+		59F8580DDF40D2117B4BB7F1 /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */; };
+		5AFBCC3F7556FCB606FE135E /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
+		672C43EA26C59C4F0605E8D8 /* AppleIntelligenceDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77858221A7265B444C32E871 /* AppleIntelligenceDictation.swift */; };
 		6AD78D1FE6581C440F3F3BD9 /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
+		6FACCCF53DA5210E489A2ABF /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
+		717675D5439D276EB3FEBC4D /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
+		7B4F0405559B5DB4BCAF1DC5 /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
+		7DAB8AC4E04354BCDD4AF759 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
+		8786E36B5DB49548E47BA6A1 /* AppleIntelligenceDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77858221A7265B444C32E871 /* AppleIntelligenceDictation.swift */; };
+		94A303A6C73EA22CF26EB8A3 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
+		990EBA544ECC1925D2F49644 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
+		99694F77C6FDCB0DE9B688ED /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */; };
+		9AA7F085E1FB8D23FBB2324E /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */; };
 		9D35B073E35A22AE1F2F7558 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
+		A23E8840AB52A7D706EB918C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
+		BE804168701D4310C3024635 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
 		C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
 		CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
+		CF3FD958C97FD6FCD5244122 /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */; };
+		EE92BBF222836B4D1C4E5AC2 /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
+		FA47EA77FCB37274485FD384 /* AppleIntelligenceDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77858221A7265B444C32E871 /* AppleIntelligenceDictation.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -27,11 +51,20 @@
 /* Begin PBXFileReference section */
 		00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchOSLivestock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockFoundationTests.swift; sourceTree = "<group>"; };
+		12661EE048299AD66AF6B6AA /* RanchOSLivestockiOSProd.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSLivestockiOSProd.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2A2860A1F261143CB11FF3FE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		36878DF880A9BD8476496051 /* RanchOSLivestockProd.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchOSLivestockProd.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		46A88D5E4C54F184977C59CA /* Info-iOS.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Info-iOS.plist"; sourceTree = "<group>"; };
 		6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockApp.swift; sourceTree = "<group>"; };
+		77858221A7265B444C32E871 /* AppleIntelligenceDictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleIntelligenceDictation.swift; sourceTree = "<group>"; };
+		89955DB67DD5F0FD424A1077 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		8B1864987A65F156C9CB5408 /* Info-iOS-Prod.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Info-iOS-Prod.plist"; sourceTree = "<group>"; };
 		B36A1F34997943B0E0F0810E /* LivestockRepository.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockRepository.swift; sourceTree = "<group>"; };
 		B868FD8D507ED4A71444C1CD /* RanchOSLivestockTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSLivestockTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockModels.swift; sourceTree = "<group>"; };
+		E880ABF0AA51C2642375F81C /* RanchOSLivestockiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSLivestockiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockBillOfSale.swift; sourceTree = "<group>"; };
+		EF856E6CA3B301B2CEFAFE00 /* Info-Prod.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "Info-Prod.plist"; sourceTree = "<group>"; };
 		FD2F52D32BEAB94A8513033F /* LivestockViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockViews.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -48,7 +81,13 @@
 		E944E450123AAC69A3E4DF1E /* Sources */ = {
 			isa = PBXGroup;
 			children = (
+				77858221A7265B444C32E871 /* AppleIntelligenceDictation.swift */,
+				89955DB67DD5F0FD424A1077 /* Assets.xcassets */,
+				8B1864987A65F156C9CB5408 /* Info-iOS-Prod.plist */,
+				46A88D5E4C54F184977C59CA /* Info-iOS.plist */,
+				EF856E6CA3B301B2CEFAFE00 /* Info-Prod.plist */,
 				2A2860A1F261143CB11FF3FE /* Info.plist */,
+				EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */,
 				D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */,
 				B36A1F34997943B0E0F0810E /* LivestockRepository.swift */,
 				FD2F52D32BEAB94A8513033F /* LivestockViews.swift */,
@@ -61,6 +100,9 @@
 			isa = PBXGroup;
 			children = (
 				00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */,
+				E880ABF0AA51C2642375F81C /* RanchOSLivestockiOS.app */,
+				12661EE048299AD66AF6B6AA /* RanchOSLivestockiOSProd.app */,
+				36878DF880A9BD8476496051 /* RanchOSLivestockProd.app */,
 				B868FD8D507ED4A71444C1CD /* RanchOSLivestockTests.xctest */,
 			);
 			name = Products;
@@ -77,11 +119,48 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		415563B418A6C90A9FC9F325 /* RanchOSLivestockiOS */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A507DB305957BF5E945B8346 /* Build configuration list for PBXNativeTarget "RanchOSLivestockiOS" */;
+			buildPhases = (
+				81A8FE421E94E965AFD81A4E /* Sources */,
+				5A78D993697BCB641CBD25E2 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOSLivestockiOS;
+			packageProductDependencies = (
+			);
+			productName = RanchOSLivestockiOS;
+			productReference = E880ABF0AA51C2642375F81C /* RanchOSLivestockiOS.app */;
+			productType = "com.apple.product-type.application";
+		};
+		4944F296BE098D05FA3551DD /* RanchOSLivestockiOSProd */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EC3F4F629546C9262A2EFF32 /* Build configuration list for PBXNativeTarget "RanchOSLivestockiOSProd" */;
+			buildPhases = (
+				D48869957C26A11C001B341E /* Sources */,
+				F9BFC3A1E34F3E614775AF25 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOSLivestockiOSProd;
+			packageProductDependencies = (
+			);
+			productName = RanchOSLivestockiOSProd;
+			productReference = 12661EE048299AD66AF6B6AA /* RanchOSLivestockiOSProd.app */;
+			productType = "com.apple.product-type.application";
+		};
 		55761CE9C6F69E36DE5E949C /* RanchOSLivestock */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 2D22F6A85FB600D01984CAC7 /* Build configuration list for PBXNativeTarget "RanchOSLivestock" */;
 			buildPhases = (
 				74A62444987654E76743E077 /* Sources */,
+				CFB59437CC01ED321F47D2BC /* Resources */,
 			);
 			buildRules = (
 			);
@@ -92,6 +171,24 @@
 			);
 			productName = RanchOSLivestock;
 			productReference = 00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */;
+			productType = "com.apple.product-type.application";
+		};
+		6E070849CB4D0B953799A567 /* RanchOSLivestockProd */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 03AA95F6F22B4FF68BE6D97A /* Build configuration list for PBXNativeTarget "RanchOSLivestockProd" */;
+			buildPhases = (
+				3EE50CFE0418F083BE540A4D /* Sources */,
+				01511B2B2F83C7F1FA9CC4E1 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = RanchOSLivestockProd;
+			packageProductDependencies = (
+			);
+			productName = RanchOSLivestockProd;
+			productReference = 36878DF880A9BD8476496051 /* RanchOSLivestockProd.app */;
 			productType = "com.apple.product-type.application";
 		};
 		8CB561BD755C93AEC63C80F6 /* RanchOSLivestockTests */ = {
@@ -121,7 +218,19 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
+					415563B418A6C90A9FC9F325 = {
+						DevelopmentTeam = ZYJVHJWT3P;
+						ProvisioningStyle = Automatic;
+					};
+					4944F296BE098D05FA3551DD = {
+						DevelopmentTeam = ZYJVHJWT3P;
+						ProvisioningStyle = Automatic;
+					};
 					55761CE9C6F69E36DE5E949C = {
+						DevelopmentTeam = ZYJVHJWT3P;
+						ProvisioningStyle = Automatic;
+					};
+					6E070849CB4D0B953799A567 = {
 						DevelopmentTeam = ZYJVHJWT3P;
 						ProvisioningStyle = Automatic;
 					};
@@ -145,20 +254,86 @@
 			projectRoot = "";
 			targets = (
 				55761CE9C6F69E36DE5E949C /* RanchOSLivestock */,
+				6E070849CB4D0B953799A567 /* RanchOSLivestockProd */,
+				415563B418A6C90A9FC9F325 /* RanchOSLivestockiOS */,
+				4944F296BE098D05FA3551DD /* RanchOSLivestockiOSProd */,
 				8CB561BD755C93AEC63C80F6 /* RanchOSLivestockTests */,
 			);
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		01511B2B2F83C7F1FA9CC4E1 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0201F71867CAC94B03AA4A64 /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		5A78D993697BCB641CBD25E2 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				6FACCCF53DA5210E489A2ABF /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		CFB59437CC01ED321F47D2BC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A23E8840AB52A7D706EB918C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		F9BFC3A1E34F3E614775AF25 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				493479452E04246E267F552C /* Assets.xcassets in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXSourcesBuildPhase section */
+		3EE50CFE0418F083BE540A4D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				672C43EA26C59C4F0605E8D8 /* AppleIntelligenceDictation.swift in Sources */,
+				9AA7F085E1FB8D23FBB2324E /* LivestockBillOfSale.swift in Sources */,
+				5AFBCC3F7556FCB606FE135E /* LivestockModels.swift in Sources */,
+				260E228581B751495A16C7C0 /* LivestockRepository.swift in Sources */,
+				717675D5439D276EB3FEBC4D /* LivestockViews.swift in Sources */,
+				BE804168701D4310C3024635 /* RanchOSLivestockApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		74A62444987654E76743E077 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				109D1003B07CD7162FAC11BD /* AppleIntelligenceDictation.swift in Sources */,
+				59F8580DDF40D2117B4BB7F1 /* LivestockBillOfSale.swift in Sources */,
 				6AD78D1FE6581C440F3F3BD9 /* LivestockModels.swift in Sources */,
 				C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */,
 				CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */,
 				9D35B073E35A22AE1F2F7558 /* RanchOSLivestockApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		81A8FE421E94E965AFD81A4E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				FA47EA77FCB37274485FD384 /* AppleIntelligenceDictation.swift in Sources */,
+				99694F77C6FDCB0DE9B688ED /* LivestockBillOfSale.swift in Sources */,
+				EE92BBF222836B4D1C4E5AC2 /* LivestockModels.swift in Sources */,
+				445F8030555C56724F790949 /* LivestockRepository.swift in Sources */,
+				94A303A6C73EA22CF26EB8A3 /* LivestockViews.swift in Sources */,
+				4DFCE36B1BBBC83B21CF4908 /* RanchOSLivestockApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -167,6 +342,19 @@
 			buildActionMask = 2147483647;
 			files = (
 				33ECEE1751A8A518AAA2E479 /* LivestockFoundationTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		D48869957C26A11C001B341E /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8786E36B5DB49548E47BA6A1 /* AppleIntelligenceDictation.swift in Sources */,
+				CF3FD958C97FD6FCD5244122 /* LivestockBillOfSale.swift in Sources */,
+				7B4F0405559B5DB4BCAF1DC5 /* LivestockModels.swift in Sources */,
+				7DAB8AC4E04354BCDD4AF759 /* LivestockRepository.swift in Sources */,
+				990EBA544ECC1925D2F49644 /* LivestockViews.swift in Sources */,
+				206D7EA2E32C614DF60056D9 /* RanchOSLivestockApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,11 +417,11 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
@@ -262,6 +450,29 @@
 			};
 			name = Debug;
 		};
+		1ADF05D76DEA3B4DDB292FB1 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Sources/Info-iOS.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.ios.dev;
+				PRODUCT_NAME = RanchOSLivestock;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 		4F72CE9E16FD42FE6E9335E1 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -276,6 +487,75 @@
 				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.dev.tests;
 				SDKROOT = macosx;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/RanchOSLivestock.app/Contents/MacOS/RanchOSLivestock";
+			};
+			name = Debug;
+		};
+		6888D559C1512933918ADD86 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Sources/Info-iOS-Prod.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.ios;
+				PRODUCT_NAME = Livestock;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		6AFC0553332FDE3E765DB420 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Sources/Info-iOS-Prod.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.ios;
+				PRODUCT_NAME = Livestock;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		6CFD380B4CC2DC19351A718C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Sources/Info-iOS.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.ios.dev;
+				PRODUCT_NAME = RanchOSLivestock;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				TARGETED_DEVICE_FAMILY = "1,2";
 			};
 			name = Debug;
 		};
@@ -296,6 +576,27 @@
 				MARKETING_VERSION = 0.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock.dev;
 				PRODUCT_NAME = RanchOSLivestock;
+				SDKROOT = macosx;
+			};
+			name = Release;
+		};
+		73965A5C6D92B5332EC587AC /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Sources/Info-Prod.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock;
+				PRODUCT_NAME = Livestock;
 				SDKROOT = macosx;
 			};
 			name = Release;
@@ -371,12 +672,12 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
-				SDKROOT = macosx;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -384,9 +685,39 @@
 			};
 			name = Debug;
 		};
+		F48F754303C6D5198C638D71 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = ZYJVHJWT3P;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = "Sources/Info-Prod.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = ai.openclaw.ranchos.livestock;
+				PRODUCT_NAME = Livestock;
+				SDKROOT = macosx;
+			};
+			name = Debug;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		03AA95F6F22B4FF68BE6D97A /* Build configuration list for PBXNativeTarget "RanchOSLivestockProd" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F48F754303C6D5198C638D71 /* Debug */,
+				73965A5C6D92B5332EC587AC /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		2D22F6A85FB600D01984CAC7 /* Build configuration list for PBXNativeTarget "RanchOSLivestock" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -405,11 +736,29 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;
 		};
+		A507DB305957BF5E945B8346 /* Build configuration list for PBXNativeTarget "RanchOSLivestockiOS" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6CFD380B4CC2DC19351A718C /* Debug */,
+				1ADF05D76DEA3B4DDB292FB1 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		B4C55A315D64F0B4057980AE /* Build configuration list for PBXNativeTarget "RanchOSLivestockTests" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				4F72CE9E16FD42FE6E9335E1 /* Debug */,
 				AA63A29DFE1213411CE29BC6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		EC3F4F629546C9262A2EFF32 /* Build configuration list for PBXNativeTarget "RanchOSLivestockiOSProd" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				6AFC0553332FDE3E765DB420 /* Debug */,
+				6888D559C1512933918ADD86 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

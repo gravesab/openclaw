@@ -7,6 +7,8 @@ struct RanchOSFinanceChargeView: View {
     @Bindable var store: RanchOSFinanceStore
     let chargeID: UUID
     @State private var showingAddUse = false
+    @State private var newCategoryName = ""
+    @State private var pendingAssignment: RanchOSFinanceAssignRequest?
 
     var body: some View {
         if let charge = store.ledger.charges.first(where: { $0.id == chargeID }) {
@@ -14,25 +16,39 @@ struct RanchOSFinanceChargeView: View {
                 Section("Charge") {
                     Text(charge.merchantText.isEmpty ? "Unknown vendor" : charge.merchantText)
                         .font(.headline)
-                    Text("\(charge.dateText) · \(charge.amountText)")
+                    Text("\(RanchOSFinanceDates.display(charge.dateText)) · \(charge.amountText)")
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Text(categoryName(charge: charge))
+                    Text(store.categoryName(for: charge))
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
-                    Picker("Category", selection: Binding(
-                        get: { store.categoryID(for: charge) ?? store.uncategorizedID ?? charge.id },
-                        set: { store.assign(chargeID: charge.id, categoryID: $0) }
-                    )) {
-                        ForEach(store.ledger.categories) { category in
-                            Text(category.name).tag(category.id)
+                    if store.isSplit(charge) {
+                        ForEach(store.splitParts(for: charge)) { part in
+                            LabeledContent(
+                                store.category(id: part.categoryID)?.name ?? RanchOSFinanceSuggestionLabels.uncategorized,
+                                value: RanchOSFinanceMoney.format(part.amount))
                         }
-                    }
-                    if charge.categoryOverrideID != nil {
-                        Text("This charge only. The vendor rule is unchanged.")
+                        Text("Edit or remove the split on Recent transactions. Choosing one category below ends the split.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }
+                    Picker("Category", selection: Binding(
+                        get: { store.categoryID(for: charge) ?? store.uncategorizedID ?? charge.id },
+                        set: { propose(categoryID: $0, charge: charge) }
+                    )) {
+                        ForEach(store.categoriesByName) { category in
+                            Text(category.name).tag(category.id)
+                        }
+                    }
+                    HStack {
+                        TextField("New category", text: $newCategoryName)
+                            .ranchEntry($newCategoryName)
+                        Button("Add") { addCategory(for: charge) }
+                            .disabled(newCategoryName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    Text(scopeCaption(charge: charge))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("Allocation") {
                     Text("Allocated \(RanchOSFinanceMoney.format(store.allocatedAmount(chargeID: charge.id)))")
@@ -70,19 +86,42 @@ struct RanchOSFinanceChargeView: View {
             .sheet(isPresented: $showingAddUse) {
                 RanchOSFinanceAddUseSheet(store: store, chargeID: charge.id)
             }
+            .sheet(item: $pendingAssignment) { request in
+                RanchOSFinanceAssignScopeSheet(store: store, request: request)
+            }
         } else {
             Text("That charge is no longer listed.")
                 .foregroundStyle(.secondary)
         }
     }
 
-    private func categoryName(charge: RanchOSFinanceCharge) -> String {
-        guard let categoryID = store.categoryID(for: charge),
-            let category = store.category(id: categoryID)
-        else {
-            return RanchOSFinanceSuggestionLabels.uncategorized
+    private func propose(categoryID: UUID, charge: RanchOSFinanceCharge) {
+        guard categoryID != store.categoryID(for: charge) else { return }
+        pendingAssignment = RanchOSFinanceAssignRequest(chargeID: charge.id, categoryID: categoryID)
+    }
+
+    private func addCategory(for charge: RanchOSFinanceCharge) {
+        guard let created = store.createCategory(name: newCategoryName) else { return }
+        newCategoryName = ""
+        propose(categoryID: created.id, charge: charge)
+    }
+
+    private func scopeCaption(charge: RanchOSFinanceCharge) -> String {
+        if let vendorID = charge.vendorID, let vendor = store.vendor(id: vendorID),
+            vendor.categoryID != store.uncategorizedID
+        {
+            if charge.categoryOverrideID != nil {
+                return "This charge only. The supplier rule is unchanged."
+            }
+            if vendor.suggestion == .suggested {
+                return "Suggested for every charge from \(vendor.name)."
+            }
+            return "Every charge from \(vendor.name) uses this category."
         }
-        return category.name
+        if charge.categoryOverrideID != nil {
+            return "This charge only. The supplier rule is unchanged."
+        }
+        return "Pick a category. RanchOS asks about the current import and about History."
     }
 
     private func useDetail(_ use: RanchOSFinanceUse) -> String {
@@ -148,6 +187,7 @@ struct RanchOSFinanceAddUseSheet: View {
                             }
                         }
                         TextField("New operation", text: $newOperationName)
+                            .ranchEntry($newOperationName)
                     case .household:
                         Text(RanchOSFinanceMoney.householdName)
                             .foregroundStyle(.secondary)
@@ -162,7 +202,9 @@ struct RanchOSFinanceAddUseSheet: View {
                     }
                     if kind == .equipment && fuelMode {
                         TextField("Gallons", text: $gallonsText)
+                            .ranchEntry($gallonsText, kind: .number)
                         TextField("Price per gallon", text: $priceText)
+                            .ranchEntry($priceText, kind: .number)
                         if let fuel = fuelPreview {
                             Text("\(gallonsText) gal × \(RanchOSFinanceMoney.format(fuel.price)) = \(RanchOSFinanceMoney.format(fuel.amount))")
                                 .font(.caption)
@@ -170,6 +212,7 @@ struct RanchOSFinanceAddUseSheet: View {
                         }
                     } else {
                         TextField("Amount", text: $amountText)
+                            .ranchEntry($amountText, kind: .number)
                     }
                     if let error {
                         Text(error)

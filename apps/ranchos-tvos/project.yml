@@ -149,6 +149,9 @@ targets:
       - path: HubSources/RanchOSFinanceView.swift
       - path: HubSources/RanchOSFinanceCost.swift
       - path: HubSources/RanchOSFinanceCostView.swift
+      - path: HubSources/RanchOSFinanceReport.swift
+      - path: HubSources/RanchOSFinanceReportView.swift
+      - path: HubSources/RanchOSFinanceEntry.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests

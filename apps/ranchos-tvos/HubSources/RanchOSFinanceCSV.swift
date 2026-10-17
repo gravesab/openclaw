@@ -373,16 +373,30 @@ enum RanchOSFinanceCSV {
 
     // MARK: - Scalars
 
-    static func parseDate(_ raw: String) -> Date? {
+    private static let dateParseLock = NSLock()
+    nonisolated(unsafe) private static var parsedDates: [String: Date] = [:]
+    nonisolated(unsafe) private static var unparsedDates = Set<String>()
+    private static let dateParsers: [DateFormatter] = dateFormats.map { format in
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
-        for format in dateFormats {
-            formatter.dateFormat = format
-            if let date = formatter.date(from: raw.trimmingCharacters(in: .whitespaces)) {
+        formatter.dateFormat = format
+        return formatter
+    }
+
+    static func parseDate(_ raw: String) -> Date? {
+        let text = raw.trimmingCharacters(in: .whitespaces)
+        dateParseLock.lock()
+        defer { dateParseLock.unlock() }
+        if let date = parsedDates[text] { return date }
+        if unparsedDates.contains(text) { return nil }
+        for parser in dateParsers {
+            if let date = parser.date(from: text) {
+                parsedDates[text] = date
                 return date
             }
         }
+        unparsedDates.insert(text)
         return nil
     }
 
@@ -409,4 +423,224 @@ enum RanchOSFinanceCSV {
         if negative { decimal.negate() }
         return decimal
     }
+}
+
+/// A calendar month that already has charges from one account.
+struct RanchOSFinanceMonth: Identifiable, Hashable, Sendable {
+    struct Key: Hashable {
+        var source: String
+        var year: Int
+        var month: Int
+    }
+
+    var source: String
+    var year: Int
+    var month: Int
+    var chargeCount: Int
+
+    var id: String { "\(source)|\(year)|\(month)" }
+
+    var label: String {
+        RanchOSFinanceDates.monthLabel(year: year, month: month)
+    }
+}
+
+/// Transaction dates and account names. Dates use the UTC calendar so a
+/// statement day does not shift into the previous month on this Mac.
+enum RanchOSFinanceDates {
+    static let missingSource = "Source not set"
+    static let apple = "Apple"
+    static let chase = "Chase"
+    static let capitalOne = "Capital One"
+    static let choices = [apple, chase, capitalOne]
+
+    static func normalizedSource(_ raw: String?) -> String? {
+        let trimmed = raw?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !trimmed.isEmpty, trimmed.count <= 40 else { return nil }
+        return trimmed
+    }
+
+    static func parse(_ text: String) -> Date? {
+        RanchOSFinanceCSV.parseDate(text)
+    }
+
+    static func display(_ text: String) -> String {
+        guard let date = parse(text) else { return text }
+        return dayLabel(date)
+    }
+
+    static func display(_ date: Date) -> String {
+        dayLabel(date)
+    }
+
+    static func rangeLabel(_ dates: [Date]) -> String {
+        guard let first = dates.min(), let last = dates.max() else { return "No transaction dates" }
+        let start = yearMonth(first)
+        let end = yearMonth(last)
+        if start == end { return monthLabel(year: start.year, month: start.month) }
+        return daySpan([first, last])
+    }
+
+    /// The first and last transaction day, including a span that stays inside one month.
+    static func daySpan(_ dates: [Date]) -> String {
+        guard let first = dates.min(), let last = dates.max() else { return "No transaction dates" }
+        if calendar.isDate(first, inSameDayAs: last) { return dayLabel(first) }
+        return "\(dayLabel(first)) – \(dayLabel(last))"
+    }
+
+    static func yearMonth(_ date: Date) -> (year: Int, month: Int) {
+        let parts = calendar.dateComponents([.year, .month], from: date)
+        return (parts.year ?? 0, parts.month ?? 0)
+    }
+
+    /// Week 1 is days 1–7, week 2 is 8–14, week 3 is 15–21, and week 4 is the rest.
+    static func weekOfMonth(_ date: Date) -> Int {
+        let day = calendar.component(.day, from: date)
+        if day <= 7 { return 1 }
+        if day <= 14 { return 2 }
+        if day <= 21 { return 3 }
+        return 4
+    }
+
+    static func weekBounds(year: Int, month: Int, week: Int) -> (start: Int, end: Int) {
+        var parts = DateComponents()
+        parts.year = year
+        parts.month = month
+        parts.day = 1
+        let last = calendar.date(from: parts).flatMap {
+            calendar.range(of: .day, in: .month, for: $0)?.count
+        } ?? 28
+        switch week {
+        case 1: return (1, min(7, last))
+        case 2: return (8, min(14, last))
+        case 3: return (15, min(21, last))
+        default: return (min(22, last), last)
+        }
+    }
+
+    static func monthLabel(year: Int, month: Int) -> String {
+        var parts = DateComponents()
+        parts.year = year
+        parts.month = month
+        parts.day = 1
+        guard let date = calendar.date(from: parts) else { return "\(month)/\(year)" }
+        return monthFormatter.string(from: date)
+    }
+
+    static func utcDate(year: Int, month: Int, day: Int) -> Date? {
+        var parts = DateComponents()
+        parts.year = year
+        parts.month = month
+        parts.day = day
+        parts.timeZone = TimeZone(secondsFromGMT: 0)
+        return calendar.date(from: parts)
+    }
+
+    static func dayOfMonth(_ date: Date) -> Int {
+        calendar.component(.day, from: date)
+    }
+
+    /// Week 1 is January 1–7. Each later week is the next seven days.
+    /// Week 52 runs through December 31, so the year is always 52 weeks.
+    static func weekOfYear(_ date: Date) -> Int {
+        let day = calendar.ordinality(of: .day, in: .year, for: date) ?? 1
+        return min(52, (day - 1) / 7 + 1)
+    }
+
+    static func weekOfYearBounds(year: Int, week: Int) -> (start: Date, end: Date)? {
+        let week = min(52, max(1, week))
+        let startDay = (week - 1) * 7 + 1
+        let endDay = week == 52 ? lastDayOfYear(year) : startDay + 6
+        guard
+            let start = date(year: year, dayOfYear: startDay),
+            let end = date(year: year, dayOfYear: endDay)
+        else { return nil }
+        return (start, end)
+    }
+
+    static func weekOfYearLabel(year: Int, week: Int) -> String {
+        guard let bounds = weekOfYearBounds(year: year, week: week) else { return "Week \(week)" }
+        let startMonth = yearMonth(bounds.start).month
+        let endMonth = yearMonth(bounds.end).month
+        let endText = startMonth == endMonth
+            ? "\(dayOfMonth(bounds.end))"
+            : monthDay(bounds.end)
+        return "Week \(week) · \(monthDay(bounds.start))–\(endText)"
+    }
+
+    static func shortMonth(_ month: Int) -> String {
+        guard (1...12).contains(month) else { return "\(month)" }
+        return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][month - 1]
+    }
+
+    static func lastDayOfYear(_ year: Int) -> Int {
+        guard
+            let start = utcDate(year: year, month: 1, day: 1),
+            let range = calendar.range(of: .day, in: .year, for: start)
+        else { return 365 }
+        return range.count
+    }
+
+    static func date(year: Int, dayOfYear: Int) -> Date? {
+        guard let start = utcDate(year: year, month: 1, day: 1) else { return nil }
+        return calendar.date(byAdding: .day, value: dayOfYear - 1, to: start)
+    }
+
+    static func monthDay(_ date: Date) -> String {
+        monthDayFormatter.string(from: date)
+    }
+
+    static func lastDay(year: Int, month: Int) -> Int {
+        weekBounds(year: year, month: month, week: 4).end
+    }
+
+    /// Months before the latest month in the import. A June–July span returns
+    /// June. One month returns nothing.
+    static func closedMonths(from dates: [Date]) -> [(year: Int, month: Int)] {
+        var seen: [String: (year: Int, month: Int)] = [:]
+        for date in dates {
+            let parts = yearMonth(date)
+            seen["\(parts.year)-\(parts.month)"] = parts
+        }
+        let sorted = seen.values.sorted { lhs, rhs in
+            if lhs.year != rhs.year { return lhs.year < rhs.year }
+            return lhs.month < rhs.month
+        }
+        guard sorted.count > 1 else { return [] }
+        return Array(sorted.dropLast())
+    }
+
+    private static func dayLabel(_ date: Date) -> String {
+        dayFormatter.string(from: date)
+    }
+
+    private static let calendar: Calendar = {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT: 0) ?? .gmt
+        return calendar
+    }()
+
+    private static let dayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMM d, yyyy"
+        return formatter
+    }()
+
+    private static let monthFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMMM yyyy"
+        return formatter
+    }()
+
+    private static let monthDayFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MMM d"
+        return formatter
+    }()
 }

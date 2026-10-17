@@ -255,7 +255,7 @@ def fetch_host_ref(host_asset_id: str | None) -> dict | None:
         return None
     row = pm_db.execute_one_json(
         """
-        SELECT id, name
+        SELECT id, name, is_pseudo
         FROM propertymanager.assets
         WHERE id = %s
         """,
@@ -263,7 +263,11 @@ def fetch_host_ref(host_asset_id: str | None) -> dict | None:
     )
     if row is None:
         return None
-    return {"id": str(row["id"]), "name": row["name"]}
+    return {
+        "id": str(row["id"]),
+        "name": row["name"],
+        "is_pseudo": bool(row.get("is_pseudo")),
+    }
 
 
 def fetch_attachments(asset_id: str) -> list[dict]:
@@ -354,28 +358,39 @@ def enrich_asset(
 
 def _host_maps_for_rows(rows: list[dict]) -> tuple[dict[str, dict], dict[str, list[dict]]]:
     """Build host refs and attachment lists from the active asset list payload."""
-    name_by_id = {str(row["id"]): row["name"] for row in rows}
+    ref_by_id = {
+        str(row["id"]): {
+            "id": str(row["id"]),
+            "name": row["name"],
+            "is_pseudo": bool(row.get("is_pseudo")),
+        }
+        for row in rows
+    }
     host_ids = {
         host_id
         for row in rows
         if (host_id := _normalize_asset_id(row.get("host_asset_id"))) is not None
     }
-    missing_host_ids = sorted(host_ids - set(name_by_id))
+    missing_host_ids = sorted(host_ids - set(ref_by_id))
     if missing_host_ids:
         extras = pm_db.execute_json(
             """
-            SELECT id, name
+            SELECT id, name, is_pseudo
             FROM propertymanager.assets
             WHERE id = ANY(%s::uuid[])
             """,
             (missing_host_ids,),
         )
         for row in extras:
-            name_by_id[str(row["id"])] = row["name"]
+            ref_by_id[str(row["id"])] = {
+                "id": str(row["id"]),
+                "name": row["name"],
+                "is_pseudo": bool(row.get("is_pseudo")),
+            }
     host_by_id = {
-        host_id: {"id": host_id, "name": name_by_id[host_id]}
+        host_id: ref_by_id[host_id]
         for host_id in host_ids
-        if host_id in name_by_id
+        if host_id in ref_by_id
     }
     attachments_by_host: dict[str, list[dict]] = {}
     for row in rows:

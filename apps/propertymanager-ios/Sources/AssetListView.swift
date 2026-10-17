@@ -101,11 +101,26 @@ struct AssetRowView: View {
                 Text(count == 1 ? "1 asset" : "\(count) assets")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-            } else if let hostName = asset.host?.name {
-                Text("Attached to \(hostName)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+            } else if let host = asset.host {
+                if host.isPseudo {
+                    HStack(spacing: 6) {
+                        Text("Group")
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.accentColor.opacity(0.15))
+                            .clipShape(Capsule())
+                        Text(host.name)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                } else {
+                    Text("Attached to \(host.name)")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
             }
             ForEach(matchingTaskTitles.prefix(3), id: \.self) { title in
                 Label(title, systemImage: "magnifyingglass")

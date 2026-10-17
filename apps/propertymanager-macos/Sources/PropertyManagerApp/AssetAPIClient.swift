@@ -367,20 +367,24 @@ struct MacAssetMeter: Codable, Hashable, Identifiable {
 struct MacAssetRef: Identifiable, Codable, Hashable {
     let id: UUID
     var name: String
+    var isPseudo: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, name
+        case isPseudo = "is_pseudo"
     }
 
-    init(id: UUID, name: String) {
+    init(id: UUID, name: String, isPseudo: Bool = false) {
         self.id = id
         self.name = name
+        self.isPseudo = isPseudo
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try MacFlexibleUUID.decode(c, key: .id)
         name = try c.decode(String.self, forKey: .name)
+        isPseudo = try c.decodeIfPresent(Bool.self, forKey: .isPseudo) ?? false
     }
 }
 

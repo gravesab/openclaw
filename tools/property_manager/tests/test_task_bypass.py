@@ -62,7 +62,7 @@ def _task(**overrides):
         "id": "task",
         "frequency": "Monthly",
         "warning_days": 7,
-        "asset_id": None,
+        "asset_id": "00000000-0000-4000-8000-000000000001",
         "schedule_kind": "calendar",
         "kind": "Maintenance",
         "intake_state": None,

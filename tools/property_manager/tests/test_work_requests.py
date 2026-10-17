@@ -41,7 +41,7 @@ def _load_app():
 
 def stored_request(**overrides):
     row = {"id": "00000000-0000-0000-0000-000000000001", "area": "North barn", "item": "Work request",
-           "task_description": "Water line is leaking", "asset_id": None, "category_name": "House", "priority": "Medium",
+           "task_description": "Water line is leaking", "asset_id": "00000000-0000-0000-0000-000000000030", "category_name": "House", "priority": "Medium",
            "intake_state": "submitted", "submitted_by": SERVER_SUBMITTER, "submitted_at": "2026-08-26T12:00:00+00:00",
            "triaged_by": None, "triaged_at": None, "triage_reason": None, "converted_task_id": None,
            "intake_idempotency_key": "retry-1"}
@@ -63,6 +63,7 @@ class WorkRequestTests(unittest.TestCase):
     @staticmethod
     def payload(**overrides):
         value = {"description": "Water line is leaking behind the wash rack.", "area": "North barn",
+                 "asset_id": "00000000-0000-0000-0000-000000000030",
                  "materials": [{"name": "PVC fitting", "quantity": 2, "unit": "each", "note": "draft only"}],
                  "attachment_ids": []}
         value.update(overrides)
@@ -76,8 +77,8 @@ class WorkRequestTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertEqual(body["schema_version"], "016")
-        self.assertEqual(body["schema_contract_status"], "migration_016_applied")
+        self.assertEqual(body["schema_version"], "017")
+        self.assertEqual(body["schema_contract_status"], "migration_017_applied")
         self.assertNotIn("attachments_root", body)
         self.assertNotIn("storage_path", body)
 
@@ -106,7 +107,7 @@ class WorkRequestTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         body = response.get_json()
         self.assertIsNone(body["schema_version"])
-        self.assertEqual(body["schema_contract_status"], "migration_016_not_verified")
+        self.assertEqual(body["schema_contract_status"], "migration_017_not_verified")
 
     def test_health_marker_is_read_only_and_parameterized(self):
         complete_objects = {
@@ -129,7 +130,7 @@ class WorkRequestTests(unittest.TestCase):
         marker_sql, marker_params = query.call_args_list[1].args
         self.assertIn("SELECT EXISTS", marker_sql)
         self.assertNotIn("INSERT", marker_sql)
-        self.assertEqual(marker_params, ("016",))
+        self.assertEqual(marker_params, ("017",))
 
     def test_submission_requires_authentication_before_validation(self):
         response = self.client.post("/v1/work-requests", json=self.payload(), headers={"Idempotency-Key": "x"})

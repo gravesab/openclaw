@@ -950,6 +950,7 @@ def parse_meter_reading():
         FROM propertymanager.assets a
         LEFT JOIN propertymanager.asset_meter m ON m.asset_id = a.id
         WHERE a.is_active = true
+          AND a.is_pseudo = false
         """
     )
 

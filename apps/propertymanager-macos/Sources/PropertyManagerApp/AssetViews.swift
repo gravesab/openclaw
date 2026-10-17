@@ -86,8 +86,23 @@ struct MacAssetsPanel: View {
                         ForEach(assetMatches) { match in
                             let asset = match.asset
                             VStack(alignment: .leading) {
-                                Text(asset.name).font(.headline)
-                                if let hostName = asset.host?.name {
+                                HStack(spacing: 6) {
+                                    Text(asset.name).font(.headline)
+                                    if asset.isPseudo {
+                                        Text("Group")
+                                            .font(.caption2.weight(.semibold))
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.accentColor.opacity(0.15))
+                                            .clipShape(Capsule())
+                                    }
+                                }
+                                if asset.isPseudo {
+                                    let count = asset.attachments?.count ?? 0
+                                    Text(count == 1 ? "1 asset" : "\(count) assets")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else if let hostName = asset.host?.name {
                                     Text("Attached to \(hostName)")
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
@@ -99,18 +114,20 @@ struct MacAssetsPanel: View {
                                         .foregroundStyle(.secondary)
                                         .lineLimit(2)
                                 }
-                                if asset.meterNeedsActivation {
-                                    Text("Meter proposed — activate")
-                                        .font(.caption)
-                                        .foregroundStyle(.orange)
-                                } else if let meter = asset.meter {
-                                    if meter.hasMeter {
-                                        Text("\(format(meter.currentValue)) \(meter.unit)")
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        Text("No operating meter")
+                                if !asset.isPseudo {
+                                    if asset.meterNeedsActivation {
+                                        Text("Meter proposed — activate")
                                             .font(.caption)
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(.orange)
+                                    } else if let meter = asset.meter {
+                                        if meter.hasMeter {
+                                            Text("\(format(meter.currentValue)) \(meter.unit)")
+                                                .foregroundStyle(.secondary)
+                                        } else {
+                                            Text("No operating meter")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
                                     }
                                 }
                             }
@@ -150,14 +167,22 @@ struct MacAssetsPanel: View {
                     $0.name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 }),
                 createAction: { draft in
-                    let created = try await store.apiClient.createAsset(
-                        name: draft.name,
-                        category: draft.category,
-                        manufacturer: draft.manufacturer,
-                        model: draft.model,
-                        location: draft.location,
-                        proposedMeterType: draft.meterType
-                    )
+                    let created: MacRanchAsset
+                    if draft.isPseudo {
+                        created = try await store.apiClient.createPseudoGroup(
+                            name: draft.name,
+                            category: draft.category
+                        )
+                    } else {
+                        created = try await store.apiClient.createAsset(
+                            name: draft.name,
+                            category: draft.category,
+                            manufacturer: draft.manufacturer,
+                            model: draft.model,
+                            location: draft.location,
+                            proposedMeterType: draft.meterType
+                        )
+                    }
                     await store.refreshAssets()
                     store.selectedTaskAssetId = created.id
                 }
@@ -178,6 +203,8 @@ private struct NewAssetDraft {
     var model = ""
     var location = ""
     var meterType = "none"
+    /// Display-only group (e.g. Mowers); no meter / manufacturer intake.
+    var isPseudo = false
 }
 
 private struct NewAssetSheet: View {
@@ -195,45 +222,56 @@ private struct NewAssetSheet: View {
     }
 
     private var categoryChoices: [String] {
-        let values = Set(categories + ["Equipment", "Vehicle", "House", "Property"])
+        let excluded = Set(["house", "home", "vehicle"])
+        let values = Set(categories + ["Equipment", "Property"])
+            .filter { !excluded.contains($0.lowercased()) }
         return values.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("New Asset").font(.title2.bold())
-            Text("Create the asset once, then link its maintenance tasks from each task's Linked Asset field.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            Text(
+                draft.isPseudo
+                    ? "A group is for display only (for example Mowers). Attach real assets to it with Attached to. Groups have no meter or tasks."
+                    : "Create the asset once, then link its maintenance tasks from each task's Linked Asset field."
+            )
+            .font(.subheadline)
+            .foregroundStyle(.secondary)
 
-            TextField("Asset name", text: $draft.name)
+            TextField(draft.isPseudo ? "Group name" : "Asset name", text: $draft.name)
                 .textFieldStyle(.roundedBorder)
                 .voiceInput($draft.name)
+
+            Toggle("Pseudo asset (group)", isOn: $draft.isPseudo)
+                .help("Groups only need a name and category. Members join later via Attached to.")
 
             Picker("Category", selection: $draft.category) {
                 ForEach(categoryChoices, id: \.self) { Text($0).tag($0) }
             }
 
-            HStack {
-                TextField("Manufacturer", text: $draft.manufacturer)
-                    .voiceInput($draft.manufacturer)
-                TextField("Model", text: $draft.model)
-                    .voiceInput($draft.model)
-            }
-            HStack {
-                TextField("Location", text: $draft.location)
-                    .voiceInput($draft.location)
-                Picker("Operating meter", selection: $draft.meterType) {
-                    Text("Runtime hours").tag("runtime_hours")
-                    Text("Mileage").tag("mileage")
-                    Text("Cycles").tag("cycles")
-                    Text("None").tag("none")
+            if !draft.isPseudo {
+                HStack {
+                    TextField("Manufacturer", text: $draft.manufacturer)
+                        .voiceInput($draft.manufacturer)
+                    TextField("Model", text: $draft.model)
+                        .voiceInput($draft.model)
                 }
-            }
+                HStack {
+                    TextField("Location", text: $draft.location)
+                        .voiceInput($draft.location)
+                    Picker("Operating meter", selection: $draft.meterType) {
+                        Text("Runtime hours").tag("runtime_hours")
+                        Text("Mileage").tag("mileage")
+                        Text("Cycles").tag("cycles")
+                        Text("None").tag("none")
+                    }
+                }
 
-            Text("Choose the operating meter independently of category. Any asset may use runtime hours, mileage, cycles, or no meter.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+                Text("Choose the operating meter independently of category. Any asset may use runtime hours, mileage, cycles, or no meter.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
 
             if existingNames.contains(normalizedName), !normalizedName.isEmpty {
                 Text("An asset with this name already exists. Asset names must be unique.")
@@ -247,7 +285,7 @@ private struct NewAssetSheet: View {
             HStack {
                 Button("Cancel") { dismiss() }
                 Spacer()
-                Button("Create Asset") {
+                Button(draft.isPseudo ? "Create Group" : "Create Asset") {
                     Task { await create() }
                 }
                 .buttonStyle(.borderedProminent)
@@ -259,6 +297,7 @@ private struct NewAssetSheet: View {
         .textFieldStyle(.roundedBorder)
         .padding(24)
         .frame(width: 560)
+        .animation(.default, value: draft.isPseudo)
     }
 
     private func create() async {
@@ -352,6 +391,14 @@ struct MacAssetDetailPanel: View {
                             .voiceInput($renameText)
                     } else {
                         Text(asset.name).font(.title3.bold())
+                        if asset.isPseudo {
+                            Text("Group")
+                                .font(.caption.weight(.semibold))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(Color.accentColor.opacity(0.15))
+                                .clipShape(Capsule())
+                        }
                     }
                     Spacer()
                     if isRenaming {
@@ -386,39 +433,41 @@ struct MacAssetDetailPanel: View {
                         .foregroundStyle(.red)
                 }
 
-                GroupBox("Attached to") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        if let host = asset.host {
-                            Button(host.name) {
-                                store.selectedTaskAssetId = host.id
+                if !asset.isPseudo {
+                    GroupBox("Attached to") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let host = asset.host {
+                                Button(host.name) {
+                                    store.selectedTaskAssetId = host.id
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundStyle(.blue)
+                            } else {
+                                Text("None")
+                                    .foregroundStyle(.secondary)
                             }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(.blue)
-                        } else {
-                            Text("None")
-                                .foregroundStyle(.secondary)
-                        }
-                        HStack {
-                            Button("Change…") {
-                                showingHostPicker = true
-                            }
-                            .disabled(isSavingHost)
-                            if asset.host != nil {
-                                Button("Clear", role: .destructive) {
-                                    Task { await saveHost(nil) }
+                            HStack {
+                                Button("Change…") {
+                                    showingHostPicker = true
                                 }
                                 .disabled(isSavingHost)
+                                if asset.host != nil {
+                                    Button("Clear", role: .destructive) {
+                                        Task { await saveHost(nil) }
+                                    }
+                                    .disabled(isSavingHost)
+                                }
                             }
+                            Text("Use this when an implement is only used with one host asset (for example a rototiller on a tractor), or to place an asset in a Group.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
-                        Text("Use this when an implement is only used with one host asset (for example a rototiller on a tractor).")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
-                if let attachments = asset.attachments, !attachments.isEmpty {
-                    GroupBox("Attachments") {
+                GroupBox(asset.isPseudo ? "Group members" : "Attachments") {
+                    if let attachments = asset.attachments, !attachments.isEmpty {
                         VStack(alignment: .leading, spacing: 6) {
                             ForEach(attachments) { attachment in
                                 Button(attachment.name) {
@@ -429,134 +478,142 @@ struct MacAssetDetailPanel: View {
                             }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-
-                GroupBox("Placed in service") {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Toggle("Record an in-service date", isOn: $hasInServiceDate)
-                        if hasInServiceDate {
-                            DatePicker("Date", selection: $inServiceDate, displayedComponents: .date)
-                        }
-                        Button(isSavingInService ? "Saving…" : "Date put into Service") {
-                            Task { await saveInServiceDate() }
-                        }
-                        .disabled(isSavingInService || editedInServiceDate == asset.placedInServiceDate)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-
-                if asset.meterNeedsActivation {
-                    GroupBox("Proposed meter") {
-                        if let proposed = asset.proposedMeter {
-                            Text("Type: \(proposed.meterType ?? "none"), unit: \(proposed.unit ?? "—")")
-                        }
-                        Button("Activate meter") {
-                            Task { await activateMeter() }
-                        }
-                        .disabled(isActivating)
-                    }
-                }
-
-                if let meter = asset.meter, meter.hasMeter {
-                    Text("\(format(meter.currentValue)) \(meter.unit)")
-                        .font(.system(size: 36, weight: .bold))
-                    Text("Current total (cumulative)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-
-                if asset.meter?.hasMeter == true {
-                    GroupBox("New reading") {
-                        Picker("Mode", selection: $entryMode) {
-                            ForEach(MacMeterEntryMode.allCases) { mode in
-                                Text(mode.title(for: asset.meter?.meterType)).tag(mode)
-                            }
-                        }
-                        .pickerStyle(.segmented)
-                        .disabled(pendingPreview != nil)
-                        TextField(entryMode.fieldLabel(for: asset.meter?.meterType), text: $valueText)
-                        TextField("Note", text: $note)
-                            .voiceInput($note)
-                        if let preview = pendingPreview {
-                            if let prev = preview.previousValue, let proposed = preview.proposedValue {
-                                Text("Previous: \(prev) → Proposed: \(proposed)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Picker("Reason", selection: $correctionReason) {
-                                ForEach(preview.options ?? ["correction", "replacement", "rollover"], id: \.self) { opt in
-                                    Text(opt.capitalized).tag(opt)
-                                }
-                            }
-                        }
-                        Button(pendingPreview == nil ? "Save reading" : "Confirm reading") {
-                            Task { await saveReading() }
-                        }
-                        .disabled(valueText.isEmpty)
-                    }
-                } else {
-                    GroupBox("Operating meter") {
-                        Text("This asset does not use an hours, mileage, or cycles meter.")
+                    } else if asset.isPseudo {
+                        Text("No members yet. Open a real asset and set Attached to this group.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("None")
                             .foregroundStyle(.secondary)
                     }
                 }
 
-                if asset.meter?.hasMeter == true, !readings.isEmpty {
-                    GroupBox("Reading history") {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(readings.prefix(10)) { reading in
-                                HStack {
-                                    Text(reading.readingAt.formatted(date: .abbreviated, time: .shortened))
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                    if let usage = reading.usageSincePrevious, usage > 0 {
-                                        Text("+\(format(usage))")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    Text("\(format(reading.value)) \(asset.meter?.unit ?? "")")
-                                        .monospacedDigit()
-                                }
+                if !asset.isPseudo {
+                    GroupBox("Placed in service") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Record an in-service date", isOn: $hasInServiceDate)
+                            if hasInServiceDate {
+                                DatePicker("Date", selection: $inServiceDate, displayedComponents: .date)
                             }
+                            Button(isSavingInService ? "Saving…" : "Date put into Service") {
+                                Task { await saveInServiceDate() }
+                            }
+                            .disabled(isSavingInService || editedInServiceDate == asset.placedInServiceDate)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
 
-                GroupBox("Maintenance tasks") {
-                    if linkedTasks.isEmpty {
-                        Text("No tasks are linked to this asset on the \(AppEnvironment.label) server.")
+                    if asset.meterNeedsActivation {
+                        GroupBox("Proposed meter") {
+                            if let proposed = asset.proposedMeter {
+                                Text("Type: \(proposed.meterType ?? "none"), unit: \(proposed.unit ?? "—")")
+                            }
+                            Button("Activate meter") {
+                                Task { await activateMeter() }
+                            }
+                            .disabled(isActivating)
+                        }
+                    }
+
+                    if let meter = asset.meter, meter.hasMeter {
+                        Text("\(format(meter.currentValue)) \(meter.unit)")
+                            .font(.system(size: 36, weight: .bold))
+                        Text("Current total (cumulative)")
+                            .font(.caption)
                             .foregroundStyle(.secondary)
-                    } else {
-                        VStack(alignment: .leading, spacing: 10) {
-                            ForEach(linkedTasks) { task in
-                                VStack(alignment: .leading, spacing: 4) {
-                                    HStack(alignment: .firstTextBaseline) {
-                                        Text(TaskTitle.highlightingSafety(TaskTitle.displayItemTitle(item: task.item, group: asset.name)))
-                                            .fontWeight(.semibold)
-                                        Spacer()
-                                        Text(task.origin == .manufacturer ? "Manufacturer" : "Owner-added")
-                                            .font(.caption)
-                                            .foregroundStyle(task.origin == .manufacturer ? .blue : .orange)
+                    }
+
+                    if asset.meter?.hasMeter == true {
+                        GroupBox("New reading") {
+                            Picker("Mode", selection: $entryMode) {
+                                ForEach(MacMeterEntryMode.allCases) { mode in
+                                    Text(mode.title(for: asset.meter?.meterType)).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                            .disabled(pendingPreview != nil)
+                            TextField(entryMode.fieldLabel(for: asset.meter?.meterType), text: $valueText)
+                            TextField("Note", text: $note)
+                                .voiceInput($note)
+                            if let preview = pendingPreview {
+                                if let prev = preview.previousValue, let proposed = preview.proposedValue {
+                                    Text("Previous: \(prev) → Proposed: \(proposed)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Picker("Reason", selection: $correctionReason) {
+                                    ForEach(preview.options ?? ["correction", "replacement", "rollover"], id: \.self) { opt in
+                                        Text(opt.capitalized).tag(opt)
                                     }
-                                    HStack(spacing: 8) {
-                                        Text(scheduleSummary(for: task))
-                                            .font(.caption)
+                                }
+                            }
+                            Button(pendingPreview == nil ? "Save reading" : "Confirm reading") {
+                                Task { await saveReading() }
+                            }
+                            .disabled(valueText.isEmpty)
+                        }
+                    } else {
+                        GroupBox("Operating meter") {
+                            Text("This asset does not use an hours, mileage, or cycles meter.")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    if asset.meter?.hasMeter == true, !readings.isEmpty {
+                        GroupBox("Reading history") {
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(readings.prefix(10)) { reading in
+                                    HStack {
+                                        Text(reading.readingAt.formatted(date: .abbreviated, time: .shortened))
                                             .foregroundStyle(.secondary)
-                                        if task.overdueMeter == true {
-                                            Text("Overdue")
-                                                .font(.caption.bold())
-                                                .foregroundStyle(.red)
-                                        } else if let remaining = task.remainingMeter {
-                                            Text("\(NSDecimalNumber(decimal: remaining).stringValue) \(task.meterIntervalUnit ?? asset.meter?.unit ?? "units") left")
+                                        Spacer()
+                                        if let usage = reading.usageSincePrevious, usage > 0 {
+                                            Text("+\(format(usage))")
                                                 .font(.caption)
                                                 .foregroundStyle(.secondary)
                                         }
+                                        Text("\(format(reading.value)) \(asset.meter?.unit ?? "")")
+                                            .monospacedDigit()
                                     }
                                 }
-                                if task.id != linkedTasks.last?.id {
-                                    Divider()
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+
+                    GroupBox("Maintenance tasks") {
+                        if linkedTasks.isEmpty {
+                            Text("No tasks are linked to this asset on the \(AppEnvironment.label) server.")
+                                .foregroundStyle(.secondary)
+                        } else {
+                            VStack(alignment: .leading, spacing: 10) {
+                                ForEach(linkedTasks) { task in
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        HStack(alignment: .firstTextBaseline) {
+                                            Text(TaskTitle.highlightingSafety(TaskTitle.displayItemTitle(item: task.item, group: asset.name)))
+                                                .fontWeight(.semibold)
+                                            Spacer()
+                                            Text(task.origin == .manufacturer ? "Manufacturer" : "Owner-added")
+                                                .font(.caption)
+                                                .foregroundStyle(task.origin == .manufacturer ? .blue : .orange)
+                                        }
+                                        HStack(spacing: 8) {
+                                            Text(scheduleSummary(for: task))
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                            if task.overdueMeter == true {
+                                                Text("Overdue")
+                                                    .font(.caption.bold())
+                                                    .foregroundStyle(.red)
+                                            } else if let remaining = task.remainingMeter {
+                                                Text("\(NSDecimalNumber(decimal: remaining).stringValue) \(task.meterIntervalUnit ?? asset.meter?.unit ?? "units") left")
+                                                    .font(.caption)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        }
+                                    }
+                                    if task.id != linkedTasks.last?.id {
+                                        Divider()
+                                    }
                                 }
                             }
                         }
@@ -593,7 +650,11 @@ struct MacAssetDetailPanel: View {
         }
         .task(id: asset.id) {
             syncInServiceDate()
-            await loadReadings()
+            if !asset.isPseudo {
+                await loadReadings()
+            } else {
+                readings = []
+            }
         }
         .onChange(of: asset.placedInServiceDate) { _ in syncInServiceDate() }
     }

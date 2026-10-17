@@ -19,7 +19,7 @@ import db as pm_db
 import meter_schedule as ms
 import task_schedule as ts
 import task_title as tt
-from assets_api import register_asset_routes
+from assets_api import register_asset_routes, reject_if_pseudo_asset
 from auth import auth_required, auth_status
 from decimal_utils import parse_decimal, decimal_to_db
 from errors import error_response, validation_error
@@ -44,7 +44,7 @@ ATTACHMENTS_ROOT = os.environ.get(
 )
 
 logger = logging.getLogger("propertymanager_api")
-EXPECTED_SCHEMA_VERSION = "017"
+EXPECTED_SCHEMA_VERSION = "018"
 MAX_TASK_PHOTO_BYTES = 25 * 1024 * 1024
 MAX_COMPLETION_HISTORY_ENTRIES = 100
 MAX_COMPLETION_HISTORY_ENTRY_BYTES = 4 * 1024
@@ -886,6 +886,8 @@ def upsert_task():
         asset_id = None
     if asset_id is None:
         return validation_error("asset_id is required", field="asset_id")
+    if (pseudo_err := reject_if_pseudo_asset(str(asset_id))) is not None:
+        return pseudo_err
 
     area, item = normalize_written_task_title(
         area=str(payload.get("area") or "House"),
@@ -1120,6 +1122,9 @@ def patch_task(task_id: str):
 
     if "asset_id" in updates and updates.get("asset_id") is None:
         return validation_error("asset_id is required", field="asset_id")
+    if "asset_id" in updates and updates.get("asset_id") is not None:
+        if (pseudo_err := reject_if_pseudo_asset(str(updates["asset_id"]))) is not None:
+            return pseudo_err
 
     # Re-canonicalize title when area/item/asset_id participate in the patch.
     if {"area", "item", "asset_id"} & set(updates):

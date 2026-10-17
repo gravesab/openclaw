@@ -23,16 +23,21 @@ struct AssetDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let asset {
-                    if asset.meterNeedsActivation {
-                        proposedMeterBanner(asset)
+                    if asset.isPseudo {
+                        groupBadge
+                        attachmentsCard(asset)
+                    } else {
+                        if asset.meterNeedsActivation {
+                            proposedMeterBanner(asset)
+                        }
+                        meterCard(asset)
+                        attachedToCard(asset)
+                        attachmentsCard(asset)
+                        assetDetailsCard(asset)
+                        serviceCard(asset)
+                        manualsCard
+                        historyCard
                     }
-                    meterCard(asset)
-                    attachedToCard(asset)
-                    attachmentsCard(asset)
-                    assetDetailsCard(asset)
-                    serviceCard(asset)
-                    manualsCard
-                    historyCard
                     deactivateCard
                 } else {
                     ProgressView()
@@ -50,7 +55,7 @@ struct AssetDetailView: View {
                     .disabled(isDeactivating)
                 }
             }
-            if asset?.meter?.hasMeter == true {
+            if asset?.isPseudo != true, asset?.meter?.hasMeter == true {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
                         showVoiceSheet = true
@@ -114,6 +119,20 @@ struct AssetDetailView: View {
         }
     }
 
+    private var groupBadge: some View {
+        HStack {
+            Text("Group")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.accentColor.opacity(0.15))
+                .clipShape(Capsule())
+            Text("Display only — attach members with Attached to on each asset.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
     @ViewBuilder
     private func attachedToCard(_ asset: RanchAsset) -> some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -140,7 +159,7 @@ struct AssetDetailView: View {
                     .disabled(isSavingHost)
                 }
             }
-            Text("Use this when an implement is only used with one host asset.")
+            Text("Use this when an implement is only used with one host asset, or to place an asset in a Group.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -152,21 +171,27 @@ struct AssetDetailView: View {
 
     @ViewBuilder
     private func attachmentsCard(_ asset: RanchAsset) -> some View {
-        if let attachments = asset.attachments, !attachments.isEmpty {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Attachments")
-                    .font(.headline)
+        VStack(alignment: .leading, spacing: 12) {
+            Text(asset.isPseudo ? "Group members" : "Attachments")
+                .font(.headline)
+            if let attachments = asset.attachments, !attachments.isEmpty {
                 ForEach(attachments) { attachment in
                     NavigationLink(value: attachment.id) {
                         Text(attachment.name)
                     }
                 }
+            } else if asset.isPseudo {
+                Text("No members yet. Open a real asset and set Attached to this group.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("None")
+                    .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding()
-            .background(Color(.secondarySystemBackground))
-            .clipShape(RoundedRectangle(cornerRadius: 12))
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
     }
 
     private func hostPickerCandidates(for asset: RanchAsset) -> [RanchAsset] {
@@ -420,7 +445,11 @@ struct AssetDetailView: View {
             if let placedInServiceDate = asset?.placedInServiceDate {
                 self.placedInServiceDate = placedInServiceDate
             }
-            await loadReadings()
+            if asset?.isPseudo == true {
+                readings = []
+            } else {
+                await loadReadings()
+            }
         } catch {
             guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription

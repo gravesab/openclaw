@@ -197,6 +197,8 @@ struct RanchAsset: Identifiable, Codable, Hashable {
     var hostAssetId: UUID?
     var host: AssetRef?
     var attachments: [AssetRef]?
+    /// Display-only group (e.g. Mowers); members attach via host_asset_id.
+    var isPseudo: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, name, manufacturer, model, category, location, aliases, tasks, meter, host, attachments
@@ -207,6 +209,7 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         case meterActivatedAt = "meter_activated_at"
         case pmSummary = "pm_summary"
         case hostAssetId = "host_asset_id"
+        case isPseudo = "is_pseudo"
     }
 
     init(from decoder: Decoder) throws {
@@ -229,6 +232,7 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         hostAssetId = try? FlexibleUUID.decode(c, key: .hostAssetId)
         host = try c.decodeIfPresent(AssetRef.self, forKey: .host)
         attachments = try c.decodeIfPresent([AssetRef].self, forKey: .attachments)
+        isPseudo = try c.decodeIfPresent(Bool.self, forKey: .isPseudo) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -251,10 +255,14 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(hostAssetId, forKey: .hostAssetId)
         try c.encodeIfPresent(host, forKey: .host)
         try c.encodeIfPresent(attachments, forKey: .attachments)
+        try c.encode(isPseudo, forKey: .isPseudo)
     }
 
     var meterNeedsActivation: Bool {
-        meterActivatedAt == nil && proposedMeter?.meterType != nil && proposedMeter?.meterType != "none"
+        !isPseudo
+            && meterActivatedAt == nil
+            && proposedMeter?.meterType != nil
+            && proposedMeter?.meterType != "none"
     }
 }
 

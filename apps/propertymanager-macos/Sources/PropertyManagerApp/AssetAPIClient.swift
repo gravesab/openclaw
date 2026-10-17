@@ -46,6 +46,24 @@ extension PropertyAPIClient {
             "location": location,
             "meter_proposed_type": proposedMeterType,
             "meter_proposed_unit": unit,
+            "is_pseudo": false,
+        ])
+        let (data, response) = try await Self.sharedSession.data(for: request)
+        try validate(response, data: data)
+        return try decoder.decode(MacRanchAsset.self, from: data)
+    }
+
+    func createPseudoGroup(name: String, category: String) async throws -> MacRanchAsset {
+        let url = try makeURL("v1/assets")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        meterApplyAuth(&request)
+        request.httpBody = try JSONSerialization.data(withJSONObject: [
+            "external_id": "mac-group-\(UUID().uuidString.lowercased())",
+            "name": name,
+            "category": category,
+            "is_pseudo": true,
         ])
         let (data, response) = try await Self.sharedSession.data(for: request)
         try validate(response, data: data)
@@ -381,6 +399,8 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
     var hostAssetId: UUID?
     var host: MacAssetRef?
     var attachments: [MacAssetRef]?
+    /// Display-only group (e.g. Mowers); members attach via host_asset_id.
+    var isPseudo: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, name, category, meter, tasks, host, attachments
@@ -390,6 +410,7 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         case pmSummary = "pm_summary"
         case placedInServiceDate = "placed_in_service_date"
         case hostAssetId = "host_asset_id"
+        case isPseudo = "is_pseudo"
     }
 
     init(
@@ -405,7 +426,8 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         placedInServiceDate: String? = nil,
         hostAssetId: UUID? = nil,
         host: MacAssetRef? = nil,
-        attachments: [MacAssetRef]? = nil
+        attachments: [MacAssetRef]? = nil,
+        isPseudo: Bool = false
     ) {
         self.id = id
         self.externalId = externalId
@@ -420,6 +442,7 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         self.hostAssetId = hostAssetId
         self.host = host
         self.attachments = attachments
+        self.isPseudo = isPseudo
     }
 
     init(from decoder: Decoder) throws {
@@ -439,6 +462,7 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         hostAssetId = try? MacFlexibleUUID.decode(c, key: .hostAssetId)
         host = try c.decodeIfPresent(MacAssetRef.self, forKey: .host)
         attachments = try c.decodeIfPresent([MacAssetRef].self, forKey: .attachments)
+        isPseudo = try c.decodeIfPresent(Bool.self, forKey: .isPseudo) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -456,10 +480,14 @@ struct MacRanchAsset: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(hostAssetId, forKey: .hostAssetId)
         try c.encodeIfPresent(host, forKey: .host)
         try c.encodeIfPresent(attachments, forKey: .attachments)
+        try c.encode(isPseudo, forKey: .isPseudo)
     }
 
     var meterNeedsActivation: Bool {
-        meterActivatedAt == nil && proposedMeter?.meterType != nil && proposedMeter?.meterType != "none"
+        !isPseudo
+            && meterActivatedAt == nil
+            && proposedMeter?.meterType != nil
+            && proposedMeter?.meterType != "none"
     }
 }
 

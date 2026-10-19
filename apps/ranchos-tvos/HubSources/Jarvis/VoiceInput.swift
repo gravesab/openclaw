@@ -90,8 +90,12 @@ struct VoiceDraft {
                 Task { @MainActor [weak self] in
                     guard let self, self.draft.token == token else { return }
                     if let text { self.draft.receive(text, token: token) }
-                    if failed { self.fail("Recognition stopped. Retry or type your question.") }
-                    else if final { self.stop() }
+                    // Speech can deliver a final result together with an error; keep the transcript.
+                    if final || (failed && !self.draft.text.isEmpty) {
+                        self.stop()
+                    } else if failed {
+                        self.fail("Recognition stopped. Retry or type your question.")
+                    }
                 }
             }
             engine.prepare()
@@ -167,8 +171,13 @@ protocol RanchVASpeechEngine: AnyObject {
     func stop()
 }
 
-final class RanchVAAVSpeechEngine: NSObject, RanchVASpeechEngine {
+final class RanchVAAVSpeechEngine: NSObject, RanchVASpeechEngine, AVSpeechSynthesizerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
+    var onFinished: (() -> Void)?
+    override init() {
+        super.init()
+        synthesizer.delegate = self
+    }
     var isSpeaking: Bool { synthesizer.isSpeaking }
     func speak(_ text: String, voice: AVSpeechSynthesisVoice?) {
         let utterance = AVSpeechUtterance(string: text)
@@ -178,6 +187,12 @@ final class RanchVAAVSpeechEngine: NSObject, RanchVASpeechEngine {
     func stop() {
         if synthesizer.isSpeaking { synthesizer.stopSpeaking(at: .immediate) }
     }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        onFinished?()
+    }
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        onFinished?()
+    }
 }
 
 @MainActor @Observable final class RanchVASpeaker {
@@ -185,6 +200,11 @@ final class RanchVAAVSpeechEngine: NSObject, RanchVASpeechEngine {
     private var engine: any RanchVASpeechEngine
     init(engine: (any RanchVASpeechEngine)? = nil) {
         self.engine = engine ?? RanchVAAVSpeechEngine()
+        if let avEngine = self.engine as? RanchVAAVSpeechEngine {
+            avEngine.onFinished = { [weak self] in
+                Task { @MainActor in self?.isSpeaking = false }
+            }
+        }
     }
     /// Closest system voice to the Jarvis delivery: British English male
     /// when present, else any British English voice, else the system default.

@@ -131,7 +131,11 @@ final class RanchOSPropertyLiveStore {
 
     /// Reloads the asset summary while this screen is open, so a DEV change replaces the list.
     func trackAssets() async {
-        var keepVisibleSummary = false
+        // Keep an already-ready summary on screen when Property reopens (no loading flash).
+        var keepVisibleSummary: Bool = {
+            if case .ready = assetsState { return true }
+            return false
+        }()
         while !Task.isCancelled {
             await refreshAssets(keepsVisibleSummary: keepVisibleSummary)
             keepVisibleSummary = true

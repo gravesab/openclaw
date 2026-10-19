@@ -128,6 +128,26 @@ final class RanchOSPropertyLiveStoreTests: XCTestCase {
     }
 
     @MainActor
+    func testRefreshAssetsCanKeepReadySummaryVisibleAcrossFailures() async {
+        let spy = PropertyBoundarySpy()
+        spy.keychainValue = "test-token-not-a-credential"
+        let store = RanchOSPropertyLiveStore(
+            mode: .standard,
+            credentials: spy.access,
+            transport: spy.transport,
+            startsAutomaticRefresh: false)
+        await store.refreshAssets()
+        guard case .ready = store.assetsState else {
+            return XCTFail("Expected an initial ready asset summary")
+        }
+        spy.statusCode = 503
+        await store.refreshAssets(keepsVisibleSummary: true)
+        guard case .ready = store.assetsState else {
+            return XCTFail("A kept summary must stay visible when the refresh fails")
+        }
+    }
+
+    @MainActor
     func testCancelledAssetReadNeverPublishesResponse() async {
         let spy = PropertyBoundarySpy()
         spy.keychainValue = "test-token-not-a-credential"

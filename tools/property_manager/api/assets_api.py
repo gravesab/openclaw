@@ -283,11 +283,56 @@ def fetch_attachments(asset_id: str) -> list[dict]:
     return [{"id": str(row["id"]), "name": row["name"]} for row in rows]
 
 
+ACTIVE_TASK_FILTER = """
+    is_active = true
+    AND kind <> 'Work Request'
+    AND intake_state IS NULL
+"""
+
+
+def fetch_active_task_counts(asset_ids: list[str] | None = None) -> dict[str, int]:
+    """Live COUNT of scheduled active tasks per asset (no cache).
+
+    docker-exec mogrify JSON-encodes Python lists, so ``ANY(%s::uuid[])`` cannot
+    take a list parameter. Prefer ``IN (%s, %s, …)`` or an unfiltered GROUP BY.
+    """
+    if asset_ids is not None and len(asset_ids) == 0:
+        return {}
+    if asset_ids is None:
+        rows = pm_db.execute_json(
+            f"""
+            SELECT asset_id::text AS asset_id, COUNT(*)::int AS active_task_count
+            FROM propertymanager.maintenance_tasks
+            WHERE asset_id IS NOT NULL
+              AND {ACTIVE_TASK_FILTER}
+            GROUP BY asset_id
+            """
+        )
+    else:
+        placeholders = ", ".join(["%s"] * len(asset_ids))
+        rows = pm_db.execute_json(
+            f"""
+            SELECT asset_id::text AS asset_id, COUNT(*)::int AS active_task_count
+            FROM propertymanager.maintenance_tasks
+            WHERE asset_id IN ({placeholders})
+              AND {ACTIVE_TASK_FILTER}
+            GROUP BY asset_id
+            """,
+            tuple(asset_ids),
+        )
+    return {
+        str(row["asset_id"]): int(row["active_task_count"])
+        for row in rows
+        if row.get("asset_id") is not None
+    }
+
+
 def enrich_asset(
     row: dict,
     *,
     host_by_id: dict[str, dict] | None = None,
     attachments_by_host: dict[str, list[dict]] | None = None,
+    active_task_count: int | None = None,
 ) -> dict:
     item = dict(row)
     placed_in_service_date = item.get("placed_in_service_date")
@@ -310,17 +355,20 @@ def enrich_asset(
     else:
         item["attachments"] = fetch_attachments(asset_id)
     current = ms._as_decimal(item.get("current_value"))
-    tasks = pm_db.execute_json(
-        """
-        SELECT id, item, schedule_kind, meter_interval_value, meter_interval_unit,
-               last_done_meter_value, next_due_meter_value, next_due, warning_days
-        FROM propertymanager.maintenance_tasks
-        WHERE is_active = true AND asset_id = %s
-          AND kind <> 'Work Request' AND intake_state IS NULL
-        ORDER BY item
-        """,
-        (asset_id,),
-    )
+    if item["is_pseudo"]:
+        tasks = []
+    else:
+        tasks = pm_db.execute_json(
+            f"""
+            SELECT id, item, schedule_kind, meter_interval_value, meter_interval_unit,
+                   last_done_meter_value, next_due_meter_value, next_due, warning_days
+            FROM propertymanager.maintenance_tasks
+            WHERE asset_id = %s
+              AND {ACTIVE_TASK_FILTER}
+            ORDER BY item
+            """,
+            (asset_id,),
+        )
     enriched_tasks = [ms.enrich_task_meter_fields(t, current) for t in tasks]
     overdue_count = sum(1 for t in enriched_tasks if t.get("overdue_meter"))
     due_soon = [
@@ -349,7 +397,14 @@ def enrich_asset(
         "activated_at": item.get("meter_activated_at"),
     }
     item["tasks"] = enriched_tasks
+    if item["is_pseudo"]:
+        summary_count = 0
+    elif active_task_count is not None:
+        summary_count = int(active_task_count)
+    else:
+        summary_count = len(enriched_tasks)
     item["pm_summary"] = {
+        "active_task_count": summary_count,
         "overdue_meter_count": overdue_count,
         "due_soon_count": len(due_soon),
     }
@@ -416,12 +471,19 @@ def list_assets():
         """
     )
     host_by_id, attachments_by_host = _host_maps_for_rows(rows)
+    asset_ids = [str(row["id"]) for row in rows]
+    active_counts = fetch_active_task_counts(asset_ids)
     return jsonify(
         [
             enrich_asset(
                 row,
                 host_by_id=host_by_id,
                 attachments_by_host=attachments_by_host,
+                active_task_count=(
+                    0
+                    if row.get("is_pseudo")
+                    else active_counts.get(str(row["id"]), 0)
+                ),
             )
             for row in rows
         ]

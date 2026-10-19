@@ -3,6 +3,8 @@ import SwiftUI
 #if os(tvOS)
 struct RanchOSTVHomeView: View {
     let dashboard: RanchOSHubDashboard
+    let propertyStore: RanchOSPropertyLiveStore
+    let livestockStore: RanchOSLivestockStore
     @Binding var appearance: RanchOSAppearance
 
     var body: some View {
@@ -18,7 +20,7 @@ struct RanchOSTVHomeView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text(dashboard.title)
                             .font(.largeTitle.bold())
-                        Text(dashboard.tenantDisplayName)
+                        Text("\(dashboard.tenantDisplayName)\n\(RanchOSBuildInfo.display)")
                             .font(.title2)
                             .foregroundStyle(.white.opacity(0.78))
                     }
@@ -26,7 +28,10 @@ struct RanchOSTVHomeView: View {
                     HStack(spacing: 28) {
                         ForEach(dashboard.modules) { module in
                             NavigationLink {
-                                RanchOSTVModuleDetailView(module: module)
+                                RanchOSTVModuleDetailView(
+                                    module: module,
+                                    propertyStore: propertyStore,
+                                    livestockStore: livestockStore)
                             } label: {
                                 RanchOSTVModuleCard(module: module)
                             }
@@ -59,6 +64,14 @@ private struct RanchOSTVModuleCard: View {
     let module: RanchOSModule
     @Environment(\.isFocused) private var isFocused
 
+    private var moduleConnectionLabel: String {
+        switch module {
+        case .property: "Live DEV data · read only"
+        case .livestock: RanchOSLivestockConnection.pendingLabel
+        case .finance: "Charts and reports"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Image(systemName: module.symbolName)
@@ -70,11 +83,15 @@ private struct RanchOSTVModuleCard: View {
                 .font(.callout)
                 .foregroundStyle(.white.opacity(0.72))
                 .lineLimit(3)
+            Text(moduleConnectionLabel)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.mint.opacity(0.9))
+                .lineLimit(2)
             Spacer(minLength: 0)
         }
         .foregroundStyle(.white)
         .padding(30)
-        .frame(width: 350, height: 290, alignment: .topLeading)
+        .frame(width: 350, height: 320, alignment: .topLeading)
         .background(.white.opacity(isFocused ? 0.24 : 0.12), in: RoundedRectangle(cornerRadius: 28))
         .overlay {
             RoundedRectangle(cornerRadius: 28)
@@ -87,6 +104,8 @@ private struct RanchOSTVModuleCard: View {
 
 private struct RanchOSTVModuleDetailView: View {
     let module: RanchOSModule
+    let propertyStore: RanchOSPropertyLiveStore
+    let livestockStore: RanchOSLivestockStore
 
     var body: some View {
         ZStack {
@@ -105,75 +124,219 @@ private struct RanchOSTVModuleDetailView: View {
                     .font(.system(size: 54, weight: .bold, design: .serif))
                     .foregroundStyle(.white)
 
-                Text("Ranch OS DEV")
+                Text("Ranch OS DEV\n\(RanchOSBuildInfo.display)")
                     .font(.title2)
                     .foregroundStyle(.white.opacity(0.74))
 
-                VStack(spacing: 16) {
-                    ForEach(items) { item in
-                        if let snapshot = item.propertySnapshot {
-                            NavigationLink {
-                                RanchOSTVPropertySnapshotView(snapshot: snapshot)
-                            } label: {
-                                RanchOSTVDetailCard(item: item)
-                            }
-                            .buttonStyle(.plain)
-                        } else {
-                            RanchOSTVDetailCard(item: item)
-                        }
-                    }
-                }
+                detailContent
                 .frame(maxWidth: 900)
 
                 Spacer()
 
-                Label("Read-only development fixture · No records can be changed here.", systemImage: "lock.shield")
-                    .font(.title3.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.76))
+                if !footerText.isEmpty {
+                    Label(footerText, systemImage: "lock.shield")
+                        .font(.title3.weight(.medium))
+                        .foregroundStyle(.white.opacity(0.76))
+                }
             }
             .padding(.horizontal, 92)
             .padding(.vertical, 66)
+        }
+        .task {
+            switch module {
+            case .property:
+                await propertyStore.trackAssets()
+            case .livestock:
+                await livestockStore.load()
+            case .finance:
+                break
+            }
         }
     }
 
     private var headline: String {
         switch module {
-        case .property: "Property overview"
-        case .livestock: "Herd overview"
-        case .finance: "Financial overview"
+        case .property: "Assets and relationships"
+        case .livestock: "Herds and groups"
+        case .finance: "Charts and reports"
         }
     }
 
-    private var items: [RanchOSTVDetailItem] {
+    @ViewBuilder
+    private var detailContent: some View {
         switch module {
         case .property:
-            RanchOSPropertyDashboard.developmentFixture.summaries.map { summary in
-                RanchOSTVDetailItem(
-                    title: summary.title,
-                    detail: summary.detail,
-                    symbolName: propertySymbol(for: summary.status),
-                    propertySnapshot: RanchOSPropertyDashboard.developmentFixture.snapshot(for: summary.asset))
-            }
+            propertyContent
         case .livestock:
-            [
-                RanchOSTVDetailItem(title: "Care reminders", detail: "2 animals need attention this week", symbolName: "bell.fill"),
-                RanchOSTVDetailItem(title: "Pasture check", detail: "Daily observation is current", symbolName: "checkmark.circle.fill"),
-                RanchOSTVDetailItem(title: "Records review", detail: "Herd details ready for review", symbolName: "doc.text.magnifyingglass"),
-            ]
+            livestockContent
         case .finance:
-            [
-                RanchOSTVDetailItem(title: "Monthly view", detail: "September summary is ready", symbolName: "checkmark.circle.fill"),
-                RanchOSTVDetailItem(title: "Household and ranch", detail: "Categories are ready for review", symbolName: "doc.text.magnifyingglass"),
-                RanchOSTVDetailItem(title: "Upcoming bills", detail: "3 planned items this month", symbolName: "calendar"),
-            ]
+            financeContent
         }
     }
 
-    private func propertySymbol(for status: RanchOSPropertySummary.Status) -> String {
+    @ViewBuilder
+    private var propertyContent: some View {
+        switch propertyStore.assetsState {
+        case .idle, .loading:
+            ProgressView("Loading PropertyManager DEV…")
+        case .unavailable(let message):
+            Text(message).foregroundStyle(.white.opacity(0.78))
+        case .ready(let assets):
+            propertyAssetSummaries(RanchOSPropertyLiveAsset.relationshipSummaries(from: assets))
+        }
+    }
+
+    private func propertyAssetSummaries(_ summaries: [RanchOSPropertyRelationshipSummary]) -> some View {
+        VStack(spacing: 16) {
+            if summaries.isEmpty {
+                Text("No assets.")
+                    .foregroundStyle(.white.opacity(0.78))
+            }
+            ForEach(summaries) { summary in
+                RanchOSTVAssetSummaryCard(summary: summary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var financeContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(RanchOSTVFinanceReport.allCases) { report in
+                RanchOSTVDetailCard(
+                    item: RanchOSTVDetailItem(
+                        title: report.title,
+                        detail: report.emptyDetail,
+                        symbolName: report.symbolName))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var livestockContent: some View {
+        switch livestockStore.presentation {
+        case .fixture:
+            Text(RanchOSLivestockConnection.pendingLabel)
+                .foregroundStyle(.white.opacity(0.78))
+        case .loading:
+            ProgressView("Loading Livestock…")
+        case .unavailable(let message):
+            VStack(alignment: .leading, spacing: 18) {
+                Text(message).foregroundStyle(.white.opacity(0.78))
+                if livestockStore.canRetry {
+                    Button("Retry") {
+                        Task { await livestockStore.load() }
+                    }
+                }
+            }
+        case .retryable:
+            Button("Retry") {
+                Task { await livestockStore.load() }
+            }
+        case .available(let dashboard):
+            livestockCards(dashboard)
+        }
+    }
+
+    private func livestockCards(_ dashboard: RanchOSLivestockDashboard) -> some View {
+        VStack(spacing: 16) {
+            ForEach(dashboard.summaries) { summary in
+                RanchOSTVDetailCard(
+                    item: RanchOSTVDetailItem(
+                        title: summary.title,
+                        detail: summary.detail,
+                        symbolName: livestockSymbol(for: summary.status)))
+            }
+        }
+    }
+
+    private var footerText: String {
+        switch module {
+        case .property:
+            "Live DEV data · read only. RanchOS cannot change PropertyManager records."
+        case .livestock:
+            livestockStore.presentation.banner
+        case .finance:
+            "Read only. These are the finance chart reports. Statements are added on iPhone or Mac."
+        }
+    }
+
+    private func livestockSymbol(for status: RanchOSLivestockSummary.Status) -> String {
         switch status {
-        case .needsAttention: "exclamationmark.triangle.fill"
-        case .upcoming: "calendar"
+        case .careDue: "bell.fill"
         case .current: "checkmark.circle.fill"
+        case .review: "doc.text.magnifyingglass"
+        }
+    }
+
+}
+
+private enum RanchOSTVFinanceReport: String, CaseIterable, Identifiable {
+    case expenses
+    case income
+    case weeks
+    case targets
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .expenses: "Expenses by category"
+        case .income: "Income by category"
+        case .weeks: "Month by week"
+        case .targets: "Cost by target"
+        }
+    }
+
+    var emptyDetail: String {
+        switch self {
+        case .expenses, .income, .weeks, .targets:
+            "Live finance summary is not connected."
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .expenses, .income: "chart.bar.fill"
+        case .weeks: "calendar"
+        case .targets: "tag.fill"
+        }
+    }
+}
+
+private struct RanchOSTVAssetSummaryCard: View {
+    let summary: RanchOSPropertyRelationshipSummary
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 18) {
+                Image(systemName: summary.members.isEmpty ? "building.2" : "square.stack.3d.up")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.mint)
+                    .frame(width: 52)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(summary.title)
+                        .font(.title3.weight(.semibold))
+                    Text(summary.detail)
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                Spacer()
+            }
+            ForEach(summary.members) { member in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(member.name).font(.body.weight(.semibold))
+                    Text(member.detail).font(.callout).foregroundStyle(.white.opacity(0.72))
+                }
+                .padding(.leading, 70)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(20)
+        .background(.white.opacity(isFocused ? 0.24 : 0.13), in: RoundedRectangle(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(.white.opacity(isFocused ? 0.9 : 0.16), lineWidth: isFocused ? 4 : 1)
         }
     }
 }

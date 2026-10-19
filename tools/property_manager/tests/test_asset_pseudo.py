@@ -80,6 +80,8 @@ class EnrichPseudoTests(unittest.TestCase):
             enriched = assets_api.enrich_asset(row)
         self.assertTrue(enriched["is_pseudo"])
         self.assertEqual(enriched["attachments"][0]["name"], "Toro")
+        self.assertEqual(enriched["pm_summary"]["active_task_count"], 0)
+        self.assertEqual(enriched["tasks"], [])
 
 
 if __name__ == "__main__":

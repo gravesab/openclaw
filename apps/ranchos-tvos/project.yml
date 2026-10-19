@@ -52,6 +52,9 @@ targets:
       path: HubSources/RanchOSiOS-Info.plist
       properties:
         CFBundleDisplayName: RanchOS DEV
+        NSMicrophoneUsageDescription: Jarvis transcribes a question on this device when you press Start listening.
+        NSSpeechRecognitionUsageDescription: Jarvis creates an on-device speech draft for your review before sending.
+        NSCameraUsageDescription: Jarvis shows a local camera preview when you start the camera. No video is recorded or uploaded.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -62,6 +65,11 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            100.85.188.74:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.dev
@@ -75,11 +83,23 @@ targets:
     platform: macOS
     sources:
       - path: HubSources
+    info:
+      path: HubSources/RanchOSMac-Info.plist
+      properties:
+        CFBundleDisplayName: RanchOS DEV
+        NSMicrophoneUsageDescription: Jarvis transcribes a question on this device when you press Start listening.
+        NSSpeechRecognitionUsageDescription: Jarvis creates an on-device speech draft for your review before sending.
+        NSCameraUsageDescription: Jarvis shows a local camera preview when you start the camera. No video is recorded or uploaded.
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            100.85.188.74:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.macos.dev
         PRODUCT_NAME: RanchOS
-        GENERATE_INFOPLIST_FILE: YES
+        GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MACOSX_DEPLOYMENT_TARGET: "15.0"
   RanchOSTV:
@@ -87,11 +107,26 @@ targets:
     platform: tvOS
     sources:
       - path: HubSources
+        excludes:
+          - RanchOSLivestockBrowserView.swift
+    info:
+      path: HubSources/RanchOSTV-Info.plist
+      properties:
+        CFBundleDisplayName: RanchOS DEV
+        NSLocalNetworkUsageDescription: RanchOS reaches the DEV PropertyManager relay on this home network.
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            100.85.188.74:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            andrew-m4-pro.local:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.tv.dev
         PRODUCT_NAME: RanchOS
-        GENERATE_INFOPLIST_FILE: YES
+        GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: TVAppIcon
         TARGETED_DEVICE_FAMILY: "3"
         TVOS_DEPLOYMENT_TARGET: "18.0"
@@ -101,6 +136,13 @@ targets:
     sources:
       - path: HubTests
       - path: HubSources/RanchOSHubModel.swift
+      - path: HubSources/RanchOSLivestockConnection.swift
+      - path: HubSources/RanchOSLivestockStore.swift
+      - path: HubSources/RanchOSLivestockBrowserModel.swift
+      - path: HubSources/RanchOSPropertyLiveStore.swift
+      - path: HubSources/Jarvis/RanchVAAssetGraph.swift
+      - path: HubSources/Jarvis/RanchVADEVQuery.swift
+      - path: HubSources/Jarvis/RanchVAWeather.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests

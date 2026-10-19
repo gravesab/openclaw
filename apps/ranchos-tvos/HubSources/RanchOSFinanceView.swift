@@ -11,7 +11,7 @@ import AppKit
 /// category and the vendors assigned to it. Charts totals expenses by
 /// category. By week is 52 weeks, by month is 12 months, and semi-annual is
 /// the six months of that half. Reports summarizes one month for one account.
-/// iPhone-first; macOS presents the same view.
+/// The Mac and iPad present this screen. The iPhone shows the monthly report.
 /// tvOS compiles this file and never presents it.
 struct RanchOSFinanceScreen: View {
     private enum Page: Hashable {
@@ -37,6 +37,9 @@ struct RanchOSFinanceScreen: View {
     @State private var editingLinks: Set<UUID> = []
     @State private var accountPendingRemoval: RanchOSFinanceAccount?
     @State private var statementGuide: RanchOSFinanceAccount?
+#if os(macOS)
+    @State private var statementWatch: RanchOSFinanceStatementWatch?
+#endif
     @State private var fileNotice: String?
     @Environment(\.openURL) private var openURL
     @State private var importAccount: RanchOSFinanceAccount?
@@ -155,15 +158,15 @@ struct RanchOSFinanceScreen: View {
                 RanchOSFinanceAddAccountSheet(store: store)
             }
 #if os(macOS)
-            .sheet(item: $statementGuide) { account in
+            .sheet(item: $statementGuide, onDismiss: stopStatementWatch) { account in
                 RanchOSFinanceStatementGuideSheet(
                     accountName: store.accountDisplayName(account),
                     link: account.downloadURL.flatMap(URL.init(string:)),
                     folder: RanchOSFinanceAccountFolders.ensure(account, among: store.ledger.accounts),
+                    watching: statementWatch != nil,
                     onOpenPage: openInBrowser,
                     onChoose: {
-                        statementGuide = nil
-                        Task { @MainActor in chooseStatement(for: account) }
+                        chooseManually(for: account)
                     })
             }
 #endif
@@ -1843,13 +1846,22 @@ struct RanchOSFinanceScreen: View {
     }
 
     /// Mac: the download page opens first, then a guide names the account
-    /// folder; the chosen file is filed there before it comes in.
+    /// folder; the chosen file is filed there before it comes in. While the
+    /// guide is up, Downloads is watched for the finished CSV.
     private func beginImport(for account: RanchOSFinanceAccount) {
 #if os(macOS)
         if let link = account.downloadURL, let url = URL(string: link) {
             openInBrowser(url)
         }
         statementGuide = account
+        stopStatementWatch()
+        let watch = RanchOSFinanceStatementWatch { urls in
+            Task { @MainActor in autoIngest(urls, for: account) }
+        } onAmbiguous: {
+            Task { @MainActor in chooseManually(for: account) }
+        }
+        statementWatch = watch
+        watch.start()
 #else
         importAccount = account
         showingImporter = true
@@ -1857,6 +1869,43 @@ struct RanchOSFinanceScreen: View {
     }
 
 #if os(macOS)
+    /// Ends the Downloads wait. The guide's dismiss and its Choose button
+    /// both land here; stopping twice is harmless.
+    private func stopStatementWatch() {
+        statementWatch?.stop()
+        statementWatch = nil
+    }
+
+    /// The guide's Choose button and every watch dead end land here: the wait
+    /// is over and the panel asks which file. Nothing happens when the guide
+    /// is already gone (the person cancelled while a callback was queued).
+    private func chooseManually(for account: RanchOSFinanceAccount) {
+        guard statementGuide != nil else {
+            stopStatementWatch()
+            return
+        }
+        stopStatementWatch()
+        statementGuide = nil
+        Task { @MainActor in chooseStatement(for: account) }
+    }
+
+    /// The wait found exactly one finished statement. It goes through the
+    /// same filing and ingest as a chosen file, but only when it parses as a
+    /// statement. Anything else is left alone and the panel asks instead.
+    private func autoIngest(_ urls: [URL], for account: RanchOSFinanceAccount) {
+        stopStatementWatch()
+        guard urls.count == 1, let statement = urls.first else { return }
+        guard let bytes = try? Data(contentsOf: statement),
+            RanchOSFinanceCSV.isRecognizedStatement(bytes: bytes)
+        else {
+            fileNotice = "\(statement.lastPathComponent) is not a recognized statement, so it was left alone. Choose the statement file."
+            chooseManually(for: account)
+            return
+        }
+        statementGuide = nil
+        fileAndIngest(statement, for: account)
+    }
+
     private func chooseStatement(for account: RanchOSFinanceAccount) {
         let folder = RanchOSFinanceAccountFolders.ensure(account, among: store.ledger.accounts)
         let panel = NSOpenPanel()
@@ -1870,6 +1919,13 @@ struct RanchOSFinanceScreen: View {
             panel.directoryURL = folder
         }
         guard panel.runModal() == .OK, let chosen = panel.url else { return }
+        fileAndIngest(chosen, for: account)
+    }
+
+    /// Files a statement into the account folder, then ingests it. Used by
+    /// the panel and by the Downloads watch alike.
+    private func fileAndIngest(_ chosen: URL, for account: RanchOSFinanceAccount) {
+        let folder = RanchOSFinanceAccountFolders.ensure(account, among: store.ledger.accounts)
         var statement = chosen
         if let folder {
             do {
@@ -2145,6 +2201,7 @@ struct RanchOSFinanceStatementGuideSheet: View {
     let accountName: String
     let link: URL?
     let folder: URL?
+    var watching = false
     var onOpenPage: (URL) -> Void
     var onChoose: () -> Void
     @Environment(\.dismiss) private var dismiss
@@ -2183,7 +2240,11 @@ struct RanchOSFinanceStatementGuideSheet: View {
                     }
                 }
                 Section("3. Bring it in") {
-                    Text("Choose the file you downloaded.")
+                    if watching {
+                        Text("Watching Downloads: when the download finishes, the statement files and imports itself. You can also choose it now.")
+                    } else {
+                        Text("Choose the file you downloaded.")
+                    }
                 }
             }
             .formStyle(.grouped)

@@ -2922,6 +2922,24 @@ struct ContentView: View {
 
                     Divider()
 
+                    if listFilter == .weeks {
+                        WeekHorizonMacView(
+                            store: store,
+                            selectedTaskID: $store.selectedTaskID,
+                            onDone: { task in
+                                store.selectedTaskID = task.id
+                                completionRequest = TaskCompletionRequest(
+                                    task: task,
+                                    initialNote: TaskCompletionPolicy.initialNote(resultNotes: task.resultNotes),
+                                    source: .editor
+                                )
+                            },
+                            onBypass: { task, action in
+                                store.selectedTaskID = task.id
+                                bypassRequest = TaskBypassRequest(task: task, action: action)
+                            }
+                        )
+                    } else {
                     ScrollView {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             ForEach(groupedTasks) { section in
@@ -2961,6 +2979,7 @@ struct ContentView: View {
                             }
                         }
                         .padding()
+                    }
                     }
                 }
                 .frame(width: 330)
@@ -3715,7 +3734,7 @@ struct TaskListHeaderView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: 420)
+            .frame(maxWidth: 520)
 
             HStack {
                 Spacer(minLength: 0)

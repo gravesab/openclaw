@@ -411,6 +411,8 @@ private struct RanchOSPropertyModuleView: View {
                 }
             }
 
+            RanchOSWeekHorizonView(propertyStore: propertyStore)
+
             Label("Live DEV data · read only. RanchOS cannot create, complete, edit, or delete PropertyManager records.", systemImage: "lock.shield")
                 .font(.footnote.weight(.medium))
                 .foregroundStyle(RanchOSTheme.mutedInk)
@@ -891,7 +893,7 @@ private struct RanchOSModuleCard: View {
     }
 }
 
-private enum RanchOSTheme {
+enum RanchOSTheme {
     static let sidebar = Color(red: 0.06, green: 0.15, blue: 0.12)
     static let canvas = LinearGradient(
         colors: [Color(red: 0.98, green: 0.97, blue: 0.92), Color(red: 0.91, green: 0.93, blue: 0.84)],

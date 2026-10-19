@@ -5,6 +5,7 @@ enum TaskListFilter: String, CaseIterable, Identifiable {
     case toDo = "To Do"
     case due = "Due"
     case overdue = "Overdue"
+    case weeks = "Weeks"
     case all = "All"
 
     var id: String { rawValue }
@@ -61,6 +62,8 @@ extension MaintenanceTask {
     }
 
     func matches(_ filter: TaskListFilter, now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        // Weeks uses its own 14-day planning buckets; do not apply the To Do window here.
+        if filter == .weeks { return false }
         guard isInSchedulingWindow(now: now, calendar: calendar) else { return false }
         switch filter {
         case .toDo:
@@ -74,6 +77,8 @@ extension MaintenanceTask {
             case .overdue, .critical: return true
             case .ok, .dueSoon: return false
             }
+        case .weeks:
+            return false
         }
     }
 }

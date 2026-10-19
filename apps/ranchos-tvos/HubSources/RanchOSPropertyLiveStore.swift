@@ -288,6 +288,8 @@ struct RanchOSPropertyLiveTask: Identifiable, Equatable {
     let parts: [RanchOSPropertyLivePart]?
     let legacyPart: RanchOSPropertyLivePart?
     let estimatedMinutes: Int?
+    let scheduleKind: String?
+    let kind: String?
 
     init?(payload: [String: Any]) {
         guard let id = payload["id"] as? String,
@@ -316,6 +318,18 @@ struct RanchOSPropertyLiveTask: Identifiable, Equatable {
         ])
         self.legacyPart = legacy.hasDetails ? legacy : nil
         self.estimatedMinutes = Self.wholeMinutes(payload["estimated_minutes"])
+        self.scheduleKind = payload["schedule_kind"] as? String
+        self.kind = payload["kind"] as? String
+    }
+
+    var isWorkRequest: Bool {
+        let normalized = (kind ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return normalized == "work request" || normalized == "work_request"
+    }
+
+    var nextDueDate: Date? {
+        guard let nextDue else { return nil }
+        return Self.parseDate(nextDue)
     }
 
     private static func wholeMinutes(_ value: Any?) -> Int? {
@@ -335,7 +349,7 @@ struct RanchOSPropertyLiveTask: Identifiable, Equatable {
 
     var status: Status {
         guard isActive else { return .current }
-        guard let nextDue, let date = Self.parseDate(nextDue) else { return .upcoming }
+        guard let date = nextDueDate else { return .upcoming }
         return date < Calendar.current.startOfDay(for: .now) ? .needsAttention : .upcoming
     }
 
@@ -345,9 +359,20 @@ struct RanchOSPropertyLiveTask: Identifiable, Equatable {
     }
 
     private static func parseDate(_ value: String) -> Date? {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: value)
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let date = fractional.date(from: value) { return date }
+
+        let internet = ISO8601DateFormatter()
+        internet.formatOptions = [.withInternetDateTime]
+        if let date = internet.date(from: value) { return date }
+
+        let dayOnly = DateFormatter()
+        dayOnly.calendar = Calendar(identifier: .gregorian)
+        dayOnly.locale = Locale(identifier: "en_US_POSIX")
+        dayOnly.timeZone = TimeZone.current
+        dayOnly.dateFormat = "yyyy-MM-dd"
+        return dayOnly.date(from: value)
     }
 }
 

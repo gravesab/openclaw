@@ -45,6 +45,13 @@ struct RootView: View {
                 }
 
                 NavigationStack {
+                    WeekHorizonView()
+                }
+                .tabItem {
+                    Label("Weeks", systemImage: "calendar")
+                }
+
+                NavigationStack {
                     AssetListView()
                 }
                 .tabItem {

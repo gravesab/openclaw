@@ -16,10 +16,10 @@ final class RanchOSHubModelTests: XCTestCase {
         XCTAssertFalse(modules.map(\.title).contains("My Health"))
     }
 
-    func testDevelopmentFixtureMakesTheOfflineBoundaryExplicit() {
+    func testDevelopmentHubMakesThePropertyConnectionAndFixtureBoundaryExplicit() {
         XCTAssertEqual(
             RanchOSHubDashboard.developmentFixtureBanner,
-            "DEV fixture · Live tenant data is not connected")
+            "DEV hub · PropertyManager summary is live")
     }
 
     func testPropertyFixtureIsReadOnlyPresentationData() {

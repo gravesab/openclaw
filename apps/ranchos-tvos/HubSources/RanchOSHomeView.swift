@@ -3,31 +3,86 @@ import SwiftUI
 #if !os(tvOS)
 private enum RanchOSDestination: Hashable {
     case home
+    case jarvis
     case module(RanchOSModule)
+}
+
+private struct RanchOSHubNavigation: Equatable, Hashable {
+    var destination: RanchOSDestination = .home
+
+    mutating func select(_ destination: RanchOSDestination) {
+        self.destination = destination
+    }
+}
+
+private enum RanchOSCompactRoute: Hashable {
+    case jarvis
+    case module(String)
 }
 
 struct RanchOSHomeView: View {
     let dashboard: RanchOSHubDashboard
+    let propertyStore: RanchOSPropertyLiveStore
+    let livestockStore: RanchOSLivestockStore
     @Binding var appearance: RanchOSAppearance
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
-    @State private var selection: RanchOSDestination = .home
+    @State private var navigation = RanchOSHubNavigation()
+    @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var hasInitializedHome = false
 
     var body: some View {
         Group {
             if horizontalSizeClass == .compact {
-                RanchOSCompactHomeView(dashboard: dashboard, appearance: $appearance)
+                RanchOSCompactHomeView(
+                    dashboard: dashboard,
+                    propertyStore: propertyStore,
+                    livestockStore: livestockStore,
+                    appearance: $appearance)
             } else {
-                NavigationSplitView {
-                    RanchOSSidebar(dashboard: dashboard, selection: $selection, appearance: $appearance)
+                NavigationSplitView(columnVisibility: $columnVisibility) {
+                    RanchOSSidebar(
+                        dashboard: dashboard,
+                        onSelect: { navigation.select($0) },
+                        appearance: $appearance)
                 } detail: {
-                    switch selection {
-                    case .home:
-                        RanchOSDashboardView(dashboard: dashboard, selection: $selection)
-                    case .module(let module):
-                        RanchOSModuleHostView(module: module)
+                    // Detail content is chosen here. A NavigationLink push would stay
+                    // visible after the sidebar changes selection.
+                    Group {
+                        switch navigation.destination {
+                        case .home:
+                            RanchOSDashboardView(dashboard: dashboard) { module in
+                                navigation.select(.module(module))
+                            }
+                        case .jarvis:
+                            RanchVADEVWorkspace(propertyStore: propertyStore).navigationTitle("Jarvis · DEV")
+                        case .module(let module):
+                            RanchOSModuleHostView(
+                                module: module,
+                                propertyStore: propertyStore,
+                                livestockStore: livestockStore,
+                                onReturnHome: {
+                                    navigation.select(.home)
+                                    columnVisibility = .all
+                                },
+                                onRevealSidebar: { columnVisibility = .all },
+                                sidebarHidden: columnVisibility == .detailOnly)
+                        }
+                    }
+                    .id(navigation)
+                    .toolbar {
+                        if columnVisibility == .detailOnly {
+                            ToolbarItem(placement: .navigation) {
+                                Button {
+                                    columnVisibility = .all
+                                } label: {
+                                    Label("Show sidebar", systemImage: "sidebar.left")
+                                }
+                                .accessibilityHint("Shows the RanchOS sidebar")
+                            }
+                        }
                     }
                 }
+                .navigationSplitViewStyle(.balanced)
             }
         }
         .tint(RanchOSTheme.accent)
@@ -35,7 +90,7 @@ struct RanchOSHomeView: View {
             guard !hasInitializedHome else { return }
             hasInitializedHome = true
             Task { @MainActor in
-                selection = .home
+                navigation.select(.home)
             }
         }
     }
@@ -43,12 +98,15 @@ struct RanchOSHomeView: View {
 
 private struct RanchOSCompactHomeView: View {
     let dashboard: RanchOSHubDashboard
+    let propertyStore: RanchOSPropertyLiveStore
+    let livestockStore: RanchOSLivestockStore
     @Binding var appearance: RanchOSAppearance
+    @State private var compactPath: [RanchOSCompactRoute] = []
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 18)]
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $compactPath) {
             ZStack {
                 RanchOSTheme.canvas.ignoresSafeArea()
 
@@ -62,16 +120,20 @@ private struct RanchOSCompactHomeView: View {
                             Text("Welcome to RanchOS")
                                 .font(.system(size: 36, weight: .bold, design: .serif))
                                 .foregroundStyle(RanchOSTheme.ink)
-                            Text(dashboard.tenantDisplayName)
+                            Text("\(dashboard.tenantDisplayName)\n\(RanchOSBuildInfo.display)")
                                 .font(.title3.weight(.medium))
                                 .foregroundStyle(RanchOSTheme.olive)
                         }
 
+                        NavigationLink(value: RanchOSCompactRoute.jarvis) {
+                            Label("Jarvis · DEV", systemImage: "sparkle")
+                                .font(.headline).padding(16)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }.buttonStyle(.bordered)
+
                         LazyVGrid(columns: columns, spacing: 18) {
                             ForEach(dashboard.modules) { module in
-                                NavigationLink {
-                                    RanchOSModuleHostView(module: module)
-                                } label: {
+                                NavigationLink(value: RanchOSCompactRoute.module(module.rawValue)) {
                                     RanchOSModuleCard(module: module)
                                 }
                                 .buttonStyle(.plain)
@@ -87,6 +149,9 @@ private struct RanchOSCompactHomeView: View {
                 }
             }
             .navigationTitle("RanchOS")
+            .navigationDestination(for: RanchOSCompactRoute.self) { route in
+                compactDestination(route)
+            }
             .toolbar {
                 ToolbarItem(placement: .automatic) {
                     Menu {
@@ -102,11 +167,27 @@ private struct RanchOSCompactHomeView: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func compactDestination(_ route: RanchOSCompactRoute) -> some View {
+        switch route {
+        case .jarvis:
+            RanchVADEVWorkspace(propertyStore: propertyStore).navigationTitle("Jarvis · DEV")
+        case .module(let rawValue):
+            if let module = RanchOSModule(rawValue: rawValue) {
+                RanchOSModuleHostView(
+                    module: module,
+                    propertyStore: propertyStore,
+                    livestockStore: livestockStore,
+                    onReturnHome: { compactPath.removeAll() })
+            }
+        }
+    }
 }
 
 private struct RanchOSSidebar: View {
     let dashboard: RanchOSHubDashboard
-    @Binding var selection: RanchOSDestination
+    var onSelect: (RanchOSDestination) -> Void
     @Binding var appearance: RanchOSAppearance
 
     var body: some View {
@@ -117,10 +198,18 @@ private struct RanchOSSidebar: View {
                     .foregroundStyle(RanchOSTheme.cream)
                     .padding(.top, 20)
 
-                Label(dashboard.tenantDisplayName, systemImage: "house")
-                    .font(.headline)
-                    .foregroundStyle(RanchOSTheme.cream)
-                    .padding(14)
+                VStack(alignment: .leading, spacing: 2) {
+                    Label(dashboard.tenantDisplayName, systemImage: "house")
+                        .font(.headline)
+                        .lineLimit(1)
+                    Text(RanchOSBuildInfo.display)
+                        .font(.caption)
+                        .foregroundStyle(RanchOSTheme.cream.opacity(0.75))
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .foregroundStyle(RanchOSTheme.cream)
+                .padding(14)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .background(.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
             }
@@ -128,17 +217,24 @@ private struct RanchOSSidebar: View {
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 20, trailing: 16))
 
             Button {
-                selection = .home
+                onSelect(.home)
             } label: {
                 Label("Home", systemImage: "house.fill")
                     .foregroundStyle(RanchOSTheme.cream)
             }
             .buttonStyle(.plain)
 
+            Section("Assistant") {
+                Button { onSelect(.jarvis) } label: {
+                    Label("Jarvis · DEV", systemImage: "sparkle")
+                        .foregroundStyle(RanchOSTheme.cream)
+                }.buttonStyle(.plain)
+            }
+
             Section("Applications") {
                 ForEach(dashboard.modules) { module in
                     Button {
-                        selection = .module(module)
+                        onSelect(.module(module))
                     } label: {
                         Label(module.title, systemImage: module.symbolName)
                             .foregroundStyle(RanchOSTheme.cream)
@@ -147,7 +243,7 @@ private struct RanchOSSidebar: View {
                 }
             }
 
-            Section("Appearance") {
+            Section("Display") {
                 Picker("Appearance", selection: $appearance) {
                     ForEach(RanchOSAppearance.allCases) { option in
                         Text(option.title).tag(option)
@@ -163,7 +259,7 @@ private struct RanchOSSidebar: View {
 
 private struct RanchOSDashboardView: View {
     let dashboard: RanchOSHubDashboard
-    @Binding var selection: RanchOSDestination
+    var onOpenModule: (RanchOSModule) -> Void
 
     private let columns = [GridItem(.adaptive(minimum: 280), spacing: 18)]
 
@@ -178,7 +274,7 @@ private struct RanchOSDashboardView: View {
                     LazyVGrid(columns: columns, spacing: 18) {
                         ForEach(dashboard.modules) { module in
                             Button {
-                                selection = .module(module)
+                                onOpenModule(module)
                             } label: {
                                 RanchOSModuleCard(module: module)
                             }
@@ -206,7 +302,7 @@ private struct RanchOSDashboardView: View {
             Text("Welcome to RanchOS")
                 .font(.system(size: 42, weight: .bold, design: .serif))
                 .foregroundStyle(RanchOSTheme.ink)
-            Text(dashboard.tenantDisplayName)
+            Text("\(dashboard.tenantDisplayName)\n\(RanchOSBuildInfo.display)")
                 .font(.title2.weight(.medium))
                 .foregroundStyle(RanchOSTheme.olive)
         }
@@ -215,17 +311,38 @@ private struct RanchOSDashboardView: View {
 
 private struct RanchOSModuleHostView: View {
     private let hostedModule: RanchOSHostedModule
+    let propertyStore: RanchOSPropertyLiveStore
+    let livestockStore: RanchOSLivestockStore
+    var onReturnHome: () -> Void = {}
+    var onRevealSidebar: () -> Void = {}
+    var sidebarHidden = false
 
-    init(module: RanchOSModule) {
+    init(
+        module: RanchOSModule,
+        propertyStore: RanchOSPropertyLiveStore,
+        livestockStore: RanchOSLivestockStore,
+        onReturnHome: @escaping () -> Void = {},
+        onRevealSidebar: @escaping () -> Void = {},
+        sidebarHidden: Bool = false
+    ) {
         hostedModule = RanchOSModuleHost.developmentFixture.hostedModule(for: module)
+        self.propertyStore = propertyStore
+        self.livestockStore = livestockStore
+        self.onReturnHome = onReturnHome
+        self.onRevealSidebar = onRevealSidebar
+        self.sidebarHidden = sidebarHidden
     }
 
     var body: some View {
         switch hostedModule {
-        case .property(let dashboard):
-            RanchOSPropertyModuleView(dashboard: dashboard)
-        case .livestock(let dashboard):
-            RanchOSLivestockModuleView(dashboard: dashboard)
+        case .property:
+            RanchOSPropertyModuleView(propertyStore: propertyStore)
+        case .livestock:
+            RanchOSLivestockModuleView(
+                store: livestockStore,
+                onReturnHome: onReturnHome,
+                onRevealSidebar: onRevealSidebar,
+                sidebarHidden: sidebarHidden)
         case .finance(let dashboard):
             RanchOSFinanceModuleView(dashboard: dashboard)
         }
@@ -233,8 +350,7 @@ private struct RanchOSModuleHostView: View {
 }
 
 private struct RanchOSPropertyModuleView: View {
-    let dashboard: RanchOSPropertyDashboard
-    @State private var selectedAsset: RanchOSPropertyAsset?
+    let propertyStore: RanchOSPropertyLiveStore
 
     var body: some View {
         ZStack {
@@ -250,36 +366,85 @@ private struct RanchOSPropertyModuleView: View {
                         Text("Property overview")
                             .font(.system(size: 40, weight: .bold, design: .serif))
                             .foregroundStyle(RanchOSTheme.ink)
-                        Text(dashboard.ranchName)
+                        Text("Ranch OS DEV · Live PropertyManager")
                             .font(.title3.weight(.medium))
                             .foregroundStyle(RanchOSTheme.mutedInk)
                     }
 
-                    VStack(spacing: 12) {
-                        ForEach(dashboard.summaries) { summary in
-                            Button {
-                                selectedAsset = summary.asset
-                            } label: {
-                                RanchOSPropertySummaryCard(summary: summary)
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Open read-only snapshot for \(summary.title)")
-                        }
-                    }
-
-                    Label(
-                        "Read-only development fixture · No maintenance records can be changed here.",
-                        systemImage: "lock.shield")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(RanchOSTheme.mutedInk)
+                    propertyContent
                 }
                 .padding(32)
             }
         }
         .navigationTitle("Property Manager")
-        .sheet(item: $selectedAsset) { asset in
-            RanchOSPropertyAssetSnapshotView(snapshot: dashboard.snapshot(for: asset))
+        .task { await propertyStore.trackAssets() }
+    }
+
+    @ViewBuilder
+    private var propertyContent: some View {
+        switch propertyStore.assetsState {
+        case .idle, .loading:
+            ProgressView("Loading PropertyManager DEV…")
+                .frame(maxWidth: .infinity, minHeight: 180)
+        case .unavailable(let message):
+            Label(message, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(RanchOSTheme.mutedInk)
+                .padding(20)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 20))
+        case .ready(let assets):
+            let summaries = RanchOSPropertyLiveAsset.relationshipSummaries(from: assets)
+            let realAssets = RanchOSPropertyLiveAsset.summaryAssets(from: assets)
+            let activeTotal = realAssets.reduce(0) { $0 + $1.activeTaskCount }
+            Label(
+                "\(realAssets.count) assets · \(activeTotal) active tasks",
+                systemImage: "checkmark.icloud")
+                .font(.headline)
+                .foregroundStyle(RanchOSTheme.ink)
+                .padding(18)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 20))
+
+            VStack(spacing: 12) {
+                ForEach(summaries) { summary in
+                    RanchOSPropertyRelationshipCard(summary: summary)
+                }
+            }
+
+            Label("Live DEV data · read only. RanchOS cannot create, complete, edit, or delete PropertyManager records.", systemImage: "lock.shield")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(RanchOSTheme.mutedInk)
         }
+    }
+}
+
+private struct RanchOSPropertyRelationshipCard: View {
+    let summary: RanchOSPropertyRelationshipSummary
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                Image(systemName: summary.members.isEmpty ? "building.2" : "square.stack.3d.up")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(RanchOSTheme.olive)
+                    .frame(width: 48, height: 48)
+                    .background(RanchOSTheme.olive.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(summary.title).font(.headline).foregroundStyle(RanchOSTheme.ink)
+                    Text(summary.detail).font(.subheadline).foregroundStyle(RanchOSTheme.mutedInk)
+                }
+                Spacer()
+            }
+            ForEach(summary.members) { member in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(member.name).font(.subheadline.weight(.semibold)).foregroundStyle(RanchOSTheme.ink)
+                    Text(member.detail).font(.caption).foregroundStyle(RanchOSTheme.mutedInk)
+                }
+                .padding(.leading, 64)
+            }
+        }
+        .padding(18)
+        .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 20))
     }
 }
 
@@ -407,7 +572,10 @@ private struct RanchOSPropertySummaryCard: View {
 }
 
 private struct RanchOSLivestockModuleView: View {
-    let dashboard: RanchOSLivestockDashboard
+    let store: RanchOSLivestockStore
+    var onReturnHome: () -> Void = {}
+    var onRevealSidebar: () -> Void = {}
+    var sidebarHidden = false
 
     var body: some View {
         ZStack {
@@ -423,37 +591,102 @@ private struct RanchOSLivestockModuleView: View {
                         Text("Herd overview")
                             .font(.system(size: 40, weight: .bold, design: .serif))
                             .foregroundStyle(RanchOSTheme.ink)
-                        Text(dashboard.ranchName)
+                        Text(subtitle)
                             .font(.title3.weight(.medium))
                             .foregroundStyle(RanchOSTheme.mutedInk)
                     }
 
-                    HStack(spacing: 14) {
-                        Label("\(dashboard.herdCount) animals", systemImage: "cow.fill")
-                        Label("2 care reminders", systemImage: "bell.fill")
-                    }
-                    .font(.headline)
-                    .foregroundStyle(RanchOSTheme.ink)
-                    .padding(18)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Color(red: 0.40, green: 0.24, blue: 0.14).opacity(0.12), in: RoundedRectangle(cornerRadius: 20))
-
-                    VStack(spacing: 12) {
-                        ForEach(dashboard.summaries) { summary in
-                            RanchOSLivestockSummaryCard(summary: summary)
-                        }
-                    }
-
-                    Label(
-                        "Read-only development fixture · No animal records can be changed here.",
-                        systemImage: "lock.shield")
-                        .font(.footnote.weight(.medium))
-                        .foregroundStyle(RanchOSTheme.mutedInk)
+                    livestockContent
                 }
                 .padding(32)
             }
         }
         .navigationTitle("Livestock")
+        .toolbar {
+            if sidebarHidden {
+                ToolbarItem(placement: .navigation) {
+                    Button {
+                        onRevealSidebar()
+                    } label: {
+                        Label("Show sidebar", systemImage: "sidebar.left")
+                    }
+                    .accessibilityHint("Shows the RanchOS sidebar")
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    onReturnHome()
+                } label: {
+                    Label("Home", systemImage: "house")
+                }
+                .accessibilityHint("Returns to RanchOS Home")
+            }
+        }
+        .task { await store.load() }
+    }
+
+    private var subtitle: String {
+        switch store.presentation {
+        case .fixture(let dashboard), .available(let dashboard):
+            dashboard.ranchName
+        case .loading, .unavailable, .retryable:
+            "Ranch OS DEV"
+        }
+    }
+
+    @ViewBuilder
+    private var livestockContent: some View {
+        switch store.presentation {
+        case .fixture:
+            Label(RanchOSLivestockConnection.pendingLabel, systemImage: "lock.shield")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(RanchOSTheme.mutedInk)
+        case .loading:
+            ProgressView("Loading Livestock…")
+                .frame(maxWidth: .infinity, minHeight: 180)
+        case .unavailable(let message):
+            VStack(alignment: .leading, spacing: 16) {
+                Label(message, systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(RanchOSTheme.mutedInk)
+                if store.canRetry {
+                    Button("Retry") {
+                        Task { await store.load() }
+                    }
+                    .buttonStyle(.bordered)
+                }
+            }
+            .padding(20)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.white.opacity(0.72), in: RoundedRectangle(cornerRadius: 20))
+        case .retryable:
+            Button("Retry") {
+                Task { await store.load() }
+            }
+            .buttonStyle(.bordered)
+        case .available(let dashboard):
+            livestockDashboardCards(dashboard)
+            Label(store.presentation.banner, systemImage: "lock.shield")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(RanchOSTheme.mutedInk)
+        }
+    }
+
+    @ViewBuilder
+    private func livestockDashboardCards(_ dashboard: RanchOSLivestockDashboard) -> some View {
+        HStack(spacing: 14) {
+            Label("\(dashboard.herdCount) animals", systemImage: "cow.fill")
+        }
+        .font(.headline)
+        .foregroundStyle(RanchOSTheme.ink)
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(red: 0.40, green: 0.24, blue: 0.14).opacity(0.12), in: RoundedRectangle(cornerRadius: 20))
+
+        VStack(spacing: 12) {
+            ForEach(dashboard.summaries) { summary in
+                RanchOSLivestockSummaryCard(summary: summary)
+            }
+        }
     }
 }
 
@@ -540,14 +773,8 @@ private struct RanchOSFinanceModuleView: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color(red: 0.19, green: 0.35, blue: 0.44).opacity(0.12), in: RoundedRectangle(cornerRadius: 20))
 
-                    VStack(spacing: 12) {
-                        ForEach(dashboard.summaries) { summary in
-                            RanchOSFinanceSummaryCard(summary: summary)
-                        }
-                    }
-
                     Label(
-                        "Read-only development fixture · No accounts, transactions, or budgets can be changed here.",
+                        "Live finance summary is not connected.",
                         systemImage: "lock.shield")
                         .font(.footnote.weight(.medium))
                         .foregroundStyle(RanchOSTheme.mutedInk)
@@ -616,6 +843,14 @@ private struct RanchOSFinanceSummaryCard: View {
 private struct RanchOSModuleCard: View {
     let module: RanchOSModule
 
+    private var moduleConnectionLabel: String {
+        switch module {
+        case .property: "Live DEV data · read only"
+        case .livestock: RanchOSLivestockConnection.pendingLabel
+        case .finance: "Live summary is not connected"
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             HStack(alignment: .top) {
@@ -641,7 +876,7 @@ private struct RanchOSModuleCard: View {
                 .font(.subheadline)
                 .foregroundStyle(RanchOSTheme.mutedInk)
                 .multilineTextAlignment(.leading)
-            Label("Development fixture", systemImage: "lock.fill")
+            Label(moduleConnectionLabel, systemImage: "lock.fill")
                 .font(.footnote.weight(.semibold))
                 .foregroundStyle(RanchOSTheme.olive)
         }

@@ -28,14 +28,24 @@ enum RanchOSAppearance: String, CaseIterable, Identifiable, Sendable {
 struct RanchOSApp: App {
     private let dashboard = RanchOSHubDashboard.developmentFixture
     @State private var appearance: RanchOSAppearance = .system
+    @State private var propertyStore = RanchOSPropertyLiveStore(mode: RanchOSLaunchMode.resolve())
+    @State private var livestockStore = RanchOSLivestockStore()
 
     var body: some Scene {
         WindowGroup {
             Group {
                 #if os(tvOS)
-                RanchOSTVHomeView(dashboard: dashboard, appearance: $appearance)
+                RanchOSTVHomeView(
+                    dashboard: dashboard,
+                    propertyStore: propertyStore,
+                    livestockStore: livestockStore,
+                    appearance: $appearance)
                 #else
-                RanchOSHomeView(dashboard: dashboard, appearance: $appearance)
+                RanchOSHomeView(
+                    dashboard: dashboard,
+                    propertyStore: propertyStore,
+                    livestockStore: livestockStore,
+                    appearance: $appearance)
                 #endif
             }
             .preferredColorScheme(appearance.colorScheme)

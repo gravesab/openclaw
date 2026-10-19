@@ -38,6 +38,14 @@ enum RanchOSFinanceCSV {
     static let genericDescriptionHeaders = ["description", "merchant", "memo", "payee", "details", "narrative"]
     static let genericAmountHeaders = ["amount", "amount (usd)", "transaction amount", "value"]
 
+    /// A loan statement names what is still owed. A principal column wins;
+    /// otherwise the newest running-balance cell is the snapshot.
+    static let principalHeaders = [
+        "principal", "outstanding principal", "current principal",
+        "principal balance", "remaining principal",
+    ]
+    static let balanceHeaders = ["balance", "running balance", "ending balance", "current balance"]
+
     static let dateFormats = ["M/d/yyyy", "MM/dd/yyyy", "M/d/yy", "MM/dd/yy", "yyyy-MM-dd"]
 
     enum Kind: String, Sendable {
@@ -70,6 +78,14 @@ enum RanchOSFinanceCSV {
         var rowCount: Int
         var charges: [Charge]
         var errors: [ParseError]
+        /// The loan snapshot in this file, if any: the principal or balance
+        /// cell on the newest dated row that carries one.
+        var principal: ParsedPrincipal? = nil
+    }
+
+    struct ParsedPrincipal: Sendable {
+        var dateText: String
+        var amountText: String
     }
 
     // MARK: - Entry point
@@ -235,6 +251,8 @@ enum RanchOSFinanceCSV {
         var date: Int
         var description: Int
         var amount: Int
+        var principal: Int? = nil
+        var balance: Int? = nil
     }
 
     static func genericMapping(headers: [String]) -> GenericMapping? {
@@ -247,7 +265,9 @@ enum RanchOSFinanceCSV {
         else {
             return nil
         }
-        return GenericMapping(date: date, description: description, amount: amount)
+        return GenericMapping(
+            date: date, description: description, amount: amount,
+            principal: firstIndex(of: principalHeaders), balance: firstIndex(of: balanceHeaders))
     }
 
     // MARK: - Apple Card rows
@@ -336,10 +356,15 @@ enum RanchOSFinanceCSV {
         var charges: [Charge] = []
         var errors: [ParseError] = []
         var seenCanonical: Set<String> = []
+        var dated: [(row: Int, date: Date, dateText: String, principalText: String, balanceText: String)] = []
         for (offset, record) in rows.enumerated() {
             let row = offset + 1
             func cell(_ column: Int) -> String {
                 column < record.count ? record[column].trimmingCharacters(in: .whitespacesAndNewlines) : ""
+            }
+            func optionalCell(_ column: Int?) -> String {
+                guard let column else { return "" }
+                return cell(column)
             }
             let dateText = cell(mapping.date)
             let merchantText = cell(mapping.description)
@@ -348,10 +373,14 @@ enum RanchOSFinanceCSV {
                 errors.append(ParseError(row: row, code: codeInvalid, message: "required column is empty"))
                 continue
             }
-            if parseDate(dateText) == nil {
+            guard let date = parseDate(dateText) else {
                 errors.append(ParseError(row: row, code: codeInvalid, message: "transaction date is invalid"))
                 continue
             }
+            dated.append((
+                row: row, date: date, dateText: dateText,
+                principalText: optionalCell(mapping.principal),
+                balanceText: optionalCell(mapping.balance)))
             guard let amount = parseAmount(amountText) else {
                 errors.append(ParseError(row: row, code: codeInvalid, message: "amount is invalid"))
                 continue
@@ -374,7 +403,26 @@ enum RanchOSFinanceCSV {
         }
         return ParsedFile(
             kind: .bank, sha256Hex: sha, rowCount: rows.count,
-            charges: charges, errors: errors)
+            charges: charges, errors: errors, principal: newestPrincipal(dated))
+    }
+
+    /// The loan snapshot: the newest dated row carrying a principal cell,
+    /// else the newest carrying a balance cell. A later physical row wins a
+    /// date tie.
+    static func newestPrincipal(
+        _ dated: [(row: Int, date: Date, dateText: String, principalText: String, balanceText: String)]
+    ) -> ParsedPrincipal? {
+        let ordered = dated.sorted {
+            if $0.date != $1.date { return $0.date > $1.date }
+            return $0.row > $1.row
+        }
+        if let found = ordered.first(where: { !$0.principalText.isEmpty }) {
+            return ParsedPrincipal(dateText: found.dateText, amountText: found.principalText)
+        }
+        if let found = ordered.first(where: { !$0.balanceText.isEmpty }) {
+            return ParsedPrincipal(dateText: found.dateText, amountText: found.balanceText)
+        }
+        return nil
     }
 
     // MARK: - Scalars
@@ -479,6 +527,11 @@ enum RanchOSFinanceDates {
         dayLabel(date)
     }
 
+    /// UTC day start. Two snapshots on the same statement day share a date.
+    static func startOfUTCDay(_ date: Date) -> Date {
+        calendar.startOfDay(for: date)
+    }
+
     static func rangeLabel(_ dates: [Date]) -> String {
         guard let first = dates.min(), let last = dates.max() else { return "No transaction dates" }
         let start = yearMonth(first)
@@ -540,6 +593,13 @@ enum RanchOSFinanceDates {
         parts.day = day
         parts.timeZone = TimeZone(secondsFromGMT: 0)
         return calendar.date(from: parts)
+    }
+
+    /// The last instant of a UTC day. A transaction dated that day stays inside
+    /// a window that ends here.
+    static func endOfUTCDay(year: Int, month: Int, day: Int) -> Date? {
+        guard let start = utcDate(year: year, month: month, day: day) else { return nil }
+        return calendar.date(byAdding: .day, value: 1, to: start)?.addingTimeInterval(-1)
     }
 
     static func dayOfMonth(_ date: Date) -> Int {

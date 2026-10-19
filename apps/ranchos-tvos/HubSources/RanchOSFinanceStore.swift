@@ -42,6 +42,48 @@ struct RanchOSFinanceAccount: Codable, Identifiable, Sendable {
     /// the browser only; RanchOS never signs in there. Older ledgers decode
     /// a missing key as empty.
     var downloadURL: String? = nil
+    /// Dated principal snapshots on a loan, as read or typed, never derived.
+    /// The newest is the balance. Older ledgers decode a missing key as empty.
+    var principalSnapshots: [RanchOSFinancePrincipalSnapshot] = []
+
+    init(
+        id: UUID, name: String, kind: RanchOSFinanceAccountKind?, purpose: String? = nil,
+        downloadURL: String? = nil, principalSnapshots: [RanchOSFinancePrincipalSnapshot] = []
+    ) {
+        self.id = id
+        self.name = name
+        self.kind = kind
+        self.purpose = purpose
+        self.downloadURL = downloadURL
+        self.principalSnapshots = principalSnapshots
+    }
+
+    /// A ledger written before principal snapshots has no such key. Decoding
+    /// must still open the account, with an empty balance list.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        kind = try container.decodeIfPresent(RanchOSFinanceAccountKind.self, forKey: .kind)
+        purpose = try container.decodeIfPresent(String.self, forKey: .purpose)
+        downloadURL = try container.decodeIfPresent(String.self, forKey: .downloadURL)
+        principalSnapshots = try container.decodeIfPresent(
+            [RanchOSFinancePrincipalSnapshot].self, forKey: .principalSnapshots) ?? []
+    }
+}
+
+/// One dated principal balance on a loan. The date is a UTC day; the amount
+/// is kept exactly as the statement or the person gave it.
+struct RanchOSFinancePrincipalSnapshot: Codable, Sendable, Equatable {
+    var date: Date
+    var amount: Decimal
+}
+
+/// What ingesting a loan statement kept. Nil for cards, banks, and files
+/// that kept nothing new.
+enum RanchOSFinancePrincipalOutcome: Sendable, Equatable {
+    case recorded(date: Date, amount: Decimal)
+    case missing
 }
 
 enum RanchOSFinanceAccountKind: String, Codable, CaseIterable, Sendable {
@@ -434,6 +476,20 @@ final class RanchOSFinanceStore {
         rememberTypedAccountNames()
     }
 
+    /// Reads the ledger file again. The report then matches what is kept on
+    /// this device, including a transaction added after the screen opened.
+    func reloadFromDisk() {
+        guard let persistenceURL,
+            let data = try? Data(contentsOf: persistenceURL),
+            let decoded = try? JSONDecoder().decode(RanchOSFinanceLedger.self, from: data),
+            decoded.version == Self.ledgerVersion
+        else { return }
+        ledger = decoded
+        chartCache.clear()
+        foldOtherIntoUncategorized()
+        rememberTypedAccountNames()
+    }
+
     static func defaultPersistenceURL() -> URL? {
         guard let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return nil }
@@ -571,6 +627,40 @@ final class RanchOSFinanceStore {
         let next = trimmedPurpose(purpose)
         if ledger.accounts[index].purpose == next { return }
         ledger.accounts[index].purpose = next
+        persist()
+    }
+
+    /// The current principal balance: the newest dated snapshot. Nil when
+    /// the loan has none. Other account types have none.
+    func principalBalance(accountID: UUID) -> RanchOSFinancePrincipalSnapshot? {
+        principalHistory(accountID: accountID).last
+    }
+
+    /// The declining balance: snapshots oldest first. Empty for cards,
+    /// banks, and loans with none.
+    func principalHistory(accountID: UUID) -> [RanchOSFinancePrincipalSnapshot] {
+        guard let account = ledger.accounts.first(where: { $0.id == accountID }),
+            account.kind == .loan
+        else { return [] }
+        return account.principalSnapshots.sorted { $0.date < $1.date }
+    }
+
+    /// Keeps one dated principal snapshot, as read or typed. A newer date is
+    /// added; the same date replaces that date; an older date joins the
+    /// history without changing the current balance. Other account types
+    /// are left alone. Nothing here subtracts payments, interest, or escrow.
+    func recordPrincipalSnapshot(accountID: UUID, date: Date, amount: Decimal) {
+        guard let index = ledger.accounts.firstIndex(where: { $0.id == accountID }),
+            ledger.accounts[index].kind == .loan
+        else { return }
+        let day = RanchOSFinanceDates.startOfUTCDay(date)
+        if let same = ledger.accounts[index].principalSnapshots.firstIndex(where: { $0.date == day }) {
+            if ledger.accounts[index].principalSnapshots[same].amount == amount { return }
+            ledger.accounts[index].principalSnapshots[same].amount = amount
+        } else {
+            ledger.accounts[index].principalSnapshots.append(
+                RanchOSFinancePrincipalSnapshot(date: day, amount: amount))
+        }
         persist()
     }
 
@@ -925,18 +1015,21 @@ final class RanchOSFinanceStore {
     func ingest(
         fileName: String, bytes: Data, now: Date = Date(), source: String? = nil, accountID: UUID? = nil
     ) -> (
-        file: RanchOSFinanceFile, newVendors: [RanchOSFinanceVendor]
+        file: RanchOSFinanceFile, newVendors: [RanchOSFinanceVendor],
+        principal: RanchOSFinancePrincipalOutcome?
     ) {
         let parsed = RanchOSFinanceCSV.parse(bytes: bytes, now: now)
         if let existingIndex = ledger.files.firstIndex(where: { $0.sha256Hex == parsed.sha256Hex }) {
+            var principal: RanchOSFinancePrincipalOutcome?
             if let accountID, ledger.files[existingIndex].accountID == nil {
                 ledger.files[existingIndex].accountID = accountID
                 if let name = RanchOSFinanceDates.normalizedSource(source) {
                     ledger.files[existingIndex].source = name
                 }
+                principal = principalOutcome(parsed: parsed, accountID: accountID)
                 persist()
             }
-            return (ledger.files[existingIndex], [])
+            return (ledger.files[existingIndex], [], principal)
         }
         let file = RanchOSFinanceFile(
             id: UUID(), fileName: fileName, sha256Hex: parsed.sha256Hex,
@@ -965,7 +1058,24 @@ final class RanchOSFinanceStore {
         }
         persist()
         newVendors = newVendors.compactMap { placed in vendor(id: placed.id) }
-        return (file, newVendors)
+        return (file, newVendors, principalOutcome(parsed: parsed, accountID: accountID))
+    }
+
+    /// A loan statement keeps its principal snapshot. Cards, banks, and
+    /// unassigned files keep nothing. A loan file with no usable principal
+    /// leaves the snapshots alone and reports missing.
+    private func principalOutcome(
+        parsed: RanchOSFinanceCSV.ParsedFile, accountID: UUID?
+    ) -> RanchOSFinancePrincipalOutcome? {
+        guard let accountID,
+            ledger.accounts.first(where: { $0.id == accountID })?.kind == .loan
+        else { return nil }
+        guard let found = parsed.principal,
+            let date = RanchOSFinanceCSV.parseDate(found.dateText),
+            let amount = RanchOSFinanceCSV.parseAmount(found.amountText)
+        else { return .missing }
+        recordPrincipalSnapshot(accountID: accountID, date: date, amount: amount)
+        return .recorded(date: RanchOSFinanceDates.startOfUTCDay(date), amount: amount)
     }
 
     /// Distinct trimmed non-empty Category values on these parsed charges.

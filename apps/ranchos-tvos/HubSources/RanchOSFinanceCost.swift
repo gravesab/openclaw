@@ -76,6 +76,16 @@ enum RanchOSFinanceMoney {
         let absolute = abs(cents)
         return sign + "$\(absolute / 100).\(String(format: "%02d", absolute % 100))"
     }
+
+    /// "$12,500.00". Two decimal places, dollars and cents.
+    static func dollarsAndCents(_ amount: Decimal) -> String {
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .currency
+        formatter.locale = Locale(identifier: "en_US")
+        formatter.minimumFractionDigits = 2
+        formatter.maximumFractionDigits = 2
+        return formatter.string(from: NSDecimalNumber(decimal: roundedCents(amount))) ?? format(amount)
+    }
 }
 
 extension RanchOSFinanceStore {

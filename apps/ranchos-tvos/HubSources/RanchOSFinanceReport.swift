@@ -49,14 +49,24 @@ struct RanchOSFinanceSummaryReport: Equatable, Sendable {
     var expensesOutsideGroups: Decimal
     var groupsOverlap: Bool
     var lastYear: RanchOSFinanceReportLastYear
+    /// The newest transaction kept for this month. Nil when the month has none.
+    var throughDate: Date?
 
     var remaining: Decimal { income - expenses }
+
+    var throughLabel: String {
+        guard let throughDate else { return "No transactions in this month" }
+        return "Through \(RanchOSFinanceDates.display(throughDate))"
+    }
 
     var statusLine: String {
         let monthName = RanchOSFinanceDates.monthLabel(year: month.year, month: month.month)
         if transactionCount == 0 { return "No transactions for \(monthName)" }
-        if uncategorizedExpenses > 0 { return "\(monthName) summary is ready · Some charges are Uncategorized" }
-        return "\(monthName) summary is ready"
+        let ready = throughDate.map {
+            "\(monthName) summary is ready through \(RanchOSFinanceDates.display($0))"
+        } ?? "\(monthName) summary is ready"
+        if uncategorizedExpenses > 0 { return "\(ready) · Some charges are Uncategorized" }
+        return ready
     }
 }
 
@@ -101,8 +111,20 @@ extension RanchOSFinanceStore {
 
         var counted = 0
         var duplicates = 0
+        var newest: Date?
         for charge in ledger.charges where reportIncludes(charge, month: month, account: account) {
-            if charge.isDuplicate { duplicates += 1 } else { counted += 1 }
+            if charge.isDuplicate {
+                duplicates += 1
+            } else {
+                counted += 1
+                if let date = RanchOSFinanceDates.parse(charge.dateText) {
+                    if let current = newest {
+                        if date > current { newest = date }
+                    } else {
+                        newest = date
+                    }
+                }
+            }
         }
 
         var compareQuery = query
@@ -140,7 +162,8 @@ extension RanchOSFinanceStore {
             groupsOverlap: overlap,
             lastYear: RanchOSFinanceReportLastYear(
                 label: compared.priorLabel, income: prior.income, expenses: prior.expenses,
-                categories: compareRows))
+                categories: compareRows),
+            throughDate: newest)
     }
 
     func reportAccountLabel(_ account: RanchOSFinanceChartAccountFilter) -> String {
@@ -161,8 +184,8 @@ extension RanchOSFinanceStore {
         var query = RanchOSFinanceChartQuery.allExpenses
         query.account = account
         query.start = RanchOSFinanceDates.utcDate(year: year, month: month, day: 1)
-        query.end = RanchOSFinanceDates.utcDate(
-            year: year, month: month, day: RanchOSFinanceDates.lastDay(year: year, month: month))
+        let last = RanchOSFinanceDates.lastDay(year: year, month: month)
+        query.end = RanchOSFinanceDates.endOfUTCDay(year: year, month: month, day: last)
         return query
     }
 
@@ -188,6 +211,7 @@ enum RanchOSFinanceReportCSV {
         var rows: [[String]] = [
             ["RanchOS Finance summary", "version \(RanchOSFinanceSummaryReport.version)", "", ""],
             ["Month", report.month.label, "", ""],
+            ["Through", report.throughLabel, "", ""],
             ["Account", report.accountLabel, "", ""],
             ["How totals count", RanchOSFinanceSummaryReport.treatment, "", ""],
             ["Section", "Name", "Amount", "Same month last year"],

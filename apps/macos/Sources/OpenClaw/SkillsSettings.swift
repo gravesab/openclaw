@@ -1,6 +1,7 @@
 import Observation
 import OpenClawProtocol
 import SwiftUI
+import OpenClawChatUI
 
 struct SkillsSettings: View {
     @Bindable var state: AppState
@@ -462,6 +463,7 @@ private struct EnvEditorView: View {
             }
             SecureField(self.editor.envKey, text: self.$value)
                 .textFieldStyle(.roundedBorder)
+                .appleIntelligenceDictation(self.$value)
             Text("Saved to openclaw.json under skills.entries.\(self.editor.skillKey)")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)

@@ -229,6 +229,7 @@ extension OnboardingView {
                             TextField("wss://gateway.example.ts.net", text: self.$state.remoteUrl)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: fieldWidth)
+                                .appleIntelligenceDictation(self.$state.remoteUrl)
                         }
                     }
                     if self.state.remoteTransport == .ssh {
@@ -239,6 +240,7 @@ extension OnboardingView {
                             TextField("user@host[:port]", text: self.$state.remoteTarget)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: fieldWidth)
+                                .appleIntelligenceDictation(self.$state.remoteTarget)
                         }
                         if let message = CommandResolver
                             .sshTargetValidationMessage(self.state.remoteTarget)
@@ -259,6 +261,7 @@ extension OnboardingView {
                             TextField("/Users/you/.ssh/id_ed25519", text: self.$state.remoteIdentity)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: fieldWidth)
+                                .appleIntelligenceDictation(self.$state.remoteIdentity)
                         }
                         GridRow {
                             Text("Project root")
@@ -267,6 +270,7 @@ extension OnboardingView {
                             TextField("/home/you/Projects/openclaw", text: self.$state.remoteProjectRoot)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: fieldWidth)
+                                .appleIntelligenceDictation(self.$state.remoteProjectRoot)
                         }
                         GridRow {
                             Text("CLI path")
@@ -277,6 +281,7 @@ extension OnboardingView {
                                 text: self.$state.remoteCliPath)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: fieldWidth)
+                                .appleIntelligenceDictation(self.$state.remoteCliPath)
                         }
                     }
                 }
@@ -392,6 +397,7 @@ extension OnboardingView {
                 SecureField("remote gateway auth token (gateway.remote.token)", text: self.$state.remoteToken)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 320)
+                    .appleIntelligenceDictation(self.$state.remoteToken)
             }
             Text("Used when the remote gateway requires token auth.")
                 .font(.caption)
@@ -724,6 +730,7 @@ extension OnboardingView {
                             AgentWorkspace.displayPath(for: OpenClawConfigFile.defaultWorkspaceURL()),
                             text: self.$workspacePath)
                             .textFieldStyle(.roundedBorder)
+                            .appleIntelligenceDictation(self.$workspacePath)
 
                         HStack(spacing: 12) {
                             Button {

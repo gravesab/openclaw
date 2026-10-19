@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #17211a;
+      --muted: #475544;
+      --line: #d5ddd4;
+      --card: #f7f6f1;
+      --accent: #1f4d38;
+    }
+    body {
+      margin: 0;
+      font-family: "Iowan Old Style", Palatino, Georgia, serif;
+      background: #e7efe6;
+      color: var(--ink);
+    }
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 32px 20px 64px;
+    }
+    h1 {
+      font-size: 2.4rem;
+      margin: 0 0 8px;
+    }
+    .stand-alone {
+      margin: 0 0 20px;
+      color: var(--muted);
+    }
+    .caption {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.85rem;
+      font-weight: 650;
+      letter-spacing: 0.01em;
+      color: var(--muted);
+    }
+    form {
+      display: flex;
+      gap: 10px;
+      margin: 16px 0;
+    }
+    input {
+      flex: 1;
+      font: inherit;
+      font-size: 1.05rem;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: white;
+    }
+    button {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 1rem;
+      padding: 10px 16px;
+      border-radius: 10px;
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: white;
+      cursor: pointer;
+    }
+    button.secondary {
+      background: white;
+      color: var(--accent);
+    }
+    .answer, .samples {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px 18px;
+    }
+    .answer p {
+      margin: 8px 0 0;
+      font-size: 1.15rem;
+    }
+    .samples {
+      margin-top: 16px;
+    }
+    .samples h2 {
+      font-family: ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.95rem;
+      margin: 0 0 10px;
+    }
+    .samples button {
+      margin: 0 8px 8px 0;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Jarvis</h1>
+    <p class="stand-alone">Separate from RanchOS. This page answers from the labeled sample herd.</p>
+    <p id="caption" class="caption">DEV fixture · sample herd · read only</p>
+    <form id="ask-form">
+      <input id="question" name="question" type="text" autocomplete="off" aria-label="Ask Jarvis a question" placeholder="Ask about the sample herd">
+      <button type="submit">Ask</button>
+    </form>
+    <section id="answer" class="answer" hidden>
+      <p id="answer-text"></p>
+    </section>
+    <section class="samples">
+      <h2>Try a sample question</h2>
+      <button type="button" class="secondary" data-question="How is the herd?">How is the herd?</button>
+      <button type="button" class="secondary" data-question="Who is Maple?">Who is Maple?</button>
+      <button type="button" class="secondary" data-question="What can you do?">What can you do?</button>
+    </section>
+  </main>
+  <script>
+    const provenance = "DEV fixture · sample herd · read only";
+    const animals = [
+      ["Maple", "Maple is a Cattle (Beef, Angus). Status: Active. Tag SA-104"],
+      ["Oak", "Oak is a Cattle (Dairy, Hereford). Status: Active. Tag SA-221"],
+      ["Ridge", "Ridge is a Cattle (Breeding, no listed breed). Status: Archived. No identifier recorded."],
+      ["Plains", "Plains is a Bison (Beef, American Bison). Status: Active. Tag BZ-09"],
+      ["Willow", "Willow is a Goat (Dairy, Boer). Status: Active. No identifier recorded."],
+      ["Thistle", "Thistle is a Sheep (Companion, Dorper). Status: Active. Tag SH-44"],
+      ["Copper", "Copper is a Chicken (Layer, Rhode Island Red). Status: Active. Band CH-12"],
+      ["Harrow", "Harrow is a Pig (Companion, Yorkshire). Status: Archived. No identifier recorded."],
+      ["Saddle", "Saddle is a Horse (Breeding, Quarter Horse). Status: Active. Brand HS-03"],
+      ["Porch", "Porch is a Pet (Companion, no listed breed). Status: Active. No identifier recorded."]
+    ];
+    const herd = "The sample herd has 12 animals. Care reminders: 2 animals need attention this week. Pasture check: Daily observation is current. Records review: Herd details ready for review.";
+
+    function answer(question) {
+      const query = question.trim();
+      if (!query) {
+        return "Ask me about the sample herd, or name a sample animal like Maple.";
+      }
+      const lowered = query.toLowerCase();
+      if (lowered.includes("what can you do") || lowered.includes("help") || lowered.includes("capabilit")) {
+        return "I can tell you about the sample herd and look up sample animals like Maple or Oak. I don't have live ranch records in this DEV slice.";
+      }
+      const animal = animals.find(([name]) => lowered.includes(name.toLowerCase()));
+      if (animal) return animal[1];
+      if (["herd", "livestock", "cattle", "animals", "how many"].some((word) => lowered.includes(word))) {
+        return herd;
+      }
+      return "I don't have that in this DEV slice. I can only answer from the labeled sample herd.";
+    }
+
+    const form = document.querySelector("#ask-form");
+    const input = document.querySelector("#question");
+    const answerBox = document.querySelector("#answer");
+    const answerText = document.querySelector("#answer-text");
+
+    function ask(question) {
+      input.value = question;
+      answerText.textContent = answer(question);
+      answerBox.hidden = false;
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      ask(input.value);
+    });
+    for (const button of document.querySelectorAll("[data-question]")) {
+      button.addEventListener("click", () => ask(button.dataset.question));
+    }
+  </script>
+</body>
+</html>

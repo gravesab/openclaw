@@ -1,0 +1,14 @@
+---
+description: Cursor designs, Muse develops, and every handoff ends with a paste-ready prompt
+alwaysApply: true
+---
+
+# Prompt for Muse
+
+On this project Andrew assigned the roles: Cursor is the designer, Muse is the developer. Cursor writes the spec and the review. Muse implements that spec and does not redesign it.
+
+Every user-facing reply that directs Muse, reviews Muse's work, or accepts a slice ends with a paste-ready prompt. An acceptance names the next slice. Filing `~/team/handoffs/` on SSH-Dev does not replace that prompt.
+
+The prompt names the handoff file, the checkout `/Users/andrewgraves/Developer/OpenClaw-DEV`, what to change, what to leave alone, how to prove it, and how to hand it back (append to the same handoff, set Status and Owner now).
+
+Do not commit, push, apply live database migrations, or touch Production inside that prompt unless Andrew has said so in the same task.

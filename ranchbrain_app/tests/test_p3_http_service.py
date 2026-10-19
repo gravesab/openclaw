@@ -14,18 +14,20 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 import ranchbrain.api.server as server_mod
 import ranchbrain.memory_store as memory_store_mod
 from ranchbrain.api.membership import MembershipStoreError, StaticMembershipStore
+from ranchbrain.api.sessions import SESSION_PREFIX, MemorySessionStore, SESSION_TTL
 from ranchbrain.api.server import ServiceConfig, create_server
 from ranchbrain.identity_oidc import GOOGLE_OIDC_ISSUER, OidcConfiguration
 from ranchbrain.memory_store import list_memories, remember, save_memory
 from ranchbrain.models import Memory
 from ranchbrain.profile_manager import PROFILES, IndexProfile
-from ranchbrain.tenancy import Role, Tenant, TenantMembership, User
+from ranchbrain.tenancy import Capability, ROLE_CAPABILITIES, Role, Tenant, TenantMembership, User
 
 A = "tenant-a"
 B = "tenant-b"
@@ -55,6 +57,7 @@ class FakeVerifier:
             "tok-no-mfa": {"amr": ["pwd"]},
             "tok-wrong-aud": {"aud": "other-audience"},
             "tok-future-iat": {"iat": int((now + timedelta(hours=1)).timestamp())},
+            "tok-stale": {"auth_time": int((now - timedelta(minutes=10)).timestamp())},
         }
         if assertion not in variants:
             raise Exception("bad signature")
@@ -109,6 +112,18 @@ class LiveServer:
         if tenant is not None:
             heads["X-Ranch-Tenant"] = tenant
         req = urllib.request.Request(self.base + path, headers=heads, method="GET")
+        return self._open(req)
+
+    def post(self, path, token="tok-good", tenant=A, headers=None):
+        heads = dict(headers or {})
+        if token is not None:
+            heads["Authorization"] = f"Bearer {token}"
+        if tenant is not None:
+            heads["X-Ranch-Tenant"] = tenant
+        req = urllib.request.Request(self.base + path, data=b"", headers=heads, method="POST")
+        return self._open(req)
+
+    def _open(self, req):
         try:
             with urllib.request.urlopen(req, timeout=15) as resp:
                 return resp.status, _hdict(resp.headers), resp.read()
@@ -124,13 +139,14 @@ def _json(raw):
     return json.loads(raw.decode("utf-8"))
 
 
-def _config(store=None, **limits):
+def _config(store=None, sessions=None, **limits):
     users, tenants, memberships = membership_facts()
     return ServiceConfig(
         oidc=OidcConfiguration(audience=AUD, environment="dev"),
         verifier=FakeVerifier(),
         memberships=store or StaticMembershipStore(
             users=tuple(users), tenants=tuple(tenants), memberships=tuple(memberships)),
+        sessions=sessions,
         host="127.0.0.1", port=0, **limits)
 
 
@@ -399,6 +415,449 @@ def test_search_overrun_returns_503_within_budget(monkeypatch):
             assert elapsed < 2.0
     finally:
         release.set()
+
+
+class Clock:
+    def __init__(self):
+        self.now = datetime.now(timezone.utc)
+
+    def __call__(self):
+        return self.now
+
+
+def test_session_issue_use_expire_and_cross_tenant():
+    made = seed("Session pump", "A labeled pump note.")
+    clock = Clock()
+    sessions = MemorySessionStore(clock=clock)
+    with LiveServer(_config(sessions=sessions)) as svc:
+        status, _, raw = svc.post("/v1/session", token="tok-stale", tenant=A)
+        assert status == 401
+        assert _json(raw)["code"] == "oidc_invalid"
+
+        status, _, raw = svc.post("/v1/session", tenant=C)
+        assert status == 403
+        assert _json(raw)["code"] == "tenant_not_authorized"
+
+        status, _, raw = svc.post("/v1/session", tenant=A)
+        assert status == 200
+        body = _json(raw)
+        assert body["token"].startswith(SESSION_PREFIX)
+        assert body["tenant_id"] == A
+        assert body["expires_at"]
+
+        status, _, raw = svc.get("/v1/memory/list", token=body["token"], tenant=A)
+        assert status == 200
+        assert _json(raw)["count"] == 1
+
+        missing_status, _, missing_raw = svc.get(f"/v1/memory/fetch/{made.memory_id}-nope", tenant=A)
+        cross_status, _, cross_raw = svc.get("/v1/memory/list", token=body["token"], tenant=B)
+        assert cross_status == 404
+        assert cross_status == missing_status
+        assert _json(cross_raw)["code"] == _json(missing_raw)["code"] == "memory_not_found"
+        assert _json(cross_raw)["message"] == _json(missing_raw)["message"]
+
+        status, _, raw = svc.get("/v1/memory/list", token=SESSION_PREFIX + "unknown", tenant=A)
+        assert status == 401
+        assert _json(raw)["code"] == "session_invalid"
+
+        clock.now += SESSION_TTL + timedelta(seconds=1)
+        status, _, raw = svc.get("/v1/memory/list", token=body["token"], tenant=A)
+        assert status == 401
+        assert _json(raw)["code"] == "session_invalid"
+
+
+# -- session route: ranch comes from membership ----------------------------
+
+
+class RecordingSessionStore:
+    """SessionStore that records issue() calls, delegating storage.
+
+    The recording only observes how often the route under test issues; it
+    never drives the route, so a zero count proves no session was issued.
+    """
+
+    def __init__(self, delegate=None):
+        self._delegate = delegate or MemorySessionStore()
+        self.issues = []
+
+    def issue(self, *, principal, tenant_id):
+        self.issues.append(tenant_id)
+        return self._delegate.issue(principal=principal, tenant_id=tenant_id)
+
+    def get(self, token):
+        return self._delegate.get(token)
+
+
+class DivergentSessionStore:
+    """SessionStore that reports a different ranch than it was asked to issue.
+
+    Records the resolved tenant_id the route passed to issue(), then
+    returns a session object bound to another ranch, proving the route
+    checks the return instead of trusting it.
+    """
+
+    def __init__(self, *, reported_tenant_id="tenant-zzz"):
+        self._reported = reported_tenant_id
+        self.issues = []
+
+    def issue(self, *, principal, tenant_id):
+        self.issues.append(tenant_id)
+        return SimpleNamespace(
+            token=SESSION_PREFIX + "divergent",
+            tenant_id=self._reported,
+            expires_at=datetime.now(timezone.utc) + SESSION_TTL,
+        )
+
+    def get(self, token):
+        return None
+
+
+class _PrincipalListStore:
+    """Postgres-shaped store: principal listing works, snapshot is forbidden."""
+
+    def __init__(self, users, tenants, memberships):
+        self._users = users
+        self._tenants = tenants
+        self._memberships = memberships
+
+    def snapshot(self):
+        raise AssertionError("session route must not snapshot a principal-list store")
+
+    def memberships_for_principal(self, *, issuer, subject, principal_id):
+        assert issuer == GOOGLE_OIDC_ISSUER
+        assert subject == SUB
+        assert principal_id == PRINCIPAL
+        return list(self._users), list(self._tenants), list(self._memberships)
+
+
+def _tenancy_store(users, tenants, memberships, *, via_principal_list):
+    if via_principal_list:
+        return _PrincipalListStore(users, tenants, memberships)
+    return StaticMembershipStore(users=tuple(users), tenants=tuple(tenants),
+                                 memberships=tuple(memberships))
+
+
+def _suspended_ranch_facts():
+    users = [User(id="u1", principal_id=PRINCIPAL)]
+    tenants = [Tenant(id=A, slug="a", display_name="Tenant A"),
+               Tenant(id=B, slug="b", display_name="Tenant B", status="suspended")]
+    memberships = [TenantMembership(tenant_id=A, user_id="u1", role=Role.OWNER),
+                   TenantMembership(tenant_id=B, user_id="u1", role=Role.VIEWER)]
+    return users, tenants, memberships
+
+
+def _single_ranch_config(sessions=None, **limits):
+    users = [User(id="u1", principal_id=PRINCIPAL)]
+    tenants = [Tenant(id=A, slug="a", display_name="Tenant A")]
+    memberships = [TenantMembership(tenant_id=A, user_id="u1", role=Role.OWNER)]
+    return _config(
+        store=StaticMembershipStore(users=tuple(users), tenants=tuple(tenants),
+                                    memberships=tuple(memberships)),
+        sessions=sessions, **limits)
+
+
+@pytest.mark.parametrize("tenant", [None, "", "   ", A])
+def test_session_single_ranch_hint_optional(tenant):
+    sessions = RecordingSessionStore()
+    with LiveServer(_single_ranch_config(sessions=sessions)) as svc:
+        status, heads, raw = svc.post("/v1/session", tenant=tenant)
+        assert status == 200, repr(tenant)
+        body = _json(raw)
+        assert set(body) == {"token", "expires_at", "tenant_id"}
+        assert body["tenant_id"] == A
+        assert body["token"].startswith(SESSION_PREFIX)
+        assert body["expires_at"]
+        assert heads["x-ranch-tenant"] == A
+        assert sessions.issues == [A]
+
+
+def test_session_hint_outside_membership_403_without_issue():
+    sessions = RecordingSessionStore()
+    with LiveServer(_config(sessions=sessions)) as svc:
+        # tenant-c exists but u1 is no member; tenant-zzz exists nowhere.
+        for tenant in (C, "tenant-zzz"):
+            status, _, raw = svc.post("/v1/session", tenant=tenant)
+            assert status == 403, tenant
+            assert _json(raw)["code"] == "tenant_not_authorized", tenant
+        assert sessions.issues == []
+
+
+@pytest.mark.parametrize("tenant", [None, "", "   "])
+def test_session_two_ranches_require_choice(tenant):
+    sessions = RecordingSessionStore()
+    with LiveServer(_config(sessions=sessions)) as svc:
+        status, _, raw = svc.post("/v1/session", tenant=tenant)
+        assert status == 400, repr(tenant)
+        assert _json(raw)["code"] == "tenant_context_invalid", repr(tenant)
+        assert sessions.issues == []
+
+
+@pytest.mark.parametrize(("tenant", "want"), [(A, A), (B, B), ("  " + B + "  ", B)])
+def test_session_two_ranches_hint_chooses(tenant, want):
+    sessions = RecordingSessionStore()
+    with LiveServer(_config(sessions=sessions)) as svc:
+        status, heads, raw = svc.post("/v1/session", tenant=tenant)
+        assert status == 200, repr(tenant)
+        assert _json(raw)["tenant_id"] == want
+        assert heads["x-ranch-tenant"] == want
+        assert sessions.issues == [want]
+
+
+@pytest.mark.parametrize("membership_status", ["suspended", "revoked"])
+def test_session_inactive_membership_403_without_issue(membership_status):
+    users = [User(id="u1", principal_id=PRINCIPAL)]
+    tenants = [Tenant(id=A, slug="a", display_name="Tenant A")]
+    memberships = [TenantMembership(tenant_id=A, user_id="u1", role=Role.OWNER,
+                                    status=membership_status)]
+    sessions = RecordingSessionStore()
+    config = _config(store=StaticMembershipStore(users=tuple(users), tenants=tuple(tenants),
+                                                 memberships=tuple(memberships)),
+                     sessions=sessions)
+    with LiveServer(config) as svc:
+        status, _, raw = svc.post("/v1/session", tenant=None)
+        assert status == 403
+        assert _json(raw)["code"] == "tenant_not_authorized"
+        assert sessions.issues == []
+
+
+def test_session_hint_at_suspended_membership_403_without_issue():
+    users = [User(id="u1", principal_id=PRINCIPAL)]
+    tenants = [Tenant(id=A, slug="a", display_name="Tenant A"),
+               Tenant(id=B, slug="b", display_name="Tenant B")]
+    memberships = [TenantMembership(tenant_id=A, user_id="u1", role=Role.OWNER,
+                                    status="suspended"),
+                   TenantMembership(tenant_id=B, user_id="u1", role=Role.VIEWER)]
+    sessions = RecordingSessionStore()
+    config = _config(store=StaticMembershipStore(users=tuple(users), tenants=tuple(tenants),
+                                                 memberships=tuple(memberships)),
+                     sessions=sessions)
+    with LiveServer(config) as svc:
+        status, _, raw = svc.post("/v1/session", tenant=A)
+        assert status == 403
+        assert _json(raw)["code"] == "tenant_not_authorized"
+        assert sessions.issues == []
+        status, _, raw = svc.post("/v1/session", tenant=B)
+        assert status == 200
+        assert _json(raw)["tenant_id"] == B
+        assert sessions.issues == [B]
+
+
+def test_session_rate_limit_charged_to_resolved_ranch():
+    sessions = RecordingSessionStore()
+    with LiveServer(_single_ranch_config(sessions=sessions, memory_per_minute=1)) as svc:
+        status, heads, _ = svc.post("/v1/session", tenant=None)
+        assert status == 200
+        assert heads["ratelimit-remaining"] == "0"
+        # The headerless issue charged ranch A's quota, not an empty-hint bucket.
+        status, _, _ = svc.get("/v1/memory/list", tenant=A)
+        assert status == 429
+
+
+def test_session_rate_limit_follows_hint_choice():
+    with LiveServer(_config(memory_per_minute=1)) as svc:
+        status, _, _ = svc.post("/v1/session", tenant=B)
+        assert status == 200
+        status, _, _ = svc.get("/v1/memory/list", tenant=A)
+        assert status == 200
+        status, _, _ = svc.get("/v1/memory/list", tenant=B)
+        assert status == 429
+
+
+def test_session_denied_hint_charges_no_quota():
+    with LiveServer(_config(memory_per_minute=1)) as svc:
+        status, _, _ = svc.post("/v1/session", tenant=C)
+        assert status == 403
+        status, _, _ = svc.get("/v1/memory/list", tenant=A)
+        assert status == 200
+
+
+def test_session_role_without_memory_read_issues_nothing(monkeypatch):
+    # No shipped role lacks memory.read; narrow the viewer to simulate a
+    # future least-privilege role and prove the route gates issuance on it.
+    narrowed = frozenset(set(ROLE_CAPABILITIES[Role.VIEWER]) - {Capability.MEMORY_READ})
+    assert Capability.MEMORY_READ not in narrowed
+    monkeypatch.setitem(ROLE_CAPABILITIES, Role.VIEWER, narrowed)
+    sessions = RecordingSessionStore()
+    with LiveServer(_config(sessions=sessions)) as svc:
+        status, _, raw = svc.post("/v1/session", tenant=B)
+        assert status == 403
+        assert _json(raw)["code"] == "tenant_capability_forbidden"
+        assert sessions.issues == []
+
+
+def test_session_principal_list_store_never_snapshots():
+    users = [User(id="u1", principal_id=PRINCIPAL)]
+    tenants = [Tenant(id=A, slug="a", display_name="Tenant A")]
+    memberships = [TenantMembership(tenant_id=A, user_id="u1", role=Role.OWNER)]
+    sessions = RecordingSessionStore()
+    config = _config(store=_PrincipalListStore(users, tenants, memberships), sessions=sessions)
+    with LiveServer(config) as svc:
+        status, heads, raw = svc.post("/v1/session", tenant=None)
+        assert status == 200
+        assert _json(raw)["tenant_id"] == A
+        assert heads["x-ranch-tenant"] == A
+        assert sessions.issues == [A]
+
+
+def test_session_membership_store_down_503():
+    with LiveServer(_config(store=FailingStore())) as svc:
+        status, heads, raw = svc.post("/v1/session", tenant=None)
+        assert status == 503
+        assert _json(raw)["code"] == "store_unavailable"
+        assert int(heads["retry-after"]) >= 1
+
+
+def test_session_store_ranch_mismatch_is_403_without_store_ranch():
+    sessions = DivergentSessionStore()
+    with LiveServer(_single_ranch_config(sessions=sessions)) as svc:
+        status, heads, raw = svc.post("/v1/session", tenant=None)
+        assert status == 403
+        body = _json(raw)
+        assert body["code"] == "tenant_not_authorized"
+        assert sessions.issues == [A]
+        assert "tenant_id" not in body
+        assert "tenant-zzz" not in raw.decode("utf-8")
+        assert heads.get("x-ranch-tenant") != "tenant-zzz"
+
+
+# -- GET routes: a session token carries its ranch -------------------------
+
+
+def _issue_token(svc, tenant):
+    status, _, raw = svc.post("/v1/session", tenant=tenant)
+    assert status == 200
+    return _json(raw)["token"]
+
+
+@pytest.mark.parametrize("tenant", [None, "   "])
+def test_session_token_lists_memory_without_header(tenant):
+    seed("Barn note", "A labeled barn note.", tenant_id=B)
+    with LiveServer(_config()) as svc:
+        token = _issue_token(svc, B)
+        status, heads, raw = svc.get("/v1/memory/list", token=token, tenant=tenant)
+        assert status == 200, repr(tenant)
+        assert _json(raw)["count"] == 1
+        assert heads["x-ranch-tenant"] == B
+
+
+def test_session_token_with_own_header_succeeds():
+    seed("Barn note", "A labeled barn note.", tenant_id=B)
+    with LiveServer(_config()) as svc:
+        token = _issue_token(svc, B)
+        status, heads, raw = svc.get("/v1/memory/list", token=token, tenant=B)
+        assert status == 200
+        assert _json(raw)["count"] == 1
+        assert heads["x-ranch-tenant"] == B
+
+
+def test_session_token_with_other_ranch_header_is_404():
+    seed("Barn note", "A labeled barn note.", tenant_id=B)
+    seed("Pump note", "A labeled pump note.", tenant_id=A)
+    with LiveServer(_config()) as svc:
+        token = _issue_token(svc, B)
+        status, _, raw = svc.get("/v1/memory/list", token=token, tenant=A)
+        assert status == 404
+        body = _json(raw)
+        assert body["code"] == "memory_not_found"
+        assert "memories" not in body and "count" not in body
+
+
+def test_session_token_get_charges_session_ranch_quota():
+    with LiveServer(_config(memory_per_minute=2)) as svc:
+        token = _issue_token(svc, B)
+        status, _, _ = svc.get("/v1/memory/list", token=token, tenant=None)
+        assert status == 200
+        status, _, _ = svc.get("/v1/memory/list", token=token, tenant=None)
+        assert status == 429
+        status, _, _ = svc.get("/v1/memory/list", tenant=A)
+        assert status == 200
+
+
+def test_google_token_without_header_on_get_stays_400():
+    with LiveServer(_config()) as svc:
+        status, _, raw = svc.get("/v1/memory/list", tenant=None)
+        assert status == 400
+        assert _json(raw)["code"] == "tenant_context_invalid"
+
+
+@pytest.mark.parametrize("via_principal_list", [False, True])
+def test_session_suspended_only_ranch_403(via_principal_list):
+    users = [User(id="u1", principal_id=PRINCIPAL)]
+    tenants = [Tenant(id=A, slug="a", display_name="Tenant A", status="suspended")]
+    memberships = [TenantMembership(tenant_id=A, user_id="u1", role=Role.OWNER)]
+    sessions = RecordingSessionStore()
+    config = _config(store=_tenancy_store(users, tenants, memberships,
+                                           via_principal_list=via_principal_list),
+                     sessions=sessions)
+    with LiveServer(config) as svc:
+        for tenant in (None, A):
+            status, _, raw = svc.post("/v1/session", tenant=tenant)
+            assert status == 403, (via_principal_list, tenant)
+            assert _json(raw)["code"] == "tenant_not_authorized"
+        assert sessions.issues == []
+
+
+@pytest.mark.parametrize("via_principal_list", [False, True])
+def test_session_hint_at_suspended_ranch_403(via_principal_list):
+    users, tenants, memberships = _suspended_ranch_facts()
+    sessions = RecordingSessionStore()
+    config = _config(store=_tenancy_store(users, tenants, memberships,
+                                           via_principal_list=via_principal_list),
+                     sessions=sessions)
+    with LiveServer(config) as svc:
+        status, _, raw = svc.post("/v1/session", tenant=B)
+        assert status == 403
+        assert _json(raw)["code"] == "tenant_not_authorized"
+        assert sessions.issues == []
+
+
+@pytest.mark.parametrize("via_principal_list", [False, True])
+def test_session_active_plus_suspended_no_hint_issues_active(via_principal_list):
+    users, tenants, memberships = _suspended_ranch_facts()
+    sessions = RecordingSessionStore()
+    config = _config(store=_tenancy_store(users, tenants, memberships,
+                                           via_principal_list=via_principal_list),
+                     sessions=sessions)
+    with LiveServer(config) as svc:
+        status, heads, raw = svc.post("/v1/session", tenant=None)
+        assert status == 200
+        assert _json(raw)["tenant_id"] == A
+        assert heads["x-ranch-tenant"] == A
+        assert sessions.issues == [A]
+
+
+@pytest.mark.parametrize("via_principal_list", [False, True])
+def test_session_active_plus_suspended_hint_chooses_active(via_principal_list):
+    users, tenants, memberships = _suspended_ranch_facts()
+    sessions = RecordingSessionStore()
+    config = _config(store=_tenancy_store(users, tenants, memberships,
+                                           via_principal_list=via_principal_list),
+                     sessions=sessions)
+    with LiveServer(config) as svc:
+        status, heads, raw = svc.post("/v1/session", tenant=A)
+        assert status == 200
+        assert _json(raw)["tenant_id"] == A
+        assert heads["x-ranch-tenant"] == A
+        assert sessions.issues == [A]
+
+
+def test_list_excludes_archived_memories():
+    made = save_memory(Memory(module="property", category="maintenance",
+                              title="Old fence note", body="Retired note.",
+                              tenant_id=A, memory_type="event", tags=[],
+                              id="arch-list-1"))
+    archive_dir = memory_store_mod.MEMORIES_DIR / "_archive" / "property"
+    archive_dir.mkdir(parents=True)
+    source = Path(made.path)
+    source.rename(archive_dir / source.name)
+    with LiveServer(_config()) as svc:
+        status, _, raw = svc.get("/v1/memory/list", tenant=A)
+        assert status == 200
+        assert _json(raw)["count"] == 0
+        assert _json(raw)["memories"] == []
+        status, _, raw = svc.get("/v1/memory/fetch/arch-list-1", tenant=A)
+        assert status == 404
+        assert _json(raw)["code"] == "memory_not_found"
 
 
 def test_fetch_ignores_archived_memories():

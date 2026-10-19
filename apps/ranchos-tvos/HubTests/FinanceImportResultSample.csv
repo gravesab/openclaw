@@ -1,0 +1,4 @@
+Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+01/15/2024,01/16/2024,Feed purchase,"North Gate Feed, LLC",Other,purchase,-42.50,Alex Sample
+01/20/2024,,Payment received,Apple Card,Payment,payment,42.50,Alex Sample
+02/01/2024,02/02/2024,Zero row,Sample Shop,Other,purchase,0.00,Alex Sample

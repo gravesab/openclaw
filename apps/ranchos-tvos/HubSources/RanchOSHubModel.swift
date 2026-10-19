@@ -1,5 +1,39 @@
 import Foundation
 
+enum RanchOSBuildInfo {
+    static var productName: String { RanchOSRuntimeEnvironment.development.productName }
+    static var environmentName: String { RanchOSRuntimeEnvironment.development.shortName }
+
+    static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
+    }
+
+    static var build: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
+    }
+
+    static var versionAndBuild: String {
+        "Version \(version) · Build \(build)"
+    }
+
+    static var display: String { display(for: .development) }
+
+    static var accessibilityLabel: String { accessibilityLabel(for: .development) }
+
+    static func display(for environment: RanchOSRuntimeEnvironment) -> String {
+        "\(environment.productName) · \(versionAndBuild)"
+    }
+
+    static func accessibilityLabel(for environment: RanchOSRuntimeEnvironment) -> String {
+        switch environment {
+        case .development:
+            "RanchOS development Version \(version) Build \(build)"
+        case .production:
+            "RanchOS production Version \(version) Build \(build)"
+        }
+    }
+}
+
 enum RanchOSModule: String, CaseIterable, Identifiable, Sendable {
     case property
     case livestock
@@ -27,7 +61,7 @@ enum RanchOSModule: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .property: "Assets, maintenance, and work requests"
         case .livestock: "Animals, care, and operational inputs"
-        case .finance: "Ledger, budgets, and reports"
+        case .finance: "Report summary from the Finance application"
         }
     }
 }
@@ -37,7 +71,7 @@ struct RanchOSHubDashboard: Sendable {
     let tenantDisplayName: String
     let modules: [RanchOSModule]
 
-    static let developmentFixtureBanner = "DEV fixture · Live tenant data is not connected"
+    static var developmentFixtureBanner: String { RanchOSRuntimeEnvironment.development.hubBanner }
     static let developmentFixture = RanchOSHubDashboard(
         title: "RanchOS",
         tenantDisplayName: "Ranch OS DEV",
@@ -132,7 +166,7 @@ struct RanchOSPropertyDashboard: Sendable {
         ])
 }
 
-struct RanchOSLivestockSummary: Identifiable, Sendable {
+struct RanchOSLivestockSummary: Identifiable, Sendable, Equatable {
     enum Status: String, Sendable {
         case careDue = "Care due"
         case current = "Current"
@@ -145,7 +179,7 @@ struct RanchOSLivestockSummary: Identifiable, Sendable {
     let status: Status
 }
 
-struct RanchOSLivestockDashboard: Sendable {
+struct RanchOSLivestockDashboard: Sendable, Equatable {
     let ranchName: String
     let herdCount: Int
     let summaries: [RanchOSLivestockSummary]
@@ -189,25 +223,14 @@ struct RanchOSFinanceDashboard: Sendable {
     let ranchName: String
     let summaries: [RanchOSFinanceSummary]
 
+    static let disconnectedCardLabel = "Report summary · not connected"
+    static let disconnectedBanner =
+        "Report summary · not connected. RanchOS will summarize reports from the Finance application when that DEV app is ready. No finance data is loaded here."
+
+    /// Placeholder host payload. Summaries stay empty until the Finance app is connected.
     static let developmentFixture = RanchOSFinanceDashboard(
         ranchName: "Ranch OS DEV",
-        summaries: [
-            RanchOSFinanceSummary(
-                id: "monthly-view",
-                title: "Monthly view",
-                detail: "September summary is ready",
-                status: .ready),
-            RanchOSFinanceSummary(
-                id: "household-ranch",
-                title: "Household and ranch",
-                detail: "Categories are ready for review",
-                status: .review),
-            RanchOSFinanceSummary(
-                id: "upcoming-bills",
-                title: "Upcoming bills",
-                detail: "3 planned items this month",
-                status: .upcoming),
-        ])
+        summaries: [])
 }
 
 enum RanchOSHostedModule: Sendable {

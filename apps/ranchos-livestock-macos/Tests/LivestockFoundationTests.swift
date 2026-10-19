@@ -209,6 +209,16 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertFalse(LivestockReadSession.readOnly([]).canReconnect)
     }
 
+    func testReconnectKeepsTheLiveReadErrorInsteadOfAGenericUnavailableBanner() async {
+        let connection = LivestockReadConnection(authorizedProvider: MessageLivestockReadProvider())
+        let session = await connection.resolve()
+        XCTAssertEqual(session, .unavailable(LivestockDevLoopbackRead.serverNotRunningMessage))
+        XCTAssertTrue(session.canReconnect)
+        XCTAssertEqual(
+            LivestockDevLoopbackRead.message(for: URLError(.cannotConnectToHost)),
+            LivestockDevLoopbackRead.serverNotRunningMessage)
+    }
+
     @MainActor
     func testFixtureRenameUpdatesLivestockPetsAndHerds() async {
         let store = LivestockStore()
@@ -622,10 +632,22 @@ final class LivestockFoundationTests: XCTestCase {
         var careDraft = LivestockAnimalSaveDraft()
         careDraft.careType = .observation
         XCTAssertNil(careDraft.costProblem())
+        XCTAssertFalse(LivestockCareEventType.observation.requiresDosage)
         careDraft.careType = .vaccination
         XCTAssertEqual(careDraft.costProblem(), "Vaccination cost is required.")
         careDraft.careCost = "25"
+        XCTAssertEqual(careDraft.costProblem(), "Vaccination dosage is required.")
+        XCTAssertEqual(
+            LivestockCareEventType.vaccination.dosageRequirementNote,
+            "Dosage is required for Vaccination. Record how much was given, such as 5 mL or 2 cc."
+        )
+        careDraft.careDosage = "2 mL"
         XCTAssertNil(careDraft.costProblem())
+        XCTAssertTrue(LivestockCareEventType.medicationAdministration.requiresDosage)
+        XCTAssertEqual(
+            LivestockCareEventType.medicationAdministration.dosageProblem(""),
+            "Medication dosage is required."
+        )
         XCTAssertEqual(LivestockCostFrequency.daily.timesPerYear, 365)
         XCTAssertEqual(LivestockCostFrequency.weekly.timesPerYear, 52)
         XCTAssertEqual(LivestockCostFrequency.monthly.timesPerYear, 12)
@@ -689,6 +711,10 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertEqual(untagged.retirementDisplay, "Processed")
         XCTAssertFalse(LivestockDestination.liveStock.includesAnimal(untagged))
         XCTAssertTrue(LivestockDestination.liveStockInactive.includesAnimal(untagged))
+        XCTAssertEqual(
+            FixturePresentationBoundary.retiredCorrectionBoundary,
+            "Retirement is locked. You can correct existing care, feed, and cost. You cannot add new records."
+        )
         let rehomedPet = Animal(
             id: UUID(),
             displayName: "Moss",
@@ -765,16 +791,17 @@ final class LivestockFoundationTests: XCTestCase {
             ["Seed", "Pellets", "Prepared meal", "Supplement"]
         )
         XCTAssertEqual(LivestockInputUnit.entryChoices.map(\.label), ["Scoop", "Cup", "Bale", "Each", "Bag", "Pounds"])
-        let shot = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: Date(), itemName: "CDT")
-        XCTAssertEqual(shot.summary, "Vaccination · CDT")
+        let shot = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: Date(), itemName: "CDT", dosage: "2 mL")
+        XCTAssertEqual(shot.summary, "Vaccination · CDT · 2 mL")
         let pills = LivestockCareEvent(
             id: UUID(),
             type: .medicationAdministration,
             occurredAt: Date(),
             itemName: "Ivermectin",
-            itemKind: "Pills"
+            itemKind: "Pills",
+            dosage: "5 mL"
         )
-        XCTAssertEqual(pills.summary, "Medication · Ivermectin · Pills")
+        XCTAssertEqual(pills.summary, "Medication · Ivermectin · Pills · 5 mL")
         let unnamed = LivestockCareEvent(id: UUID(), type: .vaccination, occurredAt: Date())
         XCTAssertEqual(unnamed.summary, "Vaccination")
     }
@@ -1043,6 +1070,7 @@ final class LivestockFoundationTests: XCTestCase {
         try loopback.write(to: ticket, atomically: true, encoding: .utf8)
         let loaded = try XCTUnwrap(LivestockDevLoopbackRead.load(fileURL: ticket))
         XCTAssertEqual(loaded.tenantID, "tenant-a")
+        XCTAssertEqual(LivestockDevLoopbackRead.connectedWhileOpenCaption, "Connected while Livestock is open.")
         XCTAssertTrue(LivestockDevLoopbackRead.connectedUntilCaption(loaded.expiresAt).hasPrefix("Connected to DEV until "))
         XCTAssertTrue(
             LivestockDevLoopbackRead.connectedUntilCaption(loaded.expiresAt, environment: "PROD")
@@ -1068,6 +1096,67 @@ final class LivestockFoundationTests: XCTestCase {
         XCTAssertTrue(store.animals.isEmpty)
         XCTAssertEqual(store.session.statusTitle, "DEV connection ended")
         XCTAssertEqual(store.animalsState, .error(message: LivestockReadConnection.endedMessage))
+    }
+
+    @MainActor
+    func testLiveSessionStaysConnectedWhenALaterReadFails() async {
+        let animal = Animal(
+            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            displayName: "Maple",
+            species: .sheep,
+            productionType: .breeding,
+            breed: LivestockCatalog.breeds.first { $0.code == "dorper" },
+            identifiers: [],
+            status: "Active"
+        )
+        let page = LivestockAuthorizedAnimalPage(origin: .live, animals: [animal])
+        let provider = SequentialAuthorizedRead([
+            .success(page),
+            .failure(LivestockDevReadError.unavailable(LivestockDevLoopbackRead.serverNotRunningMessage)),
+        ])
+        let store = LivestockStore(connection: LivestockReadConnection(authorizedProvider: provider))
+        await store.loadAuthorizedRead()
+        XCTAssertTrue(store.session.isLive)
+        XCTAssertEqual(store.animals.map(\.displayName), ["Maple"])
+        await store.loadAuthorizedRead()
+        XCTAssertTrue(store.session.isLive)
+        XCTAssertEqual(store.animals.map(\.displayName), ["Maple"])
+        XCTAssertEqual(store.connectionHoldMessage, LivestockDevLoopbackRead.serverNotRunningMessage)
+        XCTAssertTrue(store.session.statusDetail.contains("stays connected while it is open"))
+    }
+
+    @MainActor
+    func testReconnectWithoutATicketKeepsAnOpenLiveSession() async {
+        let animal = Animal(
+            id: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
+            displayName: "Maple",
+            species: .sheep,
+            productionType: .breeding,
+            breed: LivestockCatalog.breeds.first { $0.code == "dorper" },
+            identifiers: [],
+            status: "Active"
+        )
+        let ticket = LivestockDevLoopbackRead(
+            baseURL: URL(string: "http://127.0.0.1:18761")!,
+            token: "secret",
+            tenantID: "tenant-a",
+            expiresAt: Date().addingTimeInterval(3_600)
+        )
+        let store = LivestockStore(
+            connection: LivestockReadConnection(
+                authorizedProvider: StaticAuthorizedRead(
+                    page: LivestockAuthorizedAnimalPage(origin: .live, animals: [animal])
+                )
+            ),
+            liveRecords: ticket
+        )
+        await store.loadAuthorizedRead()
+        XCTAssertTrue(store.session.isLive)
+        let missing = FileManager.default.temporaryDirectory.appendingPathComponent("missing-open-dev-read.json")
+        await store.reconnectToDev(fileURL: missing)
+        XCTAssertTrue(store.session.isLive)
+        XCTAssertEqual(store.animals.map(\.displayName), ["Maple"])
+        XCTAssertNotNil(store.liveRecords)
     }
 
     func testCostsGroupByDateNewestDayFirst() {
@@ -1789,6 +1878,151 @@ final class LivestockFoundationTests: XCTestCase {
             XCTFail("Unexpected error: \(error)")
         }
     }
+
+    func testPackageNamerReadsTheLabelAndIgnoresBarcodeDigits() {
+        let named = LivestockProductNamer.draft(
+            from: LivestockPackageReading(
+                barcode: "00123456789012",
+                labelText: """
+                00123456789012
+                Purina Cattle Cubes
+                Net Wt 50 lb
+                Ingredients: corn, molasses
+                """
+            ),
+            category: .feed,
+            feedChoices: LivestockInputType.herdChoices
+        )
+        XCTAssertEqual(named.name, "Purina Cattle Cubes")
+        XCTAssertEqual(named.source, .labelText)
+        XCTAssertEqual(named.feedType, .preparedMeal)
+    }
+
+    func testPackageNamerDoesNotInventANameFromBarcodeDigitsAlone() {
+        let named = LivestockProductNamer.draft(
+            from: LivestockPackageReading(barcode: "012345678901", labelText: "012345678901"),
+            category: .vaccination,
+            feedChoices: []
+        )
+        XCTAssertEqual(named, .unnamed)
+    }
+
+    func testPackageNamerGuessesMedicineKindFromTheLabel() {
+        let named = LivestockProductNamer.draft(
+            from: LivestockPackageReading(
+                barcode: "987654321098",
+                labelText: "Ivermectin Paste 1.87%\nApple flavor"
+            ),
+            category: .medication,
+            feedChoices: []
+        )
+        XCTAssertEqual(named.name, "Ivermectin Paste 1.87%")
+        XCTAssertEqual(named.kind, "Paste")
+    }
+
+    func testScannedProductStaysInTheListUntilChosen() {
+        var directory = LivestockProductDirectory()
+        directory.remember(LivestockProduct(category: .vaccination, name: "Triangle 10", barcode: "123"))
+        XCTAssertEqual(directory.products(in: .vaccination).map(\.name), ["Triangle 10"])
+        XCTAssertEqual(directory.product(barcode: "123", in: .vaccination)?.name, "Triangle 10")
+    }
+
+    func testBreedingTreeShowsSireDamMateAndOffspring() {
+        let sire = cattle("Duke")
+        let dam = cattle("Aster")
+        let calf = cattle("Briar", sire: sire.id, dam: dam.id)
+        let cow = cattle("Maple", mate: sire.id)
+        let among = [sire, dam, calf, cow]
+        let tree = LivestockBreeding.tree(for: calf, among: among)
+        XCTAssertEqual(tree.sire?.name, "Duke")
+        XCTAssertEqual(tree.dam?.name, "Aster")
+        XCTAssertEqual(LivestockBreeding.offspring(of: sire.id, among: among).map(\.displayName), ["Briar"])
+        XCTAssertEqual(LivestockBreeding.currentMates(of: sire.id, among: among).map(\.displayName), ["Maple"])
+        XCTAssertNil(
+            LivestockBreeding.problem(
+                animal: cow,
+                sireID: nil,
+                damID: nil,
+                bredWithID: sire.id,
+                among: among
+            )
+        )
+        XCTAssertEqual(
+            LivestockBreeding.problem(
+                animal: calf,
+                sireID: calf.id,
+                damID: nil,
+                bredWithID: nil,
+                among: among
+            ),
+            "An animal cannot be its own sire."
+        )
+        XCTAssertEqual(
+            LivestockBreeding.problem(
+                animal: sire,
+                sireID: calf.id,
+                damID: nil,
+                bredWithID: nil,
+                among: among
+            ),
+            "Sire cannot be a descendant of this animal."
+        )
+        let nim = cattle("Nim", species: .goat)
+        XCTAssertEqual(
+            LivestockBreeding.problem(
+                animal: dam,
+                sireID: nil,
+                damID: nil,
+                bredWithID: nim.id,
+                among: among + [nim]
+            ),
+            "The animal they are bred with must be the same species."
+        )
+    }
+
+    func testOnDeviceNamerFallsBackWhenTheModelReturnsNothing() async {
+        let named = await LivestockProductNamer.name(
+            LivestockPackageReading(barcode: "1", labelText: "Alfalfa Hay Bales\nNet Wt 90 lb"),
+            category: .feed,
+            feedChoices: LivestockInputType.herdChoices,
+            using: LivestockSilentProductNamer()
+        )
+        XCTAssertEqual(named.name, "Alfalfa Hay Bales")
+        XCTAssertEqual(named.feedType, .alfalfaHay)
+        XCTAssertEqual(named.source, .labelText)
+    }
+}
+
+private func cattle(
+    _ name: String,
+    id: UUID = UUID(),
+    species: Species = .cattle,
+    sire: UUID? = nil,
+    dam: UUID? = nil,
+    mate: UUID? = nil
+) -> Animal {
+    Animal(
+        id: id,
+        displayName: name,
+        species: species,
+        productionType: .breeding,
+        breed: nil,
+        identifiers: [],
+        sireID: sire,
+        damID: dam,
+        bredWithID: mate,
+        status: "Active"
+    )
+}
+
+private struct LivestockSilentProductNamer: LivestockOnDeviceProductNaming {
+    func name(
+        from _: LivestockPackageReading,
+        category _: LivestockProductCategory,
+        feedChoices _: [LivestockInputType]
+    ) async -> LivestockNamedProduct? {
+        nil
+    }
 }
 
 private struct StaticAuthorizedRead: LivestockAuthorizedReadProvider {
@@ -1796,5 +2030,24 @@ private struct StaticAuthorizedRead: LivestockAuthorizedReadProvider {
 
     func readAnimals() async throws -> LivestockAuthorizedAnimalPage {
         page
+    }
+}
+
+private final class SequentialAuthorizedRead: LivestockAuthorizedReadProvider, @unchecked Sendable {
+    private var remaining: [Result<LivestockAuthorizedAnimalPage, Error>]
+
+    init(_ remaining: [Result<LivestockAuthorizedAnimalPage, Error>]) {
+        self.remaining = remaining
+    }
+
+    func readAnimals() async throws -> LivestockAuthorizedAnimalPage {
+        guard !remaining.isEmpty else { throw LivestockDevReadError.refused }
+        return try remaining.removeFirst().get()
+    }
+}
+
+private struct MessageLivestockReadProvider: LivestockAuthorizedReadProvider {
+    func readAnimals() async throws -> LivestockAuthorizedAnimalPage {
+        throw LivestockDevReadError.unavailable(LivestockDevLoopbackRead.serverNotRunningMessage)
     }
 }

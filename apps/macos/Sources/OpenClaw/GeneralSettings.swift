@@ -3,6 +3,7 @@ import Observation
 import OpenClawDiscovery
 import OpenClawIPC
 import OpenClawKit
+import OpenClawChatUI
 import SwiftUI
 
 struct GeneralSettings: View {
@@ -171,16 +172,19 @@ struct GeneralSettings: View {
                             TextField("/Users/you/.ssh/id_ed25519", text: self.$state.remoteIdentity)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 280)
+                                .appleIntelligenceDictation(self.$state.remoteIdentity)
                         }
                         LabeledContent("Project root") {
                             TextField("/home/you/Projects/openclaw", text: self.$state.remoteProjectRoot)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 280)
+                                .appleIntelligenceDictation(self.$state.remoteProjectRoot)
                         }
                         LabeledContent("CLI path") {
                             TextField("/Applications/OpenClaw.app/.../openclaw", text: self.$state.remoteCliPath)
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 280)
+                                .appleIntelligenceDictation(self.$state.remoteCliPath)
                         }
                     }
                     .padding(.top, 4)
@@ -261,6 +265,7 @@ struct GeneralSettings: View {
                 TextField("user@host[:22]", text: self.$state.remoteTarget)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: .infinity)
+                    .appleIntelligenceDictation(self.$state.remoteTarget)
                 self.remoteTestButton(disabled: !canTest)
             }
             if let validationMessage {
@@ -281,6 +286,7 @@ struct GeneralSettings: View {
                 TextField("wss://gateway.example.ts.net", text: self.$state.remoteUrl)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: .infinity)
+                    .appleIntelligenceDictation(self.$state.remoteUrl)
                 self.remoteTestButton(
                     disabled: self.state.remoteUrl.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
@@ -301,6 +307,7 @@ struct GeneralSettings: View {
                 SecureField("remote gateway auth token (gateway.remote.token)", text: self.$state.remoteToken)
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: .infinity)
+                    .appleIntelligenceDictation(self.$state.remoteToken)
             }
             Text("Used when the remote gateway requires token auth.")
                 .font(.caption)

@@ -122,6 +122,9 @@ AI_SCORECARD_PATH = OPENCLAW_ROOT / "config/ai_intelligence/scorecard.json"
 AI_MODEL_REGISTRY_PATH = (
     OPENCLAW_ROOT / "config/ai_intelligence/model_registry.json"
 )
+AI_DEPLOYMENT_MAP_PATH = (
+    OPENCLAW_ROOT / "config/ai_intelligence/deployment_map.json"
+)
 AI_MODEL_RUNTIME_ALIASES_PATH = (
     OPENCLAW_ROOT / "config/ai_intelligence/model_runtime_aliases.json"
 )
@@ -1059,7 +1062,7 @@ def get_propertymanager_mcp_status():
     return {"ready": True, "status": "Ready (on demand)"}
 
 
-def build_system_health(omlx=None, propertymanager_mcp=None):
+def build_system_health(omlx=None, propertymanager_mcp=None, llama_cpp=None):
     checks = []
 
     checks.append(
@@ -1137,6 +1140,16 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
         )
     )
 
+    llama_cpp = llama_cpp if llama_cpp is not None else get_llama_cpp_status()
+    checks.append(
+        (
+            "llama.cpp API",
+            "HTTP endpoint",
+            "Connected" if llama_cpp["connected"] else llama_cpp["status"],
+            "#16a34a" if llama_cpp["connected"] else "#b91c1c",
+        )
+    )
+
     propertymanager_mcp = propertymanager_mcp or get_propertymanager_mcp_status()
     checks.append(
         (
@@ -1196,6 +1209,68 @@ def collect_trend_sample():
 
 
 
+def load_intelmini_host_trend_rows():
+    """Return recent Intel Mini trend rows, which also carry the M4 columns."""
+    key = Path(INTELMINI_STORAGE_KEY)
+    if not key.is_file():
+        return None
+    remote_command = (
+        "python3 -c \"import csv,sys; from pathlib import Path; "
+        "p=Path.home()/'ai/projects/openclaw/reports/trends.csv'; "
+        "rows=list(csv.reader(p.open())); "
+        "w=csv.writer(sys.stdout); w.writerow(rows[0]); "
+        "w.writerows(rows[-36:])\""
+    )
+    try:
+        out = subprocess.check_output(
+            [
+                "ssh",
+                "-i",
+                str(key),
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "ConnectTimeout=5",
+                f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
+                remote_command,
+            ],
+            text=True,
+            timeout=12,
+            stderr=subprocess.DEVNULL,
+        )
+        return list(csv.DictReader(out.splitlines()))
+    except Exception:
+        return None
+
+
+def trend_rows_include_m4(rows):
+    for row in rows[-48:]:
+        for key in (
+            "m4_mem_used_gib",
+            "m4_cpu_used_pct",
+            "m4_disk_used_pct",
+            "m4_ollama_response_ms",
+        ):
+            value = parse_number(row.get(key))
+            if value is not None and value > 0:
+                return True
+    return False
+
+
+def trend_rows_are_dev_guest(rows):
+    """Guest samples report about 8 GiB. The Intel Mini host reports about 62 GiB."""
+    totals = []
+    for row in rows[-48:]:
+        total = parse_number(row.get("mem_total_gib"))
+        if total is not None and total > 0:
+            totals.append(total)
+    return bool(totals) and max(totals) < 32
+
+
 def generate_trend_charts():
     if not TREND_FILE.exists():
         return []
@@ -1208,11 +1283,21 @@ def generate_trend_charts():
     except Exception:
         return []
 
+    machine_name = "Intel Mini"
+    if rows and (
+        trend_rows_are_dev_guest(rows) or not trend_rows_include_m4(rows)
+    ):
+        remote_rows = load_intelmini_host_trend_rows()
+        if remote_rows:
+            rows = remote_rows
+        elif trend_rows_are_dev_guest(rows):
+            machine_name = "DEV virtual machine"
+
     if not rows:
         return []
 
     time_col = find_column(rows, ["timestamp", "time", "datetime", "date"])
-    recent_rows = rows[-24:]
+    recent_rows = rows[-48:]
 
     labels = []
     for row in recent_rows:
@@ -1230,23 +1315,12 @@ def generate_trend_charts():
             return None
 
         values = []
-        last_good = None
-
-        for row in rows:
-            v = parse_number(row.get(col))
-            if v is not None and v > 0:
-                last_good = v
-
         for row in recent_rows:
-            v = parse_number(row.get(col))
-            if v is not None and v > 0:
-                last_good = v
-                values.append(v)
-            elif last_good is not None:
-                values.append(last_good)
+            value = parse_number(row.get(col))
+            if value is not None and value > 0:
+                values.append(value)
             else:
-                values.append(0)
-
+                values.append(float("nan"))
         return values
 
     def style_chart(ax, title, ylabel, percent_axis=False):
@@ -1289,71 +1363,61 @@ def generate_trend_charts():
 
     chart_files = []
 
-    latency = values_for("ollama_latency_ms")
-    if latency:
+    def measured(values):
+        return bool(values) and any(value == value and value > 0 for value in values)
+
+    def add_chart(filename, title, ylabel, series, percent_axis=False):
+        drawn = [(label, values) for label, values in series if measured(values)]
+        if not drawn:
+            return
         chart_files.append(
-            save_line_chart(
-                "ollama_latency.png",
-                "Intel Mini Ollama Latency",
-                "Latency (ms)",
-                [("Intel Mini Ollama Latency", latency)],
-            )
+            save_line_chart(filename, title, ylabel, drawn, percent_axis=percent_axis)
         )
 
-    intel_mem = values_for("mem_used_gib")
-    m4_mem = values_for("m4_mem_used_gib")
-    memory_series = []
-
-    if intel_mem:
-        memory_series.append(("Intel Mini Memory Usage", intel_mem))
-
-    if m4_mem:
-        memory_series.append(("M4 Memory Usage", m4_mem))
-
-    if memory_series:
-        chart_files.append(
-            save_line_chart(
-                "memory_usage.png",
-                "Memory Usage Over Time (Both Computers)",
-                "Memory Used (GiB)",
-                memory_series,
-            )
+    add_chart(
+        "ollama_latency.png",
+        "Ollama Response",
+        "Response (ms)",
+        [
+            (machine_name, values_for("ollama_latency_ms")),
+            ("M4", values_for("m4_ollama_response_ms")),
+        ],
+    )
+    add_chart(
+        "memory_usage.png",
+        "Memory",
+        "Memory Used (GiB)",
+        [
+            (machine_name, values_for("mem_used_gib")),
+            ("M4", values_for("m4_mem_used_gib")),
+        ],
+    )
+    disk_series = [
+        (
+            machine_name if machine_name == "DEV virtual machine" else "Intel Mini internal",
+            values_for("disk_used_pct"),
+        ),
+        ("M4", values_for("m4_disk_used_pct")),
+    ]
+    if machine_name == "Intel Mini":
+        disk_series.insert(
+            1,
+            ("Intel Mini external", values_for("external_disk_used_pct")),
         )
-
-    m4_cpu = values_for("m4_cpu_used_pct")
-    if m4_cpu:
-        chart_files.append(
-            save_line_chart(
-                "m4_cpu_usage.png",
-                "M4 CPU Usage",
-                "CPU Used (%)",
-                [("M4 CPU Usage", m4_cpu)],
-                percent_axis=True,
-            )
-        )
-
-    m4_disk = values_for("m4_disk_used_pct")
-    if m4_disk:
-        chart_files.append(
-            save_line_chart(
-                "m4_disk_usage.png",
-                "M4 Disk Usage",
-                "Disk Used (%)",
-                [("M4 Disk Usage", m4_disk)],
-                percent_axis=True,
-            )
-        )
-
-    m4_ollama = values_for("m4_ollama_response_ms")
-    if m4_ollama:
-        chart_files.append(
-            save_line_chart(
-                "m4_ollama_response.png",
-                "M4 Ollama Response Time",
-                "Response Time (ms)",
-                [("M4 Ollama Response Time", m4_ollama)],
-            )
-        )
+    add_chart(
+        "intelmini_disk_usage.png",
+        "Disk",
+        "Disk Used (%)",
+        disk_series,
+        percent_axis=True,
+    )
+    add_chart(
+        "m4_cpu_usage.png",
+        "CPU",
+        "CPU Used (%)",
+        [("M4", values_for("m4_cpu_used_pct"))],
+        percent_axis=True,
+    )
 
     return chart_files
 
@@ -1389,6 +1453,36 @@ def load_model_runtime_aliases():
     }
 
 
+def model_process_usage_panel_html() -> str:
+    """Render configured assignments beside the current router selection."""
+
+    # Imported on use so dashboard tests can load this module without the routing database stack.
+    from tools.dashboard.model_usage import (
+        build_model_usage,
+        model_usage_panel_html,
+    )
+
+    try:
+        deployment_map = json.loads(
+            AI_DEPLOYMENT_MAP_PATH.read_text(encoding="utf-8")
+        )
+        registry = json.loads(
+            AI_MODEL_REGISTRY_PATH.read_text(encoding="utf-8")
+        )
+        snapshot = build_model_usage(deployment_map, registry)
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        return f"""
+        <div class='panel'>
+            <h2>Models by process</h2>
+            <div class='warning-box'>
+                The model assignment view could not be built.<br><br>
+                {html.escape(str(exc)[:160])}
+            </div>
+        </div>
+        """
+    return model_usage_panel_html(snapshot)
+
+
 def ai_routing_telemetry_panel_html(
     *,
     installed_model_names=(),
@@ -1396,8 +1490,9 @@ def ai_routing_telemetry_panel_html(
     report_path = AI_REPORT_DIR / "routing-telemetry-latest.json"
     text_path = AI_REPORT_DIR / "routing-telemetry-latest.txt"
 
+    usage_panel = model_process_usage_panel_html()
     if not report_path.exists():
-        return """
+        return usage_panel + """
         <div class='panel'>
             <h2>AI Routing Telemetry</h2>
             <div class='warning-box'>
@@ -1410,7 +1505,7 @@ def ai_routing_telemetry_panel_html(
     try:
         summary = json.loads(report_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        return f"""
+        return usage_panel + f"""
         <div class='panel'>
             <h2>AI Routing Telemetry</h2>
             <div class='warning-box'>
@@ -1629,7 +1724,7 @@ def ai_routing_telemetry_panel_html(
             "\n".join(text_path.read_text(encoding="utf-8").splitlines()[:12])
         )
 
-    return f"""
+    return usage_panel + f"""
     <div class='panel'>
         <h2>AI Routing Telemetry</h2>
         <div class='status-box'>
@@ -1714,19 +1809,19 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
     if "permission denied" in message:
         return {
             "status": "Credentials rejected",
-            "summary": "The M4 rejected the configured SSH account or key.",
+            "summary": "The metrics host rejected the configured SSH account or key.",
             "technical": "SSH authentication failed.",
         }
     if "host key verification failed" in message or "remote host identification has changed" in message:
         return {
             "status": "Host identity not trusted",
-            "summary": "The saved M4 host identity must be reviewed.",
+            "summary": "The saved metrics host identity must be reviewed.",
             "technical": "SSH host-key verification failed.",
         }
     if "connection refused" in message:
         return {
             "status": "SSH service unavailable",
-            "summary": "The M4 answered on the network but did not accept SSH.",
+            "summary": "The metrics host answered on the network but did not accept SSH.",
             "technical": "SSH connection was refused.",
         }
     if any(
@@ -1735,13 +1830,13 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
     ):
         return {
             "status": "Host unreachable",
-            "summary": "The dashboard cannot currently reach the M4 over the network.",
-            "technical": "M4 network route is unavailable.",
+            "summary": "The dashboard cannot currently reach the metrics host over the network.",
+            "technical": "Metrics host network route is unavailable.",
         }
     if isinstance(error, subprocess.TimeoutExpired) or "timed out" in message:
         return {
             "status": "Connection timed out",
-            "summary": "The M4 SSH metrics probe did not respond in time.",
+            "summary": "The metrics host SSH probe did not respond in time.",
             "technical": "SSH metrics probe timed out.",
         }
     if isinstance(error, FileNotFoundError):
@@ -1752,14 +1847,15 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
         }
     return {
         "status": "Metrics probe failed",
-        "summary": "Optional M4 metrics could not be collected.",
+        "summary": "Optional host metrics could not be collected.",
         "technical": "SSH metrics probe failed; review the dashboard service log.",
     }
 
 
-def m4_ai_health_panel_html(ollama=None, omlx=None):
+def m4_ai_health_panel_html(ollama=None, omlx=None, llama_cpp=None):
     ollama = ollama or get_m4_ollama_status()
     omlx = omlx or get_omlx_status()
+    llama_cpp = llama_cpp if llama_cpp is not None else get_llama_cpp_status()
     ollama_status = "Online" if ollama["connected"] else "Offline"
     ollama_color = "#22c55e" if ollama["connected"] else "#ef4444"
     response_ms = ollama.get("response_ms", "unknown")
@@ -1769,6 +1865,10 @@ def m4_ai_health_panel_html(ollama=None, omlx=None):
     omlx_color = "#22c55e" if omlx["connected"] else "#fbbf24"
     omlx_response_ms = omlx.get("response_ms", "unknown")
     omlx_models = omlx.get("detected_models") or omlx.get("error", "unknown")
+    llama_status = llama_cpp["status"]
+    llama_color = "#22c55e" if llama_cpp["connected"] else "#ef4444"
+    llama_response_ms = llama_cpp.get("response_ms", "unknown")
+    llama_models = llama_cpp.get("detected_models") or llama_cpp.get("error", "unknown")
 
     m4 = {
         "reachable": False,
@@ -1871,7 +1971,7 @@ PY_REMOTE
 
     html = f"""
 <div class='panel'>
-<h2>🧠 M4 AI Server Health</h2>
+<h2>🧠 Intel Mini AI Server Health</h2>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;">
 
@@ -1879,7 +1979,7 @@ PY_REMOTE
 <b>Remote metrics (optional)</b><br><br>
 <span style="color:{ssh_color};font-weight:bold;">{html_module.escape(ssh_status)}</span><br>
 {html_module.escape(m4['ssh_summary'])}<br>
-M4 SSH host: {html_module.escape(M4_SSH_HOST)}
+Metrics host: {html_module.escape(M4_SSH_HOST)}
 </div>
 
 <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
@@ -1896,7 +1996,14 @@ Models: {omlx.get('model_count', 0)}
 </div>
 
 <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
-<b>M4 Memory</b><br><br>
+<b>llama.cpp</b><br><br>
+<span style="color:{llama_color};font-weight:bold;">{html_module.escape(llama_status)}</span><br>
+Response: {html_module.escape(str(llama_response_ms))} ms<br>
+Models: {llama_cpp.get('model_count', 0)}
+</div>
+
+<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
+<b>Memory</b><br><br>
 Used: {m4['memory_used_gib']} GiB / {m4['memory_total_gib']} GiB<br>
 Percent: {m4['memory_percent']}
 </div>
@@ -1918,7 +2025,10 @@ Detected Models:
 oMLX Models:
 {html_module.escape(omlx_models)}
 
-M4 Uptime:
+llama.cpp Models:
+{html_module.escape(llama_models)}
+
+Uptime:
 {m4['uptime']}
 
 Errors:
@@ -1970,6 +2080,52 @@ def get_m4_ollama_status():
             "primary": "Unavailable",
             "detected_models": "",
             "model_names": [],
+            "response_ms": "failed",
+        }
+
+
+def get_llama_cpp_status():
+    """Probe the llama.cpp model catalog without sending a generation request.
+
+    The dashboard host reaches the M4 llama-server through the DEV loopback
+    tunnel. OPENCLAW_LLAMA_CPP_BASE_URL overrides that address.
+    """
+    base_url = os.environ.get(
+        "OPENCLAW_LLAMA_CPP_BASE_URL",
+        "http://127.0.0.1:18088/v1",
+    ).rstrip("/")
+    endpoint = f"{base_url}/models"
+    started = time.time()
+    try:
+        response = requests.get(endpoint, timeout=5)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("llama.cpp model catalog must be an object")
+        models = payload.get("data")
+        if not isinstance(models, list):
+            raise ValueError("llama.cpp model catalog data must be a list")
+        model_ids = [
+            item.get("id", "")
+            for item in models
+            if isinstance(item, dict) and item.get("id")
+        ]
+        return {
+            "connected": True,
+            "status": "Online",
+            "endpoint": endpoint,
+            "model_count": len(model_ids),
+            "detected_models": ", ".join(model_ids),
+            "response_ms": int((time.time() - started) * 1000),
+        }
+    except (requests.RequestException, ValueError, TypeError):
+        return {
+            "connected": False,
+            "status": "Offline",
+            "endpoint": endpoint,
+            "error": "The configured llama.cpp API did not return a model catalog.",
+            "model_count": 0,
+            "detected_models": "",
             "response_ms": "failed",
         }
 
@@ -6096,15 +6252,82 @@ def backup_center_remote_latest(entry, warning_days):
     return result
 
 
+def backup_center_time_machine_latest(output):
+    """Return the newest completed backup time from a read-only probe.
+
+    A backup path is preferred. When that listing is blocked, the Time
+    Machine snapshot record is used instead.
+    """
+    latest_section = ""
+    if "OPENCLAW_LATEST_BACKUP" in output:
+        latest_section = output.split("OPENCLAW_LATEST_BACKUP", 1)[1]
+        if "OPENCLAW_DESTINATION" in latest_section:
+            latest_section = latest_section.split(
+                "OPENCLAW_DESTINATION",
+                1,
+            )[0]
+    latest_section = latest_section.strip()
+    latest_path = ""
+    if latest_section:
+        latest_path = latest_section.splitlines()[-1].strip()
+    path_match = re.search(
+        r"/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.backup",
+        latest_path,
+    )
+    if path_match:
+        return (
+            latest_path,
+            datetime(*[int(value) for value in path_match.groups()]),
+            "",
+        )
+
+    snapshot = ""
+    if "OPENCLAW_SNAPSHOT" in output:
+        snapshot = output.split("OPENCLAW_SNAPSHOT", 1)[1].strip()
+    lines = [line.strip() for line in snapshot.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return "", None, ""
+    snap_match = re.fullmatch(
+        r"(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})",
+        lines[0],
+    )
+    if not snap_match:
+        return "", None, ""
+    if lines[1] != "0":
+        return (
+            "",
+            None,
+            f"Time Machine result {lines[1]}; last snapshot {lines[0]}",
+        )
+    return (
+        lines[0],
+        datetime(*[int(value) for value in snap_match.groups()]),
+        "",
+    )
+
+
 def backup_center_m4_time_machine():
     """Read Time Machine status from the M4 without changing its state."""
-    remote_command = (
-        "hostname; tmutil status 2>&1; "
-        "printf '\\nOPENCLAW_LATEST_BACKUP\\n'; "
-        "tmutil latestbackup 2>&1; "
-        "printf '\\nOPENCLAW_DESTINATION\\n'; "
-        "tmutil destinationinfo 2>&1"
-    )
+    remote_command = """
+hostname
+tmutil status 2>&1
+printf '\\nOPENCLAW_LATEST_BACKUP\\n'
+tmutil latestbackup 2>&1
+printf '\\nOPENCLAW_DESTINATION\\n'
+tmutil destinationinfo 2>&1
+printf '\\nOPENCLAW_SNAPSHOT\\n'
+defaults export /Library/Preferences/com.apple.TimeMachine - 2>/dev/null \
+  | python3 -c 'import plistlib,sys; from datetime import timezone; raw=sys.stdin.buffer.read()
+if not raw: raise SystemExit(0)
+data=plistlib.loads(raw)
+dest=(data.get("Destinations") or [None])[0] or {}
+snaps=dest.get("SnapshotDates") or []
+if not snaps: raise SystemExit(0)
+snap=snaps[-1]
+if snap.tzinfo is None: snap=snap.replace(tzinfo=timezone.utc)
+print(snap.astimezone().strftime("%Y-%m-%d-%H%M%S"))
+print(dest.get("RESULT"))'
+"""
     try:
         result = subprocess.run(
             [
@@ -6133,21 +6356,21 @@ def backup_center_m4_time_machine():
                 or "M4 Time Machine probe failed."
             )
         output = result.stdout
-        latest_section = output.split(
-            "OPENCLAW_LATEST_BACKUP",
-            1,
-        )[1].split("OPENCLAW_DESTINATION", 1)[0].strip()
-        latest_path = latest_section.splitlines()[-1].strip()
-        timestamp_match = re.search(
-            r"/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})"
-            r"\.backup",
-            latest_path,
+        latest_path, latest_at, failure = backup_center_time_machine_latest(
+            output
         )
-        if not timestamp_match:
+        if failure:
+            return {
+                "found": True,
+                "file": "Live read-only M4 Time Machine probe",
+                "content": failure,
+                "values": {},
+                "status": "critical",
+                "status_label": "Failed",
+                "status_color": "#ef4444",
+            }
+        if latest_at is None:
             raise ValueError("M4 latest backup timestamp was unavailable.")
-        latest_at = datetime(
-            *[int(value) for value in timestamp_match.groups()]
-        )
         age_hours = max(
             0,
             int(
@@ -7639,19 +7862,60 @@ All monitored OpenClaw services are connected.
     return output + "</div>"
 
 
+def format_dashboard_window_title(environment, version, build):
+    """Browser and page title for this dashboard."""
+    return f"OpenClaw AI Dashboard {environment} Version {version} Build {build}"
+
+
+def dashboard_window_title():
+    """Name this dashboard DEV and identify the running version and build.
+
+    Version comes from package.json. Build is the short git commit of the
+    checkout that is serving the page.
+    """
+    environment = os.environ.get("OPENCLAW_DASHBOARD_ENVIRONMENT", "DEV").strip() or "DEV"
+    version = "unknown"
+    try:
+        payload = json.loads((OPENCLAW_ROOT / "package.json").read_text(encoding="utf-8"))
+        candidate = payload.get("version")
+        if isinstance(candidate, str) and candidate.strip():
+            version = candidate.strip()
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        version = "unknown"
+
+    build = "unknown"
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(OPENCLAW_ROOT), "rev-parse", "--short=11", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        candidate = completed.stdout.strip()
+        if re.fullmatch(r"[0-9a-f]{7,40}", candidate):
+            build = candidate
+    except (OSError, subprocess.SubprocessError):
+        build = "unknown"
+
+    return format_dashboard_window_title(environment, version, build)
+
+
 @app.route("/")
 def home():
     backup_success = request.args.get("backup")
     drift = check_ai_drift()
     omlx = get_omlx_status()
+    llama_cpp = get_llama_cpp_status()
     propertymanager_mcp = get_propertymanager_mcp_status()
-    services = build_system_health(omlx, propertymanager_mcp)
+    services = build_system_health(omlx, propertymanager_mcp, llama_cpp)
     m4 = get_m4_ollama_status()
+    page_title = html_module.escape(dashboard_window_title())
 
     html = """
 <html>
 <head>
-<title>OpenClaw AI Dashboard</title>
+<title>__DASHBOARD_WINDOW_TITLE__</title>
 <style>
 body { background-color:#1e293b; color:white; font-family:Arial; padding:20px; }
 .panel { background-color:#273549; padding:20px; margin-bottom:20px; border-radius:10px; }
@@ -7682,15 +7946,24 @@ h1, h2 { margin-top:0; }
 </style>
 </head>
 <body>
-<h1>OpenClaw AI Dashboard</h1>
+<h1>__DASHBOARD_WINDOW_TITLE__</h1>
 
 __OPENCLAW_SHARED_NAVIGATION__
 """
 
+    html = html.replace("__DASHBOARD_WINDOW_TITLE__", page_title)
     html = html.replace(
         "__OPENCLAW_SHARED_NAVIGATION__",
         openclaw_shared_navigation(),
         1,
+    )
+
+    html += (
+        '<p style="margin:0 0 16px;">'
+        '<a href="http://127.0.0.1:8000/jarvis.html" '
+        'style="background:#334155;color:white;text-decoration:none;'
+        'padding:10px 14px;border-radius:7px;font-weight:bold;'
+        'display:inline-block;">Jarvis</a></p>'
     )
 
     html += system_connectivity_panel_html(drift, m4)
@@ -7702,7 +7975,7 @@ __OPENCLAW_SHARED_NAVIGATION__
     if m4["connected"]:
         html += f"""
         <div class='panel'>
-            <h2>🧠 Intel Mini → M4 Model Server</h2>
+            <h2>🧠 Intel Mini Model Server</h2>
             <div class='status-box'>
                 <b>Status:</b> <span style='color:#7CFC00;'>Connected</span><br><br>
                 <b>Endpoint:</b> {m4["endpoint"]}<br><br>
@@ -7715,7 +7988,7 @@ __OPENCLAW_SHARED_NAVIGATION__
     else:
         html += f"""
         <div class='panel'>
-            <h2>🧠 Intel Mini → M4 Model Server</h2>
+            <h2>🧠 Intel Mini Model Server</h2>
             <div class='warning-box'>
                 <b>Status:</b> Offline<br><br>
                 <b>Endpoint:</b> {m4["endpoint"]}<br><br>
@@ -7724,7 +7997,7 @@ __OPENCLAW_SHARED_NAVIGATION__
         </div>
         """
 
-    html += m4_ai_health_panel_html(m4, omlx)
+    html += m4_ai_health_panel_html(m4, omlx, llama_cpp)
     html += ai_routing_telemetry_panel_html(
         installed_model_names=m4.get("model_names", []),
     )
@@ -7747,6 +8020,7 @@ __OPENCLAW_SHARED_NAVIGATION__
     html += f"""
     <div class='panel'>
         <h2>Trend Charts</h2>
+        <p>The legend names the machine. Intel Mini and M4 share a chart when the units match. Memory is GiB used. Disk is percent full: Intel Mini internal, Intel Mini external, and M4. The DEV virtual machine disk is on the external drive, so it shows on that line and does not jump the internal disk. CPU is the M4 only, because the Intel Mini samples do not include CPU.</p>
         <form method='get' action='/' onsubmit="
 document.getElementById('refreshMsg').innerHTML='Collecting fresh sample and refreshing charts...';
 document.getElementById('refreshBtn').disabled=true;
@@ -7804,10 +8078,23 @@ Trend file checked:
     ram = run_command("free -h | awk '/Mem:/ {print $3 \" / \" $2}'")
     disk = run_command("df -h / | awk 'NR==2 {print $3 \" / \" $2 \" (\" $5 \")\"}'")
     docker = run_command("docker ps -q | wc -l")
+    if Path("/mnt/ai-storage").is_mount():
+        live_monitor_title = "Live Resource Monitor — Intel Mini"
+        live_monitor_note = (
+            "These numbers are the Intel Mini host. "
+            "They are not the DEV virtual machine and not the M4."
+        )
+    else:
+        live_monitor_title = "Live Resource Monitor — DEV virtual machine"
+        live_monitor_note = (
+            "These numbers are the DEV guest running on the Intel Mini. "
+            "They are not the Intel Mini host and not the M4."
+        )
 
     html += f"""
 <div class="panel">
-<h2>Live Resource Monitor</h2>
+<h2>{live_monitor_title}</h2>
+<p>{live_monitor_note}</p>
 <div class="output">CPU Usage:
 {cpu}% used
 

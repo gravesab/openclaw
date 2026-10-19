@@ -1,0 +1,4 @@
+module GTMSessionFetcherCore {
+umbrella "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/gtm-session-fetcher/Sources/Core/Public"
+export *
+}

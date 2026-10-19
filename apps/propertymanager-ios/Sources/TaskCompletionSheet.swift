@@ -129,6 +129,7 @@ struct TaskCompletionSheet: View {
                 Section("Note") {
                     TextField("Completion note (optional)", text: $note, axis: .vertical)
                         .lineLimit(2...5)
+                        .appleIntelligenceDictation($note)
                 }
 
                 if let localError {
@@ -192,6 +193,7 @@ struct TaskCompletionSheet: View {
                     if !confirmedCurrent {
                         TextField("Enter current reading (0 = no change)", text: $meterValue)
                             .keyboardType(.decimalPad)
+                            .appleIntelligenceDictation($meterValue)
                     }
                     Text("Required. Enter the reading shown on the equipment, or 0 if it has not changed.")
                         .font(.caption)

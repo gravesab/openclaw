@@ -118,6 +118,7 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LivestockEnvironment: DEV
         NSLocalNetworkUsageDescription: Livestock DEV reads and saves animals on this Mac.
+        NSCameraUsageDescription: Livestock DEV reads barcodes and product names on the package. That reading stays on this device.
         NSMicrophoneUsageDescription: Livestock DEV uses the microphone so you can dictate into text fields. Speech stays on this device.
         NSSpeechRecognitionUsageDescription: Livestock DEV converts speech to text on this device for text fields.
         NSAppTransportSecurity:
@@ -158,6 +159,7 @@ targets:
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         LivestockEnvironment: PROD
         NSLocalNetworkUsageDescription: Livestock reads and saves animals on this Mac.
+        NSCameraUsageDescription: Livestock reads barcodes and product names on the package. That reading stays on this device.
         NSMicrophoneUsageDescription: Livestock uses the microphone so you can dictate into text fields. Speech stays on this device.
         NSSpeechRecognitionUsageDescription: Livestock converts speech to text on this device for text fields.
         NSAppTransportSecurity:

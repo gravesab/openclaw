@@ -329,3 +329,37 @@ def open_session(
         environment=environment,
         correlation_id=principal.correlation_id,
     )
+
+
+def open_session_from_store(
+    *,
+    principal: VerifiedPrincipal,
+    users: Iterable[User],
+    memberships: Iterable[TenantMembership],
+    environment: str,
+    requested_tenant_id: str | None = None,
+    now: datetime | None = None,
+) -> TenantContext:
+    """Open the one ranch session from the server membership snapshot.
+
+    Finds the one active user bound to the verified principal and passes
+    only that user's memberships to :func:`open_session`. ``users`` and
+    ``memberships`` are server-loaded rows, never client input: there is no
+    parameter for a caller-supplied membership list, so a client-style list
+    naming another ranch cannot open that ranch.
+    """
+
+    mine = [user for user in users if user.principal_id == principal.id and user.status == "active"]
+    if not mine:
+        raise TenancyError("no active user for this principal", TenancyErrorCode.TENANT_NOT_AUTHORIZED)
+    if len(mine) != 1:
+        raise TenancyError("principal user is ambiguous", TenancyErrorCode.TENANT_CONTEXT_INVALID)
+    user = mine[0]
+    return open_session(
+        principal=principal,
+        user_id=user.id,
+        memberships=[m for m in memberships if m.user_id == user.id],
+        environment=environment,
+        requested_tenant_id=requested_tenant_id,
+        now=now,
+    )

@@ -1,0 +1,22 @@
+moduledependenciestarget: \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/SDKSettings.json \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/usr/include/Darwin.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/Foundation-DWZAVYZ6QSY79VBSXJ0DY6DKL.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/usr/include/DarwinFoundation1.modulemap \
+  /Library/Developer/CommandLineTools/usr/lib/clang/21/include/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreFoundation.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/IOKit.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreGraphics.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/ApplicationServices-23B79YHNN264XZXXY9I0FO80M.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreText.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/ApplicationServices.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/CoreData-5ZFH6EWPB272RS6BBLHQ71US2.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreData.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/CoreImage-47R0TPIERWPZ836KRDZV5CQPM.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/OpenGL.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreImage.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/Symbols-6CN63ANFMYL8EN05L5XGGAX67.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Symbols.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/QuartzCore-EMBQYLFKLMYKQQG7DJ8E6JTMH.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/QuartzCore.framework/Modules/module.modulemap

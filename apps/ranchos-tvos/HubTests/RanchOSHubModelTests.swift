@@ -16,10 +16,13 @@ final class RanchOSHubModelTests: XCTestCase {
         XCTAssertFalse(modules.map(\.title).contains("My Health"))
     }
 
-    func testDevelopmentFixtureMakesTheOfflineBoundaryExplicit() {
+    func testDevelopmentHubMakesThePropertyConnectionAndFixtureBoundaryExplicit() {
         XCTAssertEqual(
             RanchOSHubDashboard.developmentFixtureBanner,
-            "DEV fixture · Live tenant data is not connected")
+            "DEV · PropertyManager live; Livestock pending; Finance not connected")
+        XCTAssertEqual(
+            RanchOSRuntimeEnvironment.production.hubBanner,
+            "Production · PropertyManager live; Livestock pending; Finance not connected")
     }
 
     func testPropertyFixtureIsReadOnlyPresentationData() {
@@ -51,12 +54,28 @@ final class RanchOSHubModelTests: XCTestCase {
         XCTAssertEqual(fixture.summaries.map(\.status), [.careDue, .current, .review])
     }
 
-    func testFinanceFixtureIsReadOnlyPresentationData() {
-        let fixture = RanchOSFinanceDashboard.developmentFixture
+    func testFinanceScreenIsADisconnectedReportSummary() {
+        let dashboard = RanchOSFinanceDashboard.developmentFixture
 
-        XCTAssertEqual(fixture.ranchName, "Ranch OS DEV")
-        XCTAssertEqual(fixture.summaries.map(\.id), ["monthly-view", "household-ranch", "upcoming-bills"])
-        XCTAssertEqual(fixture.summaries.map(\.status), [.ready, .review, .upcoming])
+        XCTAssertEqual(dashboard.ranchName, "Ranch OS DEV")
+        XCTAssertTrue(dashboard.summaries.isEmpty)
+        XCTAssertEqual(RanchOSModule.finance.detail, "Report summary from the Finance application")
+        XCTAssertEqual(RanchOSFinanceDashboard.disconnectedCardLabel, "Report summary · not connected")
+        XCTAssertTrue(RanchOSFinanceDashboard.disconnectedBanner.contains("not connected"))
+        XCTAssertTrue(RanchOSFinanceDashboard.disconnectedBanner.contains("No finance data is loaded here."))
+    }
+
+    func testBuildInfoDisplayAlwaysShowsDevVersionAndBuild() {
+        let display = RanchOSBuildInfo.display
+
+        XCTAssertEqual(RanchOSBuildInfo.productName, "RanchOS DEV")
+        XCTAssertEqual(RanchOSBuildInfo.environmentName, "DEV")
+        XCTAssertTrue(display.hasPrefix("RanchOS DEV · Version "), display)
+        XCTAssertTrue(display.contains(" · Build "), display)
+        XCTAssertEqual(RanchOSBuildInfo.versionAndBuild, "Version \(RanchOSBuildInfo.version) · Build \(RanchOSBuildInfo.build)")
+        XCTAssertTrue(RanchOSBuildInfo.accessibilityLabel.contains("development"))
+        XCTAssertTrue(RanchOSBuildInfo.accessibilityLabel.contains("Version"))
+        XCTAssertTrue(RanchOSBuildInfo.accessibilityLabel.contains("Build"))
     }
 
     func testCompiledModuleHostSelectsOnlyTheApprovedFixtureModules() {

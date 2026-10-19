@@ -48,6 +48,13 @@ targets:
     platform: iOS
     sources:
       - path: HubSources
+        excludes:
+          - ModelRouter.swift
+          - RanchBrainClient.swift
+          - RanchBrainFacts.swift
+          - RanchOSJarvisStore.swift
+          - RanchOSJarvisLivestock.swift
+          - RanchOSJarvisSessionProvider.swift
     info:
       path: HubSources/RanchOSiOS-Info.plist
       properties:
@@ -62,6 +69,17 @@ targets:
           - UIInterfaceOrientationPortraitUpsideDown
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            100.85.188.74:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            100.85.36.72:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            intelmini.local:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.dev
@@ -75,11 +93,33 @@ targets:
     platform: macOS
     sources:
       - path: HubSources
+        excludes:
+          - ModelRouter.swift
+          - RanchBrainClient.swift
+          - RanchBrainFacts.swift
+          - RanchOSJarvisStore.swift
+          - RanchOSJarvisLivestock.swift
+          - RanchOSJarvisSessionProvider.swift
+    info:
+      path: HubSources/RanchOSMac-Info.plist
+      properties:
+        CFBundleDisplayName: RanchOS DEV
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            100.85.188.74:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            100.85.36.72:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            intelmini.local:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.macos.dev
         PRODUCT_NAME: RanchOS
-        GENERATE_INFOPLIST_FILE: YES
+        GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         MACOSX_DEPLOYMENT_TARGET: "15.0"
   RanchOSTV:
@@ -87,11 +127,38 @@ targets:
     platform: tvOS
     sources:
       - path: HubSources
+        excludes:
+          - RanchOSLivestockBrowserView.swift
+          - ModelRouter.swift
+          - RanchBrainClient.swift
+          - RanchBrainFacts.swift
+          - RanchOSJarvisStore.swift
+          - RanchOSJarvisLivestock.swift
+          - RanchOSJarvisSessionProvider.swift
+    info:
+      path: HubSources/RanchOSTV-Info.plist
+      properties:
+        CFBundleDisplayName: RanchOS DEV
+        NSLocalNetworkUsageDescription: RanchOS reaches PropertyManager on this home network for DEV and Production live data.
+        NSAppTransportSecurity:
+          NSExceptionDomains:
+            100.85.188.74:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            100.85.36.72:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            andrew-m4-pro.local:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            intelmini.local:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.tv.dev
         PRODUCT_NAME: RanchOS
-        GENERATE_INFOPLIST_FILE: YES
+        GENERATE_INFOPLIST_FILE: NO
         ASSETCATALOG_COMPILER_APPICON_NAME: TVAppIcon
         TARGETED_DEVICE_FAMILY: "3"
         TVOS_DEPLOYMENT_TARGET: "18.0"
@@ -101,7 +168,19 @@ targets:
     sources:
       - path: HubTests
       - path: HubSources/RanchOSHubModel.swift
+      - path: HubSources/RanchOSRuntimeEnvironment.swift
+      - path: HubSources/RanchOSLivestockConnection.swift
+      - path: HubSources/RanchOSLivestockStore.swift
+      - path: HubSources/RanchOSLivestockBrowserModel.swift
+      - path: HubSources/RanchOSPropertyLiveStore.swift
+      - path: HubSources/RanchOSForecastStore.swift
+      - path: HubSources/RanchOSJarvisStore.swift
+      - path: HubSources/RanchOSJarvisLivestock.swift
+      - path: HubSources/ModelRouter.swift
+      - path: HubSources/RanchBrainClient.swift
+      - path: HubSources/RanchBrainFacts.swift
       - path: HubSources/RanchOSFinanceImportResult.swift
+      - path: HubSources/RanchOSJarvisSessionProvider.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests

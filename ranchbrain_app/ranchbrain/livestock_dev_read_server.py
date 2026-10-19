@@ -1,9 +1,10 @@
 """Loopback-only Livestock DEV read server for a local app test.
 
-GET /api/ranchos/livestock/v1/animals is the only route. The process binds
+GET /api/ranchos/livestock/v1/animals serves the Livestock DEV app.
+GET /api/ranchos/livestock/v1/herd prepares the RanchOS TV/iPhone summary
+from DEV Postgres. Apple clients do not open the database. The process binds
 127.0.0.1, writes a mode-0600 ticket outside the repo, and does not print
-the token. It does not accept writes, open PostgreSQL, or listen on any
-other address.
+the token.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from ranchbrain.livestock_read_api import (
     LivestockProvenanceV1,
     LivestockReadResponseV1,
     LiveLifecycleStatus,
+    herd_summary_payload,
 )
 from ranchbrain.tenancy import (
     Role,
@@ -42,6 +44,7 @@ DEV_SESSION_HOURS = 18
 # One address so a restart does not force a new ticket or a new iPhone copy.
 DEV_LOOPBACK_PORT = 18761
 ANIMALS_PATH = f"{API_PREFIX}/animals"
+HERD_PATH = f"{API_PREFIX}/herd"
 TENANT_ID = "tenant-a"
 TENANT_NAME = "North Ranch"
 PRINCIPAL_ID = "dev-read-principal"
@@ -132,6 +135,15 @@ class _FixedPrincipalContract:
             requested_tenant_id=requested_tenant_id,
             method="GET",
             path=ANIMALS_PATH,
+            now=self._now,
+        )
+
+    def read_herd(self, requested_tenant_id: str) -> LivestockReadResponseV1:
+        return self._contract.execute(
+            principal=self._principal,
+            requested_tenant_id=requested_tenant_id,
+            method="GET",
+            path=HERD_PATH,
             now=self._now,
         )
 
@@ -240,24 +252,27 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(405, {"error": "livestock DEV read allows GET only"}, allow="GET")
 
     def _read(self) -> None:
-        server: LivestockDevReadServer = self.server  # type: ignore[assignment]
         path = self.path.split("?", 1)[0]
-        if path != ANIMALS_PATH:
+        if path not in (ANIMALS_PATH, HERD_PATH):
             self._send(404, {"error": "not found"})
             return
-        presented = _bearer(self.headers.get("Authorization"))
-        if not presented or not hmac.compare_digest(presented, server.token):
-            self._send(401, {"error": "unauthorized"})
+        server = self._authorized()
+        if server is None:
             return
         tenant = (self.headers.get("X-RanchOS-Tenant") or "").strip()
-        if tenant != TENANT_ID:
-            self._send(403, {"error": "tenant selection was not authorized"})
-            return
         try:
-            if server.records is None:
+            if path == HERD_PATH:
+                if server.records is None:
+                    payload = response_payload(server.contract.read_herd(tenant))
+                else:
+                    payload = herd_summary_payload(server.records.hub_dashboard(TENANT_NAME))
+            elif server.records is None:
                 payload = response_payload(server.contract.read_animals(tenant))
             else:
                 payload = envelope(server.records.animals(), server.records.herds())
+        except LivestockPostgresError as error:
+            self._send(503, {"error": str(error)})
+            return
         except Exception:
             self._send(403, {"error": "livestock read was not authorized"})
             return
@@ -344,6 +359,7 @@ class _Handler(BaseHTTPRequestHandler):
                         item_name=str(body.get("item_name", "")),
                         item_kind=str(body.get("item_kind", "")),
                         herd_id=herd_id,
+                        dosage=str(body.get("dosage", "")),
                     )
                 elif action == "care" and len(parts) == len(prefix) + 6 and parts[-1] == "correct":
                     event_id = server.records.correct_care(
@@ -357,6 +373,7 @@ class _Handler(BaseHTTPRequestHandler):
                         str(body.get("cost_id", "")),
                         str(body.get("cost_amount", "")),
                         herd_id,
+                        dosage=str(body.get("dosage", "")),
                     )
                 elif action == "consumption" and len(parts) == len(prefix) + 4:
                     observed_at = str(body.get("observed_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
@@ -446,6 +463,13 @@ class _Handler(BaseHTTPRequestHandler):
                     str(body.get("production_type_code", "")),
                     str(body.get("breed_code", "")),
                 )
+            elif action == "breeding" and len(parts) == len(prefix) + 2:
+                server.records.update_breeding(
+                    animal_id,
+                    str(body.get("sire_animal_id", "")),
+                    str(body.get("dam_animal_id", "")),
+                    str(body.get("bred_with_animal_id", "")),
+                )
             elif action == "lifecycle" and len(parts) == len(prefix) + 2:
                 occurred_at = str(body.get("occurred_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
                 event_id = server.records.record_lifecycle(
@@ -476,6 +500,7 @@ class _Handler(BaseHTTPRequestHandler):
                     str(body.get("item_kind", "")),
                     str(body.get("cost_id", "")),
                     str(body.get("cost_amount", "")),
+                    dosage=str(body.get("dosage", "")),
                 )
             elif action == "consumption" and len(parts) == len(prefix) + 4 and parts[-1] == "correct":
                 event_id = server.records.correct_consumption(
@@ -509,6 +534,7 @@ class _Handler(BaseHTTPRequestHandler):
                     body.get("confirmed") is True,
                     str(body.get("item_name", "")),
                     str(body.get("item_kind", "")),
+                    dosage=str(body.get("dosage", "")),
                 )
             elif action == "consumption" and len(parts) == len(prefix) + 2:
                 observed_at = str(body.get("observed_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))

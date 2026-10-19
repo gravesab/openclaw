@@ -1,0 +1,9 @@
+[Unit]
+Description=Collect system health without AI
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=OPENCLAW_HEALTH_ENV=prod
+ExecStart=/usr/bin/python3 %h/bin/system_health.py
+TimeoutStartSec=60

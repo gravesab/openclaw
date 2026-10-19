@@ -31,6 +31,7 @@ from ..identity_oidc import (
 from ..memory_store import list_memories
 from ..profile_manager import PROFILES
 from ..search_engine import search as index_search
+from ..sso_login import login
 from ..tenancy import (
     Capability,
     TenancyError,
@@ -38,9 +39,12 @@ from ..tenancy import (
     TenantContext,
     TenantContextResolver,
     VerifiedPrincipal,
+    open_session_from_store,
+    require_capability,
 )
 from .membership import MembershipStore, MembershipStoreError
 from .rate_limit import RateLimiter
+from .sessions import SESSION_PREFIX, MemorySessionStore, SessionStore
 
 log = logging.getLogger("ranchbrain.api")
 
@@ -65,6 +69,7 @@ class ServiceConfig:
     oidc: OidcConfiguration
     verifier: TokenSignatureVerifier
     memberships: MembershipStore
+    sessions: SessionStore | None = None
     host: str = "127.0.0.1"
     port: int = 5063
     search_per_minute: int = 60
@@ -84,6 +89,7 @@ class _State:
     def __init__(self, config: ServiceConfig, time_fn=None) -> None:
         self.config = config
         self.adapter = GoogleOidcIdentityAdapter(config.oidc, config.verifier)
+        self.sessions = config.sessions or MemorySessionStore()
         self.limiter = RateLimiter(
             search_per_minute=config.search_per_minute,
             memory_per_minute=config.memory_per_minute,
@@ -153,15 +159,21 @@ class _Handler(BaseHTTPRequestHandler):
         self._handle("GET")
 
     def do_POST(self):  # noqa: N802
+        if urlparse(self.path).path == "/v1/session":
+            self._issue_session()
+            return
+        self._method_not_allowed()
+
+    def _method_not_allowed(self) -> None:
         self._respond(405, {"code": "method_not_allowed", "message": "GET only",
                             "request_id": self._request_id()}, "memory", "",
                         extra={"Allow": "GET"})
 
-    do_PUT = do_POST
-    do_DELETE = do_POST
-    do_PATCH = do_POST
-    do_HEAD = do_POST
-    do_OPTIONS = do_POST
+    do_PUT = _method_not_allowed
+    do_DELETE = _method_not_allowed
+    do_PATCH = _method_not_allowed
+    do_HEAD = _method_not_allowed
+    do_OPTIONS = _method_not_allowed
 
     def log_message(self, format, *args):  # noqa: N802
         # The stdlib line carries the request path, which embeds search
@@ -185,8 +197,14 @@ class _Handler(BaseHTTPRequestHandler):
             if route is None:
                 raise _HttpError(404, "not_found", "unknown endpoint")
             kind, args = route
-            principal = self._authenticate()
-            tenant_id = self._requested_tenant()
+            principal, session_tenant_id = self._authenticate()
+            if session_tenant_id is not None:
+                # A session Bearer [REDACTED] its ranch: a missing or blank
+                # header reads it, a matching header reads the same ranch,
+                # and any other header already failed 404 in _authenticate.
+                tenant_id = session_tenant_id
+            else:
+                tenant_id = self._requested_tenant()
             tenant_echo = tenant_id
             self._resolve(principal, tenant_id)
             allowed, remaining, reset, limit = self.state.limiter.check(tenant_id, bucket)
@@ -235,13 +253,27 @@ class _Handler(BaseHTTPRequestHandler):
 
     # -- stages -------------------------------------------------------
 
-    def _authenticate(self) -> VerifiedPrincipal:
+    def _bearer(self) -> str | None:
         header = self.headers.get("Authorization", "")
         scheme, _, token = header.partition(" ")
         if scheme != "Bearer" or not token.strip():
+            return None
+        return token.strip()
+
+    def _authenticate(self) -> tuple[VerifiedPrincipal, str | None]:
+        token = self._bearer()
+        if token is None:
             raise _HttpError(401, "oidc_missing", "Bearer OIDC token required")
+        if token.startswith(SESSION_PREFIX):
+            session = self.state.sessions.get(token)
+            if session is None:
+                raise _HttpError(401, "session_invalid", "session expired or unknown")
+            requested = self.headers.get("X-Ranch-Tenant", "").strip()
+            if requested and requested != session.tenant_id:
+                raise _HttpError(404, "memory_not_found", "no such memory")
+            return session.principal, session.tenant_id
         try:
-            return self.state.adapter.verify(token.strip())
+            return self.state.adapter.verify(token), None
         except TenancyError as error:
             # Adapter messages are safe (no token, no claims echoed).
             raise _HttpError(401, "oidc_invalid", str(error)) from error
@@ -254,11 +286,21 @@ class _Handler(BaseHTTPRequestHandler):
         return tenant
 
     def _resolve(self, principal: VerifiedPrincipal, tenant_id: str) -> TenantContext:
-        users, tenants, memberships = self.state.config.memberships.snapshot()
-        resolver = TenantContextResolver(
-            environment=self.state.config.oidc.environment,
-            users=users, tenants=tenants, memberships=memberships)
+        store = self.state.config.memberships
         try:
+            if hasattr(store, "resolve_principal"):
+                subject = principal.id.removeprefix("google-oidc:")
+                return store.resolve_principal(
+                    issuer=self.state.config.oidc.issuer,
+                    subject=subject,
+                    tenant_id=tenant_id,
+                    principal=principal,
+                    capability=Capability.MEMORY_READ,
+                )
+            users, tenants, memberships = store.snapshot()
+            resolver = TenantContextResolver(
+                environment=self.state.config.oidc.environment,
+                users=users, tenants=tenants, memberships=memberships)
             return resolver.resolve(principal=principal,
                                     requested_tenant_id=tenant_id,
                                     capability=Capability.MEMORY_READ)
@@ -270,6 +312,120 @@ class _Handler(BaseHTTPRequestHandler):
                 raise _HttpError(403, error.code.value,
                                  "membership lacks memory.read") from error
             raise _HttpError(400, error.code.value, str(error)) from error
+
+    def _issue_session(self) -> None:
+        request_id = self._request_id()
+        tenant_echo = ""
+        try:
+            token = self._bearer()
+            if token is None:
+                raise _HttpError(401, "oidc_missing", "Bearer OIDC token required")
+            if token.startswith(SESSION_PREFIX):
+                raise _HttpError(401, "oidc_invalid", "session issue requires a fresh Google token")
+            try:
+                principal = self.state.adapter.verify(token)
+            except TenancyError as error:
+                raise _HttpError(401, "oidc_invalid", str(error)) from error
+            hint = self.headers.get("X-Ranch-Tenant", "").strip() or None
+            store = self.state.config.memberships
+            if hasattr(store, "memberships_for_principal"):
+                # Postgres request path: the runtime role can EXECUTE the
+                # principal-memberships function but has no table SELECT, so
+                # the session route must never call snapshot() on this store.
+                subject = principal.id.removeprefix("google-oidc:")
+                users, tenants, memberships = store.memberships_for_principal(
+                    issuer=self.state.config.oidc.issuer,
+                    subject=subject,
+                    principal_id=principal.id,
+                )
+            else:
+                users, tenants, memberships = store.snapshot()
+            # A ranch whose status is not active authorizes nothing: drop
+            # its memberships before resolution, on both stores. A ranch
+            # missing from the tenants data counts as not active.
+            active_ranches = {tenant.id for tenant in tenants if tenant.status == "active"}
+            memberships = [m for m in memberships if m.tenant_id in active_ranches]
+            # The ranch comes from membership, never from the header: resolve
+            # first (pure, issues nothing), gate on memory.read exactly as
+            # _resolve does, and charge the resolved ranch's quota — all
+            # before login() is allowed to issue.
+            context = open_session_from_store(
+                principal=principal,
+                users=users,
+                memberships=memberships,
+                environment=self.state.config.oidc.environment,
+                requested_tenant_id=hint,
+            )
+            require_capability(context, Capability.MEMORY_READ)
+            tenant_id = context.tenant_id
+            tenant_echo = tenant_id
+            allowed, remaining, reset, limit = self.state.limiter.check(tenant_id, "memory")
+            if not allowed:
+                raise _HttpError(429, "rate_limited",
+                                 "per-tenant quota exceeded; retry shortly",
+                                 retry_after=reset)
+            session, _ = login(
+                principal=principal,
+                users=users,
+                memberships=memberships,
+                environment=self.state.config.oidc.environment,
+                store=self.state.sessions,
+                requested_tenant_id=hint,
+            )
+            if session.tenant_id != tenant_id:
+                # The store disagreed with the resolved ranch: fail closed
+                # through the shared mapping, which never reports the
+                # store's ranch.
+                raise TenancyError(
+                    "session store returned a different ranch",
+                    TenancyErrorCode.TENANT_NOT_AUTHORIZED,
+                )
+            self._respond(200, {
+                "token": session.token,
+                "expires_at": session.expires_at.isoformat(),
+                "tenant_id": tenant_id,
+            }, "memory", tenant_echo, request_id, remaining=remaining, reset=reset, limit=limit)
+            log.info("ok route=session tenant=%s request=%s", tenant_id, request_id)
+        except _HttpError as error:
+            remaining, reset, limit = self.state.limiter.peek(tenant_echo, "memory")
+            self._respond(error.status,
+                          {"code": error.code, "message": error.message,
+                           "request_id": request_id},
+                          "memory", tenant_echo, request_id,
+                          remaining=remaining, reset=reset, limit=limit,
+                          retry_after=error.retry_after)
+        except TenancyError as error:
+            # Same verdicts as _resolve: not-a-member is 403, a missing
+            # ranch choice or stale principal is 400, a role without
+            # memory.read is 403. Reached only before any issue call.
+            if error.code == TenancyErrorCode.TENANT_NOT_AUTHORIZED:
+                status, message = 403, "no active membership in this tenant"
+            elif error.code == TenancyErrorCode.CAPABILITY_FORBIDDEN:
+                status, message = 403, "membership lacks memory.read"
+            else:
+                status, message = 400, str(error)
+            remaining, reset, limit = self.state.limiter.peek(tenant_echo, "memory")
+            self._respond(status,
+                          {"code": error.code.value, "message": message,
+                           "request_id": request_id},
+                          "memory", tenant_echo, request_id,
+                          remaining=remaining, reset=reset, limit=limit)
+        except MembershipStoreError as error:
+            log.warning("membership store down request=%s err=%s", request_id, error)
+            remaining, reset, limit = self.state.limiter.peek(tenant_echo, "memory")
+            self._respond(503, {"code": "store_unavailable",
+                                "message": "membership store unavailable; retry shortly",
+                                "request_id": request_id},
+                          "memory", tenant_echo, request_id,
+                          remaining=remaining, reset=reset, limit=limit,
+                          retry_after=STORE_RETRY_AFTER_SECONDS)
+        except Exception:
+            log.exception("unexpected failure request=%s", request_id)
+            remaining, reset, limit = self.state.limiter.peek(tenant_echo, "memory")
+            self._respond(500, {"code": "internal", "message": "unexpected failure",
+                                "request_id": request_id},
+                          "memory", tenant_echo, request_id,
+                          remaining=remaining, reset=reset, limit=limit)
 
     # -- endpoints ----------------------------------------------------
 
@@ -415,12 +571,67 @@ def create_server(config: ServiceConfig, *, time_fn=None) -> ThreadingHTTPServer
     return _Server((config.host, config.port), BoundHandler, state)
 
 
+def _database_connect():
+    # Imported here so the read API imports on machines without the DB driver.
+    import os
+    import psycopg2
+
+    return psycopg2.connect(
+        host=os.environ["RANCHBRAIN_DB_HOST"],
+        port=os.environ["RANCHBRAIN_DB_PORT"],
+        dbname=os.environ["RANCHBRAIN_DB_NAME"],
+        user=os.environ["RANCHBRAIN_DB_USER"],
+        password=os.environ["RANCHBRAIN_DB_PASSWORD"],
+    )
+
+
 def main() -> int:
-    """Manual DEV entry point. Always fails closed until a verifier exists."""
-    print("No TokenSignatureVerifier is configured in this build: refusing to start. "
-          "Wire a JOSE-backed verifier (crypto dependency pending approval) and retry.",
-          file=sys.stderr, flush=True)
-    return 2
+    """DEV entry point. Refuses to listen unless audience, certs, and DB env are set.
+
+    There is no fake-verify path. Certificates are Google's published keys,
+    loaded once at start.
+    """
+    import os
+
+    audience = os.environ.get("RANCHBRAIN_OIDC_AUDIENCE", "").strip()
+    if not audience:
+        print("RANCHBRAIN_OIDC_AUDIENCE is not set: refusing to start.", file=sys.stderr, flush=True)
+        return 2
+    try:
+        # Lazy so a missing google-auth fails process start, not import of the read API.
+        from ..identity_google_auth import GoogleAuthTokenVerifier, fetch_google_certs, require_google_auth
+        require_google_auth()
+        verifier = GoogleAuthTokenVerifier(certs=fetch_google_certs(), audience=audience)
+    except Exception as error:
+        print(f"OIDC verifier is not available: {error}. Refusing to start.", file=sys.stderr, flush=True)
+        return 2
+    try:
+        from .membership import PostgresMembershipStore
+        memberships = PostgresMembershipStore(_database_connect)
+        _database_connect().close()
+    except Exception as error:
+        print(f"membership database is not available: {type(error).__name__}. Refusing to start.",
+              file=sys.stderr, flush=True)
+        return 2
+    host = os.environ.get("RANCHBRAIN_BIND", "127.0.0.1")
+    port = int(os.environ.get("RANCHBRAIN_PORT", "5063"))
+    environment = os.environ.get("RANCHBRAIN_ENVIRONMENT", "dev")
+    config = ServiceConfig(
+        oidc=OidcConfiguration(audience=audience, environment=environment),
+        verifier=verifier,
+        memberships=memberships,
+        host=host,
+        port=port,
+    )
+    httpd = create_server(config)
+    print(f"RanchBrain P3 listening on {host}:{port}", flush=True)
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        httpd.server_close()
+    return 0
 
 
 if __name__ == "__main__":

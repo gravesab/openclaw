@@ -29,6 +29,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Livestock DEV reads barcodes and product names on the package. That reading stays on this device.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Livestock DEV reads and saves animals on this Mac.</string>
 	<key>NSMicrophoneUsageDescription</key>

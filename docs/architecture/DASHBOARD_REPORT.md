@@ -89,6 +89,11 @@ Browser → Flask (0.0.0.0:5051)
   `OPENCLAW_M4_SSH_USER`, and `OPENCLAW_M4_SSH_KEY`.
 - Remote Python collects: memory (vm_stat), Ollama process/CPU, uptime.
 - An SSH metrics failure does not mark a reachable Ollama API offline.
+- Probes llama.cpp at `OPENCLAW_LLAMA_CPP_BASE_URL` (default
+  `http://127.0.0.1:18088/v1`, the development loopback tunnel to the M4
+  llama-server on port 8088) via `/models`. The Intel Mini AI Server Health
+  card shows online or offline, response time, and loaded model ids. A
+  llama.cpp probe failure does not mark Ollama offline.
 
 ### Model Status
 
@@ -190,8 +195,9 @@ Browser → Flask (0.0.0.0:5051)
 - Inventory probes are read-only. They inspect archive metadata, mount state,
   and capacity without mounting storage in the development VM.
 - The M4 Time Machine card uses a read-only SSH probe of `tmutil status`,
-  `tmutil latestbackup`, and `tmutil destinationinfo`; it never starts or
-  changes a Time Machine backup.
+  `tmutil latestbackup`, and `tmutil destinationinfo`. When the backup list
+  is unreadable, it uses the newest Time Machine snapshot record instead. It
+  never starts or changes a Time Machine backup.
 - Time Machine is expected to back up daily. The dashboard reports healthy
   through 30 hours, warning from 30–48 hours, and critical after 48 hours.
 - **Run Verification Now** validates the latest remote archives and available

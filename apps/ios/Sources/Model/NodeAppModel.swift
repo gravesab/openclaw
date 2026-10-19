@@ -3964,6 +3964,8 @@ extension NodeAppModel {
             await self.handleAgentDeepLink(link, originalURL: url)
         case .gateway:
             break
+        case .dashboard:
+            break
         }
     }
 

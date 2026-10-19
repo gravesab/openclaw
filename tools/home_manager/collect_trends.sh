@@ -61,7 +61,7 @@ fi
 
 TS="$(date '+%Y-%m-%d %H:%M:%S')"
 
-OLLAMA_BASE_URL="${OPENCLAW_OLLAMA_BASE_URL:-http://192.168.50.117:11434}"
+OLLAMA_BASE_URL="${OPENCLAW_OLLAMA_BASE_URL:-http://127.0.0.1:11435}"
 if LATENCY_SECONDS="$(
   curl -fsS -w '%{time_total}' -o /dev/null \
     "$OLLAMA_BASE_URL/api/tags" 2>/dev/null
@@ -71,39 +71,49 @@ else
   LATENCY=""
 fi
 
-MEM_USED="$(free -g | awk '/Mem:/ {print $3}')"
-MEM_TOTAL="$(free -g | awk '/Mem:/ {print $2}')"
-DISK_USED="$(df -P / | awk 'NR==2 {gsub("%","",$5); print $5}')"
-EXTERNAL_DISK_USED=""
 EXTERNAL_MOUNT_TARGET="$(
   findmnt -n -T /mnt/ai-storage -o TARGET 2>/dev/null || true
 )"
+INTELMINI_STORAGE_HOST="${OPENCLAW_INTELMINI_STORAGE_HOST:-100.85.36.72}"
+INTELMINI_STORAGE_USER="${OPENCLAW_INTELMINI_STORAGE_USER:-gravesab}"
+INTELMINI_STORAGE_KEY="${OPENCLAW_INTELMINI_STORAGE_KEY:-$HOME/.ssh/openclaw_dev_backup_ed25519}"
+
+# free -g rounds the DEV guest's 2.2 GiB down to 2. Read mebibytes and keep one decimal.
+# On the guest, memory and both disks come from the Intel Mini host. The guest's own
+# disk is not the Mini's internal drive, and the DEV virtual machine disk is on the
+# external 4TB drive.
+read_mem_gib() {
+  free -m | awk '/Mem:/ {printf "%.1f %.1f\n", $3/1024, $2/1024}'
+}
 if [ "$EXTERNAL_MOUNT_TARGET" = "/mnt/ai-storage" ]; then
+  DISK_USED="$(df -P / | awk 'NR==2 {gsub("%","",$5); print $5}')"
   EXTERNAL_DISK_USED="$(
-    df -P /mnt/ai-storage |
-      awk 'NR==2 {gsub("%","",$5); print $5}'
+    df -P /mnt/ai-storage | awk 'NR==2 {gsub("%","",$5); print $5}'
   )"
+  MEM_LINE="$(read_mem_gib)"
 else
-  INTELMINI_STORAGE_HOST="${OPENCLAW_INTELMINI_STORAGE_HOST:-100.85.36.72}"
-  INTELMINI_STORAGE_USER="${OPENCLAW_INTELMINI_STORAGE_USER:-gravesab}"
-  INTELMINI_STORAGE_KEY="${OPENCLAW_INTELMINI_STORAGE_KEY:-$HOME/.ssh/openclaw_dev_backup_ed25519}"
-  EXTERNAL_DISK_USED="$(
+  HOST_SAMPLE="$(
     ssh -i "$INTELMINI_STORAGE_KEY" \
       -o BatchMode=yes \
       -o IdentitiesOnly=yes \
       -o StrictHostKeyChecking=yes \
       -o ConnectTimeout=5 \
       "$INTELMINI_STORAGE_USER@$INTELMINI_STORAGE_HOST" \
-      "findmnt -n -T /mnt/ai-storage -o TARGET | grep -Fx /mnt/ai-storage >/dev/null && df -P /mnt/ai-storage | awk 'NR==2 {gsub(\"%\",\"\",\$5); print \$5}'" \
+      "df -P / | awk 'NR==2 {gsub(\"%\",\"\",\$5); print \$5}'; findmnt -n -T /mnt/ai-storage -o TARGET | grep -Fx /mnt/ai-storage >/dev/null && df -P /mnt/ai-storage | awk 'NR==2 {gsub(\"%\",\"\",\$5); print \$5}' || true; free -m | awk '/Mem:/ {printf \"%.1f %.1f\\n\", \$3/1024, \$2/1024}'" \
       2>/dev/null || true
   )"
+  DISK_USED="$(printf '%s\n' "$HOST_SAMPLE" | sed -n '1p')"
+  EXTERNAL_DISK_USED="$(printf '%s\n' "$HOST_SAMPLE" | sed -n '2p')"
+  MEM_LINE="$(printf '%s\n' "$HOST_SAMPLE" | sed -n '3p')"
 fi
+MEM_USED="$(echo "$MEM_LINE" | awk '{print $1}')"
+MEM_TOTAL="$(echo "$MEM_LINE" | awk '{print $2}')"
 
 M4_JSON="$(
 ssh -i "$HOME/.ssh/id_ed25519_openclaw_m4" \
   -o BatchMode=yes \
   -o ConnectTimeout=5 \
-  "${OPENCLAW_M4_SSH_USER:-andrewgraves}@${OPENCLAW_M4_SSH_HOST:-192.168.50.117}" \
+  "${OPENCLAW_M4_SSH_USER:-andrewgraves}@${OPENCLAW_M4_SSH_HOST:-100.104.100.96}" \
   "~/openclaw-m4-monitor/m4-health.sh" 2>/dev/null || true
 )"
 

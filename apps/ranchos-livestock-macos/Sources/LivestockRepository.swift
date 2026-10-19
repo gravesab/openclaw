@@ -126,7 +126,7 @@ enum LivestockReadSession: Equatable, Sendable {
         let stamp = LivestockBuildStamp.current
         switch self {
         case .readOnly:
-            return "These animals are stored in the \(stamp.databaseLabel). Tags, lifecycle, care, feed, and cost can be saved. Species, production type, and breed stay as recorded."
+            return "These animals are stored in the \(stamp.databaseLabel). Livestock stays connected while it is open. Tags, lifecycle, care, feed, and cost can be saved. Species, production type, and breed stay as recorded."
         case .fixture:
             return "Juniper and Cedar can be edited here. Changes stay on this screen until you quit."
         case .unavailable, .cancelled:
@@ -192,7 +192,8 @@ struct LivestockReadConnection: Sendable {
             return (.cancelled, [])
         } catch {
             if Task.isCancelled { return (.cancelled, []) }
-            return (.unavailable(Self.unavailableMessage), [])
+            let message = (error as? LocalizedError)?.errorDescription?.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (.unavailable(message?.isEmpty == false ? message! : Self.unavailableMessage), [])
         }
     }
 }
@@ -204,6 +205,7 @@ struct LivestockReadConnection: Sendable {
     private var connection: LivestockReadConnection
     let fixtureWriteRole: LivestockFixtureWriteRole
     var liveRecords: LivestockDevLoopbackRead?
+    var isReconnecting = false
     var session: LivestockReadSession = .unavailable(LivestockReadConnection.unavailableMessage)
     var overview: HerdOverview?
     var animals: [Animal] = []
@@ -212,6 +214,7 @@ struct LivestockReadConnection: Sendable {
     var animalsState: FixtureLoadState = .loading
     var selectedAnimalID: Animal.ID?
     var saveNotice: LivestockSaveNotice?
+    var connectionHoldMessage: String?
     private var createInFlight = false
 
     init(
@@ -260,7 +263,18 @@ struct LivestockReadConnection: Sendable {
 
     /// Reloads the on-disk ticket and asks the DEV server again. Does not open the sample session.
     func reconnectToDev(fileURL: URL? = nil) async {
+        let holding = session.isLive
+        if !holding {
+            isReconnecting = true
+            overviewState = .loading
+            animalsState = .loading
+        }
+        defer { isReconnecting = false }
         guard let ticket = LivestockDevLoopbackRead.load(fileURL: fileURL ?? LivestockDevLoopbackRead.ticketURL()) else {
+            if holding, liveRecords != nil {
+                await loadAuthorizedRead(keeping: selectedAnimalID)
+                return
+            }
             liveRecords = nil
             connection = LivestockReadConnection()
             session = .unavailable(LivestockReadConnection.endedMessage)
@@ -270,18 +284,39 @@ struct LivestockReadConnection: Sendable {
             overviewState = .error(message: LivestockReadConnection.endedMessage)
             animalsState = .error(message: LivestockReadConnection.endedMessage)
             selectedAnimalID = nil
+            connectionHoldMessage = nil
             return
         }
         liveRecords = ticket
         connection = LivestockReadConnection(authorizedProvider: ticket)
+        await loadAuthorizedRead(keeping: holding ? selectedAnimalID : nil)
+    }
+
+    /// Connects on launch and keeps retrying while Livestock stays open.
+    func holdConnectionWhileOpen() async {
         await loadAuthorizedRead()
+        while !Task.isCancelled {
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            if Task.isCancelled { return }
+            if session.isLive { continue }
+            if LivestockDevLoopbackRead.load() != nil || liveRecords != nil {
+                await reconnectToDev()
+            }
+        }
     }
 
     func loadAuthorizedRead(keeping selection: Animal.ID? = nil) async {
+        let holding = session.isLive
+        let keptAnimals = animals
+        let keptSession = session
+        let keptHerds = herds
+        let keptOverview = overview
+        let keptSelected = selectedAnimalID
         let (resolved, loadedHerds) = await connection.resolveLoaded()
-        session = resolved
         switch resolved {
         case .readOnly(let loadedAnimals):
+            session = resolved
+            connectionHoldMessage = nil
             herds = loadedHerds
             overview = HerdOverview.from(animals: loadedAnimals, herds: loadedHerds)
             overviewState = .loaded
@@ -293,6 +328,19 @@ struct LivestockReadConnection: Sendable {
                 selectedAnimalID = loadedAnimals.first?.id
             }
         case .unavailable, .cancelled:
+            if holding {
+                holdLiveSession(
+                    session: keptSession,
+                    animals: keptAnimals,
+                    herds: keptHerds,
+                    overview: keptOverview,
+                    selected: selection ?? keptSelected,
+                    message: resolved.banner
+                )
+                return
+            }
+            session = resolved
+            connectionHoldMessage = nil
             let message = resolved.banner
             overview = nil
             animals = []
@@ -301,6 +349,19 @@ struct LivestockReadConnection: Sendable {
             animalsState = .error(message: message)
             selectedAnimalID = nil
         case .fixture:
+            if holding {
+                holdLiveSession(
+                    session: keptSession,
+                    animals: keptAnimals,
+                    herds: keptHerds,
+                    overview: keptOverview,
+                    selected: selection ?? keptSelected,
+                    message: LivestockReadConnection.fixtureAsLiveMessage
+                )
+                return
+            }
+            session = resolved
+            connectionHoldMessage = nil
             overview = nil
             animals = []
             herds = []
@@ -308,6 +369,24 @@ struct LivestockReadConnection: Sendable {
             animalsState = .error(message: LivestockReadConnection.fixtureAsLiveMessage)
             selectedAnimalID = nil
         }
+    }
+
+    private func holdLiveSession(
+        session keptSession: LivestockReadSession,
+        animals keptAnimals: [Animal],
+        herds keptHerds: [LivestockHerd],
+        overview keptOverview: HerdOverview?,
+        selected: Animal.ID?,
+        message: String
+    ) {
+        session = keptSession
+        animals = keptAnimals
+        herds = keptHerds
+        overview = keptOverview
+        animalsState = keptAnimals.isEmpty ? animalsState : .loaded
+        if keptOverview != nil { overviewState = .loaded }
+        selectedAnimalID = selected
+        connectionHoldMessage = message
     }
 
     /// Session memory only. A fixture owner or manager can append an animal. Nothing is written to disk or a database.
@@ -687,6 +766,43 @@ struct LivestockReadConnection: Sendable {
         }
     }
 
+    func updateBreeding(animalID: Animal.ID, sireID: UUID?, damID: UUID?, bredWithID: UUID?) async -> String {
+        guard let index = animals.firstIndex(where: { $0.id == animalID }) else {
+            return "The animal was not found."
+        }
+        let current = animals[index]
+        guard current.species != .pet else {
+            return "A pet does not have a breeding record."
+        }
+        guard fixtureWriteRole.canAssignIdentifier else {
+            return FixturePresentationBoundary.viewerCannotAssignBoundary
+        }
+        if let problem = LivestockBreeding.problem(
+            animal: current,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
+            among: animals
+        ) {
+            return problem
+        }
+        if case .fixture = session {
+            animals[index] = current.replacingBreeding(sireID: sireID, damID: damID, bredWithID: bredWithID)
+            session = .fixture(animals)
+            return "Breeding saved."
+        }
+        guard let liveRecords, session.isLive else {
+            return FixturePresentationBoundary.identifierUnavailableBoundary
+        }
+        do {
+            try await liveRecords.updateBreeding(animalID: animalID, sireID: sireID, damID: damID, bredWithID: bredWithID)
+            await reloadLiveAnimal(animalID)
+            return "Breeding saved to the \(LivestockBuildStamp.current.databaseLabel)."
+        } catch {
+            return errorText(error)
+        }
+    }
+
     func renameAnimal(animalID: Animal.ID, displayName: String) async -> String {
         let cleaned = displayName.split(whereSeparator: \.isWhitespace).joined(separator: " ")
         guard !cleaned.isEmpty, cleaned.count <= 80 else { return "Display name is required." }
@@ -812,7 +928,8 @@ struct LivestockReadConnection: Sendable {
         itemName: String,
         itemKind: String,
         cost: String,
-        financeReference: String
+        financeReference: String,
+        dosage: String = ""
     ) async -> String {
         guard let liveRecords, session.isLive else {
             return "Herd care saves in the \(LivestockBuildStamp.current.databaseLabel). Connect to it first."
@@ -826,6 +943,9 @@ struct LivestockReadConnection: Sendable {
         if let problem = type.costProblem(cost) {
             return problem
         }
+        if let problem = type.dosageProblem(dosage) {
+            return problem
+        }
         do {
             let eventID = try await liveRecords.recordCare(
                 herdID: herdID,
@@ -833,7 +953,8 @@ struct LivestockReadConnection: Sendable {
                 occurredAt: occurredAt,
                 confirmed: type.needsConfirmation,
                 itemName: itemName,
-                itemKind: itemKind
+                itemKind: itemKind,
+                dosage: dosage
             )
             if LivestockMoney.nonzeroText(cost) != nil {
                 guard let eventID else {
@@ -1076,7 +1197,7 @@ struct LivestockReadConnection: Sendable {
         }
         do {
             switch correction {
-            case let .care(eventID, occurredAt, reason, itemName, itemKind, cost):
+            case let .care(eventID, occurredAt, reason, itemName, itemKind, dosage, cost):
                 try await liveRecords.correctCare(
                     animalID: animalID,
                     herdID: herdID,
@@ -1085,6 +1206,7 @@ struct LivestockReadConnection: Sendable {
                     reason: reason,
                     itemName: itemName,
                     itemKind: itemKind,
+                    dosage: dosage,
                     cost: cost
                 )
             case let .feed(consumptionID, quantity, unit, frequency, observedAt, supplier, batch, reason, cost):
@@ -1180,21 +1302,7 @@ struct LivestockReadConnection: Sendable {
     }
 
     private func reloadLiveAnimal(_ animalID: Animal.ID) async {
-        let keptAnimals = animals
-        let keptSession = session
-        let keptHerds = herds
-        let keptOverview = overview
         await loadAuthorizedRead(keeping: animalID)
-        guard case .readOnly = session else {
-            session = keptSession
-            animals = keptAnimals
-            herds = keptHerds
-            overview = keptOverview
-            animalsState = .loaded
-            if keptOverview != nil { overviewState = .loaded }
-            selectedAnimalID = animalID
-            return
-        }
         if animals.contains(where: { $0.id == animalID }) {
             selectedAnimalID = animalID
         }
@@ -1283,7 +1391,8 @@ struct LivestockReadConnection: Sendable {
                     occurredAt: draft.careAt,
                     confirmed: careType.needsConfirmation,
                     itemName: draft.careItemName,
-                    itemKind: draft.careItemKind
+                    itemKind: draft.careItemKind,
+                    dosage: draft.careDosage
                 )
                 result.savedCare = true
                 step = "\(careType.label) cost"
@@ -1467,6 +1576,7 @@ struct LivestockAnimalSaveDraft: Equatable, Sendable {
     var careAt = Date()
     var careItemName = ""
     var careItemKind = ""
+    var careDosage = ""
     var careFinanceReference = ""
     var feedLines: [LivestockFeedEntry] = [LivestockFeedEntry(inputType: .feed)]
     var feedAt = Date()
@@ -1523,8 +1633,13 @@ struct LivestockAnimalSaveDraft: Equatable, Sendable {
         if lifecycleType != nil, let problem = activityCostProblem(lifecycleCost, label: "Event cost", required: false) {
             return problem
         }
-        if let type = careType, let problem = type.costProblem(careCost) {
-            return problem
+        if let type = careType {
+            if let problem = type.costProblem(careCost) {
+                return problem
+            }
+            if let problem = type.dosageProblem(careDosage) {
+                return problem
+            }
         }
         for line in feedLines where line.hasQuantity || !line.cost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             if let problem = LivestockFeedEntry.problem(quantity: line.quantity, cost: line.cost, feed: line.inputType.label) {
@@ -1623,6 +1738,7 @@ enum LivestockRecordCorrection: Equatable, Sendable {
         reason: LivestockLifecycleCorrectionReason,
         itemName: String,
         itemKind: String,
+        dosage: String = "",
         cost: LivestockCostFix? = nil
     )
     case feed(
@@ -1640,7 +1756,7 @@ enum LivestockRecordCorrection: Equatable, Sendable {
 
     var problem: String? {
         switch self {
-        case let .care(_, _, reason, _, _, cost):
+        case let .care(_, _, reason, _, _, _, cost):
             return cost?.problem(reason: reason)
         case let .feed(_, quantity, _, _, _, _, _, reason, cost):
             guard reason != .duplicateEntry else { return cost?.problem(reason: reason) }
@@ -1866,6 +1982,10 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
     let tenantID: String
     let expiresAt: Date
 
+    static var connectedWhileOpenCaption: String {
+        "Connected while Livestock is open."
+    }
+
     static func connectedUntilCaption(
         _ expiresAt: Date,
         environment: String = LivestockBuildStamp.current.environment,
@@ -1925,11 +2045,18 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         }
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
+        request.timeoutInterval = 20
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue(tenantID, forHTTPHeaderField: "X-RanchOS-Tenant")
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await URLSession.shared.data(for: request)
+        } catch let error as URLError {
+            throw LivestockDevReadError.unavailable(Self.message(for: error))
+        }
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            throw LivestockDevReadError.unavailable("The \(LivestockBuildStamp.current.databaseLabel) did not return animals.")
+            throw LivestockDevReadError.unavailable(Self.failureMessage(from: data))
         }
         return try Self.decode(data)
     }
@@ -1967,6 +2094,30 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
     static func isLoopback(_ url: URL) -> Bool {
         guard url.scheme == "http", let host = url.host?.lowercased() else { return false }
         return host == "127.0.0.1" || host == "localhost"
+    }
+
+    static var serverNotRunningMessage: String {
+        "The \(LivestockBuildStamp.current.serverLabel) is not running, so Reconnect cannot reach the DEV database."
+    }
+
+    static func message(for error: URLError) -> String {
+        switch error.code {
+        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed, .networkConnectionLost, .notConnectedToInternet, .timedOut:
+            serverNotRunningMessage
+        default:
+            "The \(LivestockBuildStamp.current.databaseLabel) did not return animals."
+        }
+    }
+
+    static func failureMessage(from data: Data) -> String {
+        if
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let error = object["error"] as? String
+        {
+            let trimmed = error.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty { return trimmed }
+        }
+        return "The \(LivestockBuildStamp.current.databaseLabel) did not return animals."
     }
 
     /// The Mac app stays on this machine. The iPhone build may use this Mac's private address.
@@ -2029,6 +2180,9 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
             retiredAt: stamp.date(from: Self.text(row["retired_at"])),
             saleAmount: Self.text(row["sale_amount"]).isEmpty ? nil : LivestockMoney.decimal(Self.text(row["sale_amount"])),
             saleOn: Self.saleDay.date(from: Self.text(row["sale_on"])),
+            sireID: UUID(uuidString: Self.text(row["sire_animal_id"])),
+            damID: UUID(uuidString: Self.text(row["dam_animal_id"])),
+            bredWithID: UUID(uuidString: Self.text(row["bred_with_animal_id"])),
             status: "Active"
         )
     }
@@ -2087,6 +2241,17 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         )
     }
 
+    func updateBreeding(animalID: Animal.ID, sireID: UUID?, damID: UUID?, bredWithID: UUID?) async throws {
+        try await post(
+            path: "\(Self.animalsPath)/\(animalID.uuidString)/breeding",
+            body: [
+                "sire_animal_id": sireID?.uuidString ?? "",
+                "dam_animal_id": damID?.uuidString ?? "",
+                "bred_with_animal_id": bredWithID?.uuidString ?? "",
+            ]
+        )
+    }
+
     func createHerd(name: String, notes: String) async throws {
         try await post(path: "\(Self.animalsPath)/herds", body: ["name": name, "notes": notes])
     }
@@ -2131,7 +2296,8 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         occurredAt: Date,
         confirmed: Bool,
         itemName: String = "",
-        itemKind: String = ""
+        itemKind: String = "",
+        dosage: String = ""
     ) async throws -> UUID? {
         let reply = try await post(
             path: "\(Self.animalsPath)/\(try Self.ownerPath(animalID: animalID, herdID: herdID))/care",
@@ -2141,6 +2307,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 "confirmed": confirmed,
                 "item_name": itemName,
                 "item_kind": itemKind,
+                "dosage": dosage,
             ]
         )
         return (reply["event_id"] as? String).flatMap(UUID.init(uuidString:))
@@ -2246,6 +2413,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
         reason: LivestockLifecycleCorrectionReason,
         itemName: String,
         itemKind: String,
+        dosage: String = "",
         cost: LivestockCostFix? = nil
     ) async throws {
         try await post(
@@ -2256,6 +2424,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 "confirmed": true,
                 "item_name": itemName,
                 "item_kind": itemKind,
+                "dosage": dosage,
             ], cost)
         )
     }
@@ -2429,6 +2598,7 @@ struct LivestockDevLoopbackRead: LivestockAuthorizedReadProvider, Sendable {
                 occurredAt: occurredAt,
                 itemName: item["item_name"] as? String,
                 itemKind: item["item_kind"] as? String,
+                dosage: item["dosage"] as? String,
                 supersedesID: (item["supersedes_id"] as? String).flatMap(UUID.init(uuidString:)),
                 correctionReason: (item["correction_reason"] as? String).flatMap(LivestockLifecycleCorrectionReason.init(rawValue:)),
                 isCurrent: item["current"] as? Bool ?? true

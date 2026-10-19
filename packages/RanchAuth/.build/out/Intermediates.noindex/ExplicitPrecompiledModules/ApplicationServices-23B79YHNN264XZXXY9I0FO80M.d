@@ -1,0 +1,20 @@
+moduledependenciestarget: \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/SDKSettings.json \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/_DarwinFoundation1-C1F4ZTMCXA3LRAJOKA8IA8AND.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/usr/include/DarwinFoundation1.modulemap \
+  /Library/Developer/CommandLineTools/usr/lib/clang/21/include/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/CoreServices-9TFWLE6VWIFKZ85EP1J60YEOG.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/usr/include/DarwinFoundation2.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreFoundation.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreServices.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/CoreText-3L9F9QT10O7KM9LL9YVF20R23.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreGraphics.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreText.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/ColorSync-6QDACXLWBAZQKF4AP3TLJ9SV2.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/ColorSync.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/ImageIO-3FHS59EEJDQS38CHDCW1BJVJL.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/ImageIO.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/Foundation-DWZAVYZ6QSY79VBSXJ0DY6DKL.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/CUPS-C7MFHOGDQRA21UHD9QINFKA3Q.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/usr/include/cups.modulemap

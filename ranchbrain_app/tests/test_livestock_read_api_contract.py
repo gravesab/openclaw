@@ -22,6 +22,7 @@ from ranchbrain.livestock_read_api import (
     DataOrigin,
     FactFreshness,
     HubLivestockDashboardV1,
+    HubSummaryStatus,
     LivestockAnimalReadFactV1,
     LivestockAuthorizedReadContract,
     LivestockProvenanceV1,
@@ -30,6 +31,8 @@ from ranchbrain.livestock_read_api import (
     LivestockReadResponseV1,
     LiveLifecycleStatus,
     authorize_livestock_read,
+    build_hub_dashboard_from_live_records,
+    herd_summary_payload,
     require_origin_label,
 )
 from ranchbrain.tenancy import (
@@ -400,6 +403,42 @@ class LivestockReadApiContractTests(unittest.TestCase):
         with self.assertRaises(TenancyError) as override:
             self.read(MemorySource((animal("tenant-a", "animal-a", "North Cow"),)), query={"tenant_id": "tenant-b"})
         self.assertEqual(override.exception.code, TenancyErrorCode.TENANT_CONTEXT_INVALID)
+
+    def test_live_records_prepare_ranchos_requirements_without_inventing_care_due(self):
+        dashboard = build_hub_dashboard_from_live_records(
+            "North Ranch",
+            (
+                {
+                    "display_name": "Daisy",
+                    "species_code": "dairy_cow",
+                    "production_type_code": "dairy",
+                    "breed_code": "jersey",
+                    "identifiers": [{"kind": "ear_tag", "value": "DY-1"}],
+                    "care_events": [],
+                    "consumptions": [{"input_type": "hay", "current": True}],
+                },
+                {
+                    "display_name": "Aster",
+                    "retirement_reason": "sold",
+                    "identifiers": [],
+                    "care_events": [{"type": "observation", "current": True}],
+                    "consumptions": [{"input_type": "hay", "current": True}],
+                },
+            ),
+            ({"id": "herd-a", "name": "Milkers", "retired_at": None},),
+        )
+        self.assertEqual(dashboard.herd_count, 1)
+        self.assertEqual(dashboard.origin, DataOrigin.LIVE)
+        cards = {card.id: card for card in dashboard.summaries}
+        self.assertEqual(cards["herd-count"].detail, "1 current animals in 1 open herd/group")
+        self.assertEqual(cards["fact-freshness"].status, HubSummaryStatus.CURRENT)
+        self.assertEqual(cards["records-review"].status, HubSummaryStatus.REVIEW)
+        self.assertIn("no care record", cards["records-review"].detail)
+        self.assertNotIn("Care due", cards["fact-freshness"].status.value)
+        payload = herd_summary_payload(dashboard)
+        self.assertEqual(payload["operation"], "herd_summary")
+        self.assertEqual(payload["body"]["hub"]["operation"], HUB_READ_DASHBOARD_OPERATION)
+        self.assertEqual(payload["body"]["hub"]["dashboard"]["herdCount"], 1)
 
     def test_future_gates_are_not_started_and_only_herd_maps_to_read_dashboard(self):
         self.assertEqual(

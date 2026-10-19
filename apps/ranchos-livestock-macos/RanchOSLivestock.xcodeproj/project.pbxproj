@@ -8,11 +8,17 @@
 
 /* Begin PBXBuildFile section */
 		0201F71867CAC94B03AA4A64 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
+		0A1B2C3D4E5F60718293A4B5 /* LivestockProductNamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9E4A72B8D041F0A3E16B27 /* LivestockProductNamer.swift */; };
+		0B2C3D4E5F60718293A4B5C6 /* LivestockProductPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D0F5B83C9E15201B4F27C38 /* LivestockProductPicker.swift */; };
+		0C3D4E5F60718293A4B5C6D7 /* LivestockBreeding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E1F6C94DAF26312C5038D49 /* LivestockBreeding.swift */; };
 		109D1003B07CD7162FAC11BD /* AppleIntelligenceDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77858221A7265B444C32E871 /* AppleIntelligenceDictation.swift */; };
 		206D7EA2E32C614DF60056D9 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
 		260E228581B751495A16C7C0 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
 		33ECEE1751A8A518AAA2E479 /* LivestockFoundationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */; };
 		445F8030555C56724F790949 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
+		46A11C3D4E5F60718293A4B5 /* LivestockProductNamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9E4A72B8D041F0A3E16B27 /* LivestockProductNamer.swift */; };
+		47B22D4E5F60718293A4B5C6 /* LivestockProductPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D0F5B83C9E15201B4F27C38 /* LivestockProductPicker.swift */; };
+		48C33E5F60718293A4B5C6D7 /* LivestockBreeding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E1F6C94DAF26312C5038D49 /* LivestockBreeding.swift */; };
 		493479452E04246E267F552C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
 		4DFCE36B1BBBC83B21CF4908 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
 		59F8580DDF40D2117B4BB7F1 /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */; };
@@ -23,6 +29,9 @@
 		717675D5439D276EB3FEBC4D /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
 		7B4F0405559B5DB4BCAF1DC5 /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
 		7DAB8AC4E04354BCDD4AF759 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
+		81C33D4E5F60718293A4B5C6 /* LivestockProductPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D0F5B83C9E15201B4F27C38 /* LivestockProductPicker.swift */; };
+		83E55F60718293A4B5C6D7E8 /* LivestockBreeding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E1F6C94DAF26312C5038D49 /* LivestockBreeding.swift */; };
+		82D44E5F60718293A4B5C6D7 /* LivestockProductNamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9E4A72B8D041F0A3E16B27 /* LivestockProductNamer.swift */; };
 		8786E36B5DB49548E47BA6A1 /* AppleIntelligenceDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77858221A7265B444C32E871 /* AppleIntelligenceDictation.swift */; };
 		94A303A6C73EA22CF26EB8A3 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
 		990EBA544ECC1925D2F49644 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
@@ -32,6 +41,9 @@
 		A23E8840AB52A7D706EB918C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 89955DB67DD5F0FD424A1077 /* Assets.xcassets */; };
 		BE804168701D4310C3024635 /* RanchOSLivestockApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */; };
 		C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */ = {isa = PBXBuildFile; fileRef = B36A1F34997943B0E0F0810E /* LivestockRepository.swift */; };
+		C951BE5F60718293A4B5C6D7 /* LivestockProductNamer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C9E4A72B8D041F0A3E16B27 /* LivestockProductNamer.swift */; };
+		CA62CF60718293A4B5C6D7E8 /* LivestockProductPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D0F5B83C9E15201B4F27C38 /* LivestockProductPicker.swift */; };
+		CB73D0718293A4B5C6D7E8F9 /* LivestockBreeding.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E1F6C94DAF26312C5038D49 /* LivestockBreeding.swift */; };
 		CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = FD2F52D32BEAB94A8513033F /* LivestockViews.swift */; };
 		CF3FD958C97FD6FCD5244122 /* LivestockBillOfSale.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */; };
 		EE92BBF222836B4D1C4E5AC2 /* LivestockModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */; };
@@ -51,6 +63,9 @@
 /* Begin PBXFileReference section */
 		00339103C7FF2F7E8B86827D /* RanchOSLivestock.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchOSLivestock.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		05769C28E8397ACD5FB63A7E /* LivestockFoundationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockFoundationTests.swift; sourceTree = "<group>"; };
+		1C9E4A72B8D041F0A3E16B27 /* LivestockProductNamer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockProductNamer.swift; sourceTree = "<group>"; };
+		2D0F5B83C9E15201B4F27C38 /* LivestockProductPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockProductPicker.swift; sourceTree = "<group>"; };
+		3E1F6C94DAF26312C5038D49 /* LivestockBreeding.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LivestockBreeding.swift; sourceTree = "<group>"; };
 		12661EE048299AD66AF6B6AA /* RanchOSLivestockiOSProd.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSLivestockiOSProd.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		2A2860A1F261143CB11FF3FE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		36878DF880A9BD8476496051 /* RanchOSLivestockProd.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchOSLivestockProd.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -88,7 +103,10 @@
 				EF856E6CA3B301B2CEFAFE00 /* Info-Prod.plist */,
 				2A2860A1F261143CB11FF3FE /* Info.plist */,
 				EE6DE7C6126C334BF7129E38 /* LivestockBillOfSale.swift */,
+				3E1F6C94DAF26312C5038D49 /* LivestockBreeding.swift */,
 				D6A8FACA79186DC4C670A0F0 /* LivestockModels.swift */,
+				1C9E4A72B8D041F0A3E16B27 /* LivestockProductNamer.swift */,
+				2D0F5B83C9E15201B4F27C38 /* LivestockProductPicker.swift */,
 				B36A1F34997943B0E0F0810E /* LivestockRepository.swift */,
 				FD2F52D32BEAB94A8513033F /* LivestockViews.swift */,
 				6F51542A7474B7E0E95CB10A /* RanchOSLivestockApp.swift */,
@@ -305,6 +323,9 @@
 				672C43EA26C59C4F0605E8D8 /* AppleIntelligenceDictation.swift in Sources */,
 				9AA7F085E1FB8D23FBB2324E /* LivestockBillOfSale.swift in Sources */,
 				5AFBCC3F7556FCB606FE135E /* LivestockModels.swift in Sources */,
+				0C3D4E5F60718293A4B5C6D7 /* LivestockBreeding.swift in Sources */,
+				0A1B2C3D4E5F60718293A4B5 /* LivestockProductNamer.swift in Sources */,
+				0B2C3D4E5F60718293A4B5C6 /* LivestockProductPicker.swift in Sources */,
 				260E228581B751495A16C7C0 /* LivestockRepository.swift in Sources */,
 				717675D5439D276EB3FEBC4D /* LivestockViews.swift in Sources */,
 				BE804168701D4310C3024635 /* RanchOSLivestockApp.swift in Sources */,
@@ -318,6 +339,9 @@
 				109D1003B07CD7162FAC11BD /* AppleIntelligenceDictation.swift in Sources */,
 				59F8580DDF40D2117B4BB7F1 /* LivestockBillOfSale.swift in Sources */,
 				6AD78D1FE6581C440F3F3BD9 /* LivestockModels.swift in Sources */,
+				CB73D0718293A4B5C6D7E8F9 /* LivestockBreeding.swift in Sources */,
+				C951BE5F60718293A4B5C6D7 /* LivestockProductNamer.swift in Sources */,
+				CA62CF60718293A4B5C6D7E8 /* LivestockProductPicker.swift in Sources */,
 				C840ADD3B27FB83507590486 /* LivestockRepository.swift in Sources */,
 				CE0B9F5A6A730CBEEC946A65 /* LivestockViews.swift in Sources */,
 				9D35B073E35A22AE1F2F7558 /* RanchOSLivestockApp.swift in Sources */,
@@ -331,6 +355,9 @@
 				FA47EA77FCB37274485FD384 /* AppleIntelligenceDictation.swift in Sources */,
 				99694F77C6FDCB0DE9B688ED /* LivestockBillOfSale.swift in Sources */,
 				EE92BBF222836B4D1C4E5AC2 /* LivestockModels.swift in Sources */,
+				48C33E5F60718293A4B5C6D7 /* LivestockBreeding.swift in Sources */,
+				46A11C3D4E5F60718293A4B5 /* LivestockProductNamer.swift in Sources */,
+				47B22D4E5F60718293A4B5C6 /* LivestockProductPicker.swift in Sources */,
 				445F8030555C56724F790949 /* LivestockRepository.swift in Sources */,
 				94A303A6C73EA22CF26EB8A3 /* LivestockViews.swift in Sources */,
 				4DFCE36B1BBBC83B21CF4908 /* RanchOSLivestockApp.swift in Sources */,
@@ -352,6 +379,9 @@
 				8786E36B5DB49548E47BA6A1 /* AppleIntelligenceDictation.swift in Sources */,
 				CF3FD958C97FD6FCD5244122 /* LivestockBillOfSale.swift in Sources */,
 				7B4F0405559B5DB4BCAF1DC5 /* LivestockModels.swift in Sources */,
+				83E55F60718293A4B5C6D7E8 /* LivestockBreeding.swift in Sources */,
+				82D44E5F60718293A4B5C6D7 /* LivestockProductNamer.swift in Sources */,
+				81C33D4E5F60718293A4B5C6 /* LivestockProductPicker.swift in Sources */,
 				7DAB8AC4E04354BCDD4AF759 /* LivestockRepository.swift in Sources */,
 				990EBA544ECC1925D2F49644 /* LivestockViews.swift in Sources */,
 				206D7EA2E32C614DF60056D9 /* RanchOSLivestockApp.swift in Sources */,

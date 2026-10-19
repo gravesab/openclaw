@@ -15,6 +15,7 @@ class SystemHealthTests(unittest.TestCase):
     def test_gateway_uses_user_runtime_and_listener_uses_system_scope(self):
         omlx = {"connected": True, "status": "Online"}
         propertymanager_mcp = {"ready": True, "status": "Ready (on demand)"}
+        llama_cpp = {"connected": True, "status": "Online"}
 
         def check_service_result(name, _command, scope):
             return (name, scope, "Connected", "#16a34a")
@@ -24,7 +25,11 @@ class SystemHealthTests(unittest.TestCase):
             "check_service",
             side_effect=check_service_result,
         ) as check_service:
-            services = dashboard.build_system_health(omlx, propertymanager_mcp)
+            services = dashboard.build_system_health(
+                omlx,
+                propertymanager_mcp,
+                llama_cpp,
+            )
 
         calls = {call.args[0]: call.args[1:] for call in check_service.call_args_list}
         self.assertEqual(
@@ -47,6 +52,10 @@ class SystemHealthTests(unittest.TestCase):
             services,
         )
         self.assertIn(
+            ("llama.cpp API", "HTTP endpoint", "Connected", "#16a34a"),
+            services,
+        )
+        self.assertIn(
             (
                 "PropertyManager MCP",
                 "On-demand stdio server",
@@ -66,6 +75,7 @@ class SystemHealthTests(unittest.TestCase):
             services = dashboard.build_system_health(
                 omlx,
                 {"ready": False, "status": "Disabled"},
+                {"connected": False, "status": "Offline"},
             )
 
         self.assertIn(
@@ -76,6 +86,65 @@ class SystemHealthTests(unittest.TestCase):
                 "#b91c1c",
             ),
             services,
+        )
+        self.assertIn(
+            (
+                "llama.cpp API",
+                "HTTP endpoint",
+                "Offline",
+                "#b91c1c",
+            ),
+            services,
+        )
+
+    def test_window_title_names_the_dev_dashboard_version_and_build(self):
+        title = dashboard.format_dashboard_window_title(
+            "DEV",
+            "2026.5.16-beta.4",
+            "386bfbb2d82",
+        )
+        self.assertEqual(
+            title,
+            "OpenClaw AI Dashboard DEV Version 2026.5.16-beta.4 Build 386bfbb2d82",
+        )
+
+    def test_window_title_reads_package_version_and_git_build(self):
+        completed = mock.Mock(stdout="5a2190c67c0\n")
+        with (
+            mock.patch.object(
+                dashboard.Path,
+                "read_text",
+                return_value='{"version": "2026.5.16-beta.4"}',
+            ),
+            mock.patch.object(dashboard.subprocess, "run", return_value=completed),
+            mock.patch.dict(dashboard.os.environ, {}, clear=True),
+        ):
+            title = dashboard.dashboard_window_title()
+
+        self.assertEqual(
+            title,
+            "OpenClaw AI Dashboard DEV Version 2026.5.16-beta.4 Build 5a2190c67c0",
+        )
+
+    def test_window_title_uses_unknown_when_version_and_build_are_unavailable(self):
+        with (
+            mock.patch.object(
+                dashboard.Path,
+                "read_text",
+                side_effect=OSError("missing"),
+            ),
+            mock.patch.object(
+                dashboard.subprocess,
+                "run",
+                side_effect=dashboard.subprocess.SubprocessError("git failed"),
+            ),
+            mock.patch.dict(dashboard.os.environ, {}, clear=True),
+        ):
+            title = dashboard.dashboard_window_title()
+
+        self.assertEqual(
+            title,
+            "OpenClaw AI Dashboard DEV Version unknown Build unknown",
         )
 
     def test_propertymanager_mcp_status_uses_only_its_dev_configuration_contract(self):

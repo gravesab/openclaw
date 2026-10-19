@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import OpenClawKit
+import OpenClawChatUI
 import OpenClawProtocol
 import OSLog
 import SwiftUI
@@ -299,10 +300,12 @@ struct OnboardingWizardStepView: View {
             SecureField(self.step.placeholder ?? "", text: self.$textValue)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 360)
+                .appleIntelligenceDictation(self.$textValue)
         } else {
             TextField(self.step.placeholder ?? "", text: self.$textValue)
                 .textFieldStyle(.roundedBorder)
                 .frame(maxWidth: 360)
+                .appleIntelligenceDictation(self.$textValue)
         }
     }
 

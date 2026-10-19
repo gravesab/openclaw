@@ -1,0 +1,4 @@
+module AppAuthCore {
+umbrella "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/AppAuth-iOS/Sources/AppAuthCore"
+export *
+}

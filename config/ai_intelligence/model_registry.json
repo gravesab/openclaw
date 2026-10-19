@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-07-23",
+  "updated": "2026-10-03",
   "models": [
     {
       "id": "apple-foundation-models",
@@ -73,16 +73,6 @@
       "notes": "Local candidate for reasoning and multimodal-adjacent workflows."
     },
     {
-      "id": "ollama-gemma4-12b-mlx",
-      "display_name": "Gemma 4 12B MLX",
-      "provider": "Local Ollama",
-      "deployment": "local",
-      "status": "evaluation",
-      "privacy_tier": "local",
-      "cost_tier": "owned-hardware",
-      "notes": "DEV-only handbook-extraction candidate installed on the M4. It has no PropertyManager mutation capability and must pass source-cited evaluation before promotion."
-    },
-    {
       "id": "ollama-hermes3-8b",
       "display_name": "Hermes 3 8B",
       "provider": "Local Ollama",
@@ -121,6 +111,16 @@
       "privacy_tier": "external",
       "cost_tier": "paid",
       "notes": "Primary high-capability planning, architecture, and difficult engineering model."
+    },
+    {
+      "id": "llama-cpp-qwen3.5-9b",
+      "display_name": "Qwen 3.5 9B (llama.cpp)",
+      "provider": "llama.cpp",
+      "deployment": "local",
+      "status": "evaluation",
+      "privacy_tier": "local",
+      "cost_tier": "owned-hardware",
+      "notes": "Preferred open-source runtime. Serves Qwen 3.5 9B through llama.cpp on the M4. Apple Intelligence stays first for lightweight private work. Embeddings stay on Nomic. Scorecard numbers are provisional copies of the Qwen 3.5 9B oMLX entry until a llama.cpp benchmark is recorded."
     }
   ]
 }

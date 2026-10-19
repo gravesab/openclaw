@@ -1,0 +1,18 @@
+moduledependenciestarget: \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/SDKSettings.json \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/_DarwinFoundation1-BMFEHHON2JSSBB9HZOJ3FZQL2.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/usr/include/DarwinFoundation1.modulemap \
+  /Library/Developer/CommandLineTools/usr/lib/clang/21/include/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/_Builtin_stdbool-8SZFANBF74H80PKYPN73OAIOB.pcm \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/_Builtin_stdint-2UYGRMS55JUDLOOTLA2ZG75M1.pcm \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/CoreGraphics-E4IR352UL0VDSJVN6G13OD852.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/usr/include/ObjectiveC.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreGraphics.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/Foundation-4BIS55AHYRBYIRGRCGO5946GE.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Foundation.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/CoreVideo-2U94NNCYGSMHXQBNTLL4OBTM6.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/OpenGL.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/ImageIO.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/IOSurface.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/Metal.framework/Modules/module.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/System/Library/Frameworks/CoreVideo.framework/Modules/module.modulemap

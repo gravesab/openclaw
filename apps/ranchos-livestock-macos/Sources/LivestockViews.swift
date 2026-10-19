@@ -1,7 +1,7 @@
 import SwiftUI
 
 enum LivestockDestination: String, CaseIterable, Identifiable {
-    case overview, herd, createHerd, herdsInactive, liveStock, liveStockInactive, pets, petsInactive
+    case overview, herd, createHerd, herdsInactive, liveStock, liveStockInactive, breeding, pets, petsInactive
 
     var id: String { rawValue }
     var label: String {
@@ -12,6 +12,7 @@ enum LivestockDestination: String, CaseIterable, Identifiable {
         case .herdsInactive: "Herds/groups retired to a better life"
         case .liveStock: AnimalCategory.liveStock.label
         case .liveStockInactive: "Livestock/group retired to a better life"
+        case .breeding: "Breeding tree"
         case .petsInactive: "Pets retired to a better life"
         case .pets: AnimalCategory.pets.label
         }
@@ -24,12 +25,13 @@ enum LivestockDestination: String, CaseIterable, Identifiable {
         case .herdsInactive: "archivebox"
         case .liveStock: "pawprint"
         case .liveStockInactive, .petsInactive: "archivebox"
+        case .breeding: "arrow.triangle.branch"
         case .pets: "dog"
         }
     }
     var category: AnimalCategory? {
         switch self {
-        case .overview, .herd, .createHerd, .herdsInactive: nil
+        case .overview, .herd, .createHerd, .herdsInactive, .breeding: nil
         case .liveStock, .liveStockInactive: .liveStock
         case .pets, .petsInactive: .pets
         }
@@ -37,7 +39,7 @@ enum LivestockDestination: String, CaseIterable, Identifiable {
     var showsInactive: Bool {
         switch self {
         case .liveStockInactive, .petsInactive: true
-        case .overview, .herd, .createHerd, .herdsInactive, .liveStock, .pets: false
+        case .overview, .herd, .createHerd, .herdsInactive, .liveStock, .breeding, .pets: false
         }
     }
 
@@ -143,6 +145,8 @@ struct LivestockRootView: View {
                     LivestockWrappingLabel(title: LivestockDestination.liveStockInactive.label, systemImage: LivestockDestination.liveStockInactive.icon)
                         .tag(LivestockDestination.liveStockInactive)
                         .accessibilityLabel("Livestock/group retired to a better life")
+                    LivestockWrappingLabel(title: LivestockDestination.breeding.label, systemImage: LivestockDestination.breeding.icon)
+                        .tag(LivestockDestination.breeding)
                 }
                 Section("Pets") {
                     LivestockWrappingLabel(title: LivestockDestination.pets.label, systemImage: LivestockDestination.pets.icon)
@@ -155,7 +159,11 @@ struct LivestockRootView: View {
                         .accessibilityLabel("Pets retired to a better life")
                 }
                 Section("This herd") {
-                    SessionStatusView(session: store.session, connectedUntil: store.liveRecords?.expiresAt)
+                    SessionStatusView(
+                        session: store.session,
+                        connectedUntil: store.liveRecords?.expiresAt,
+                        holdMessage: store.connectionHoldMessage
+                    )
                     fixtureSessionControl
                 }
                 Section("Appearance") {
@@ -228,6 +236,9 @@ struct LivestockRootView: View {
             Text("Tags, lifecycle, care, feed, and cost save to the \(LivestockBuildStamp.current.databaseLabel).")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+        } else if store.isReconnecting {
+            ProgressView("Connecting to the DEV database…")
+                .font(.caption)
         } else {
             Button("Reconnect") {
                 Task { await store.reconnectToDev() }
@@ -260,6 +271,7 @@ struct LivestockRootView: View {
         case .herdsInactive: RetiredHerdsView(store: store, herdID: $retiredHerdID)
         case .liveStock: AnimalListView(store: store, destination: .liveStock)
         case .liveStockInactive: AnimalListView(store: store, destination: .liveStockInactive)
+        case .breeding: BreedingTreeView(store: store)
         case .pets: AnimalListView(store: store, destination: .pets)
         case .petsInactive: AnimalListView(store: store, destination: .petsInactive)
         }
@@ -271,6 +283,8 @@ struct LivestockRootView: View {
             ActiveHerdPane(store: store, herdID: $activeHerdID, status: herdStatus, onChange: requestHerdChange)
         case .herdsInactive:
             RetiredHerdPane(store: store, herdID: retiredHerdID)
+        case .breeding:
+            BreedingTreeDetail(store: store)
         case .liveStock, .liveStockInactive, .pets, .petsInactive:
             animalDetail
         }
@@ -389,30 +403,50 @@ struct LivestockIdentityBadge: View {
 struct SessionStatusView: View {
     let session: LivestockReadSession
     var connectedUntil: Date? = nil
+    var holdMessage: String? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Label(session.statusTitle, systemImage: session.isLive ? "lock.fill" : "pawprint")
                 .font(.subheadline.weight(.semibold))
-            if session.isLive, let connectedUntil {
-                Text(LivestockDevLoopbackRead.connectedUntilCaption(connectedUntil))
+            if session.isLive {
+                Text(LivestockDevLoopbackRead.connectedWhileOpenCaption)
                     .font(.caption.weight(.semibold))
                     .fixedSize(horizontal: false, vertical: true)
+                if let connectedUntil {
+                    Text(LivestockDevLoopbackRead.connectedUntilCaption(connectedUntil))
+                        .font(.caption.weight(.semibold))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
             Text(session.statusDetail)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            if session.isLive, let holdMessage {
+                Text(holdMessage)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityText)
     }
 
     private var accessibilityText: String {
-        if session.isLive, let connectedUntil {
-            return "\(session.statusTitle). \(LivestockDevLoopbackRead.connectedUntilCaption(connectedUntil)) \(session.statusDetail)"
+        var parts = [session.statusTitle]
+        if session.isLive {
+            parts.append(LivestockDevLoopbackRead.connectedWhileOpenCaption)
         }
-        return "\(session.statusTitle). \(session.statusDetail)"
+        if session.isLive, let connectedUntil {
+            parts.append(LivestockDevLoopbackRead.connectedUntilCaption(connectedUntil))
+        }
+        parts.append(session.statusDetail)
+        if session.isLive, let holdMessage {
+            parts.append(holdMessage)
+        }
+        return parts.joined(separator: ". ")
     }
 }
 
@@ -609,8 +643,8 @@ struct HerdAnimalBrowser: View {
                     systemImage: "rectangle.3.group",
                     state: store.overviewState,
                     ownershipNote: FixturePresentationBoundary.tenantDisclosure,
-                    actionTitle: store.session.canReconnect ? "Reconnect" : nil,
-                    action: store.session.canReconnect ? { Task { await store.reconnectToDev() } } : nil
+                    actionTitle: store.session.canReconnect && !store.isReconnecting ? "Reconnect" : nil,
+                    action: store.session.canReconnect && !store.isReconnecting ? { Task { await store.reconnectToDev() } } : nil
                 )
             }
         }
@@ -725,6 +759,7 @@ struct ActiveHerdPane: View {
     @State private var shotName = ""
     @State private var medicineName = ""
     @State private var medicineKind = ""
+    @State private var careDosage = ""
     @State private var careCost = ""
     @State private var careFinanceReference = ""
     @State private var careStatus: String?
@@ -735,6 +770,7 @@ struct ActiveHerdPane: View {
     @State private var suppliers = LivestockSupplierDirectory()
     @State private var batch = ""
     @State private var feedStatus: String?
+    @State private var products = LivestockProductDirectory()
     @State private var correctionTarget: LivestockCorrectionTarget?
 
     private var activeHerds: [LivestockHerd] {
@@ -826,20 +862,32 @@ struct ActiveHerdPane: View {
                             }
                         }
                         if careType == .vaccination {
-                            TextField("Shot", text: $shotName)
-                                .appleIntelligenceDictation($shotName)
-                            Text("Leave this blank, or name the shot.")
+                            LivestockProductFields(
+                                category: .vaccination,
+                                fieldTitle: "Shot",
+                                name: $shotName,
+                                kind: $medicineKind,
+                                catalog: $products
+                            )
+                            Text("Leave this blank, or name the shot. Scanning adds it to the list; choose it if you want it.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }
                         if careType == .medicationAdministration {
-                            TextField("Medicine", text: $medicineName)
-                                .appleIntelligenceDictation($medicineName)
-                            TextField("Kind", text: $medicineKind, prompt: Text("Pills, liquid, paste"))
-                                .appleIntelligenceDictation($medicineKind)
-                            Text("Leave these blank, or enter the medicine and its kind.")
+                            LivestockProductFields(
+                                category: .medication,
+                                fieldTitle: "Medicine",
+                                kindTitle: "Kind",
+                                name: $medicineName,
+                                kind: $medicineKind,
+                                catalog: $products
+                            )
+                            Text("Leave these blank, or enter the medicine and its kind. Scanning adds it to the list; choose it if you want it.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
+                        }
+                        if let type = careType, type.requiresDosage {
+                            LivestockDosageField(dosage: $careDosage, note: type.dosageRequirementNote)
                         }
                         if let type = careType {
                             DatePicker("Occurred", selection: $careAt)
@@ -865,13 +913,15 @@ struct ActiveHerdPane: View {
                                         itemName: type == .vaccination ? shotName : (type == .medicationAdministration ? medicineName : ""),
                                         itemKind: type == .medicationAdministration ? medicineKind : "",
                                         cost: careCost,
-                                        financeReference: careFinanceReference
+                                        financeReference: careFinanceReference,
+                                        dosage: type.requiresDosage ? careDosage : ""
                                     )
                                     if careStatus?.hasPrefix("Herd care saved") == true {
                                         careType = nil
                                         shotName = ""
                                         medicineName = ""
                                         medicineKind = ""
+                                        careDosage = ""
                                         careCost = ""
                                         careFinanceReference = ""
                                     }
@@ -917,6 +967,7 @@ struct ActiveHerdPane: View {
                                 line: $line,
                                 costs: selectedHerd.costs,
                                 feedChoices: LivestockInputType.herdChoices,
+                                catalog: $products,
                                 showsRemove: feedLines.count > 1,
                                 onRemove: { feedLines.removeAll { $0.id == line.id } }
                             )
@@ -995,10 +1046,12 @@ struct ActiveHerdPane: View {
         .onAppear {
             dropRetiredSelection()
             refreshSuppliers(fillEmpty: true)
+            refreshProducts()
         }
         .onChange(of: store.herds) { _, _ in
             dropRetiredSelection()
             refreshSuppliers(fillEmpty: supplier.isEmpty)
+            refreshProducts()
         }
         .sheet(item: $correctionTarget) { target in
             LivestockRecordCorrectionSheet(store: store, herdID: herdID, target: target)
@@ -1022,7 +1075,7 @@ struct ActiveHerdPane: View {
     }
 
     private var herdCareCostProblem: String? {
-        careType?.costProblem(careCost)
+        careType?.costProblem(careCost) ?? careType?.dosageProblem(careDosage)
     }
 
     private func dropRetiredSelection() {
@@ -1037,6 +1090,10 @@ struct ActiveHerdPane: View {
         guard fillEmpty, supplier.isEmpty, !suppliers.last.isEmpty else { return }
         supplier = suppliers.last
         pickedSupplier = suppliers.last
+    }
+
+    private func refreshProducts() {
+        products = LivestockProductDirectory.load().merging(animals: store.animals, herds: store.herds)
     }
 
     private var herdFeedProblem: String? {
@@ -1228,13 +1285,25 @@ struct LivestockFeedLineFields: View {
     @Binding var line: LivestockFeedEntry
     var costs: [LivestockCostAttribution]
     var feedChoices: [LivestockInputType]
+    @Binding var catalog: LivestockProductDirectory
     var costTitle: String = "Cost"
     var costHint: String = "Enter the cost of one feeding. This does not post to Finance."
     var showsRemove: Bool
     var onRemove: () -> Void
+    @State private var unusedFeedName = ""
+    @State private var unusedFeedKind = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            LivestockProductFields(
+                category: .feed,
+                fieldTitle: "Feed",
+                feedChoices: feedChoices,
+                name: $unusedFeedName,
+                kind: $unusedFeedKind,
+                feedType: $line.inputType,
+                catalog: $catalog
+            )
             labeled("Feed") {
                 Picker("Feed", selection: $line.inputType) {
                     ForEach(feedChoices) { item in
@@ -1598,6 +1667,158 @@ struct OverviewCard: View {
     }
 }
 
+struct BreedingTreeView: View {
+    @Bindable var store: LivestockStore
+
+    private var livestock: [Animal] {
+        store.animals
+            .filter { $0.species != .pet }
+            .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+    }
+
+    var body: some View {
+        List(selection: $store.selectedAnimalID) {
+            if livestock.isEmpty {
+                Text("Add livestock to record sire, dam, and who they are bred with.")
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(livestock) { animal in
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(animal.displayName).font(.headline)
+                        Text(treeSummary(animal))
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .tag(animal.id as Animal.ID?)
+                }
+            }
+        }
+        .livestockScreenTitle(LivestockDestination.breeding.label)
+        #if os(iOS)
+        .safeAreaInset(edge: .bottom) {
+            if let animal = focused {
+                BreedingTreeCanvas(animal: animal, animals: store.animals)
+                    .padding()
+            }
+        }
+        #endif
+    }
+
+    private var focused: Animal? {
+        livestock.first { $0.id == store.selectedAnimalID } ?? livestock.first
+    }
+
+    private func treeSummary(_ animal: Animal) -> String {
+        var parts = [animal.productionType.label]
+        if let sire = store.animals.first(where: { $0.id == animal.sireID }) {
+            parts.append("Sire \(sire.displayName)")
+        }
+        if let dam = store.animals.first(where: { $0.id == animal.damID }) {
+            parts.append("Dam \(dam.displayName)")
+        }
+        if let mate = store.animals.first(where: { $0.id == animal.bredWithID }) {
+            parts.append("Bred with \(mate.displayName)")
+        }
+        return parts.joined(separator: " · ")
+    }
+}
+
+struct BreedingTreeDetail: View {
+    @Bindable var store: LivestockStore
+
+    private var livestock: [Animal] {
+        store.animals.filter { $0.species != .pet }
+    }
+
+    var body: some View {
+        if let animal = livestock.first(where: { $0.id == store.selectedAnimalID }) ?? livestock.first {
+            ScrollView {
+                BreedingTreeCanvas(animal: animal, animals: store.animals)
+                    .padding(24)
+            }
+            .livestockScreenTitle(animal.displayName)
+        } else {
+            ContentUnavailableView(
+                LivestockDestination.breeding.label,
+                systemImage: "arrow.triangle.branch",
+                description: Text("Choose an animal to see sire, dam, the current mate, and offspring.")
+            )
+        }
+    }
+}
+
+struct BreedingTreeCanvas: View {
+    let animal: Animal
+    let animals: [Animal]
+
+    var body: some View {
+        let tree = LivestockBreeding.tree(for: animal, among: animals)
+        VStack(spacing: 16) {
+            HStack(alignment: .top, spacing: 24) {
+                ancestorColumn(tree.sire, title: "Sire")
+                ancestorColumn(tree.dam, title: "Dam")
+            }
+            breedingCard(name: tree.name, role: tree.role, prominent: true)
+            if let mate = tree.mate {
+                VStack(spacing: 8) {
+                    Text("Bred with").font(.caption).foregroundStyle(.secondary)
+                    breedingCard(name: mate.name, role: mate.role, prominent: false)
+                }
+            }
+            if !tree.mates.isEmpty {
+                labeledRow("Also bred to", tree.mates)
+            }
+            if !tree.offspring.isEmpty {
+                labeledRow("Offspring", tree.offspring)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    @ViewBuilder
+    private func ancestorColumn(_ node: LivestockBreedingNode?, title: String) -> some View {
+        VStack(spacing: 8) {
+            if let sire = node?.sire {
+                breedingCard(name: sire.name, role: "Sire", prominent: false)
+            }
+            if let dam = node?.dam {
+                breedingCard(name: dam.name, role: "Dam", prominent: false)
+            }
+            if let node {
+                breedingCard(name: node.name, role: title, prominent: false)
+            } else {
+                breedingCard(name: "Unknown", role: title, prominent: false)
+            }
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    private func labeledRow(_ title: String, _ nodes: [LivestockBreedingNode]) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(title).font(.caption).foregroundStyle(.secondary)
+            HStack(alignment: .top, spacing: 12) {
+                ForEach(nodes) { node in
+                    breedingCard(name: node.name, role: node.role, prominent: false)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func breedingCard(name: String, role: String, prominent: Bool) -> some View {
+        VStack(spacing: 4) {
+            Text(role).font(.caption).foregroundStyle(.secondary)
+            Text(name)
+                .font(prominent ? .title3.bold() : .headline)
+                .multilineTextAlignment(.center)
+        }
+        .padding(12)
+        .frame(minWidth: 120)
+        .background(prominent ? Color.accentColor.opacity(0.15) : Color.secondary.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+    }
+}
+
 struct AnimalListView: View {
     @Bindable var store: LivestockStore
     let destination: LivestockDestination
@@ -1667,8 +1888,8 @@ struct AnimalListView: View {
                     systemImage: "pawprint",
                     state: store.animalsState,
                     ownershipNote: FixturePresentationBoundary.tenantDisclosure,
-                    actionTitle: store.session.canReconnect ? "Reconnect" : nil,
-                    action: store.session.canReconnect ? { Task { await store.reconnectToDev() } } : nil
+                    actionTitle: store.session.canReconnect && !store.isReconnecting ? "Reconnect" : nil,
+                    action: store.session.canReconnect && !store.isReconnecting ? { Task { await store.reconnectToDev() } } : nil
                 )
             }
         }
@@ -1703,7 +1924,11 @@ struct AnimalListView: View {
         if animal.species == .pet {
             return "\(animal.speciesDisplay) · \(animal.breedDisplay) · \(animal.identifierSummary)\(herdSuffix(animal))"
         }
-        return "\(animal.species.label) · \(animal.productionType.label) · \(animal.identifierSummary)\(herdSuffix(animal))"
+        var line = "\(animal.species.label) · \(animal.productionType.label) · \(animal.identifierSummary)\(herdSuffix(animal))"
+        if let mateID = animal.bredWithID, let mate = store.animals.first(where: { $0.id == mateID }) {
+            line += " · Bred with \(mate.displayName)"
+        }
+        return line
     }
 
     private func herdSuffix(_ animal: Animal) -> String {
@@ -1738,6 +1963,7 @@ struct AnimalDetailView: View {
     @State private var shotName = ""
     @State private var medicineName = ""
     @State private var medicineKind = ""
+    @State private var careDosage = ""
     @State private var careFinanceReference = ""
     @State private var careCost = ""
     @State private var lifecycleCost = ""
@@ -1747,11 +1973,16 @@ struct AnimalDetailView: View {
     @State private var suppliers = LivestockSupplierDirectory()
     @State private var batch = ""
     @State private var feedAt = Date()
+    @State private var products = LivestockProductDirectory()
     @State private var costAmount = ""
     @State private var financeReference = ""
     @State private var productionChoice: ProductionType = .breeding
     @State private var breedChoice: Breed?
     @State private var classificationMessage: String?
+    @State private var sireChoice: UUID?
+    @State private var damChoice: UUID?
+    @State private var mateChoice: UUID?
+    @State private var breedingMessage: String?
 
     private var pendingSave: LivestockAnimalSaveDraft {
         LivestockAnimalSaveDraft(
@@ -1765,6 +1996,7 @@ struct AnimalDetailView: View {
             careAt: careAt,
             careItemName: careType == .vaccination ? shotName : (careType == .medicationAdministration ? medicineName : ""),
             careItemKind: careType == .medicationAdministration ? medicineKind : "",
+            careDosage: careType?.requiresDosage == true ? careDosage : "",
             careFinanceReference: careFinanceReference,
             feedLines: feedLines,
             feedAt: feedAt,
@@ -1792,8 +2024,12 @@ struct AnimalDetailView: View {
         pickedSupplier = suppliers.last
     }
 
+    private func refreshProducts() {
+        products = LivestockProductDirectory.load().merging(animals: store.animals, herds: store.herds)
+    }
+
     private func canCorrectRecords(_ animal: Animal) -> Bool {
-        store.session.isLive && canCorrectLifecycle && !animal.isRetired
+        store.session.isLive && canCorrectLifecycle
     }
 
     private static func costTitle(_ title: String, cost: Decimal?) -> String {
@@ -1890,6 +2126,47 @@ struct AnimalDetailView: View {
                             LabeledContent("Breed", value: animal.breedDisplay)
                         }
                     }
+                    if animal.species != .pet {
+                        DetailSection(title: "Genetics", icon: "arrow.triangle.branch") {
+                            if canEditIdentifiers {
+                                breedingPickers(for: animal)
+                                Button("Save breeding") {
+                                    let animalID = animal.id
+                                    let sire = sireChoice
+                                    let dam = damChoice
+                                    let mate = mateChoice
+                                    Task {
+                                        breedingMessage = await store.updateBreeding(
+                                            animalID: animalID,
+                                            sireID: sire,
+                                            damID: dam,
+                                            bredWithID: mate
+                                        )
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(!breedingChanged(animal) || breedingProblem(animal) != nil)
+                                if let problem = breedingProblem(animal) {
+                                    Text(problem).font(.callout).foregroundStyle(.orange)
+                                }
+                                if animal.productionType == .breeding, mateChoice == nil {
+                                    Text("Choose who this animal is being bred with so the genetics stay straight.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                if let breedingMessage {
+                                    Text(breedingMessage).font(.callout).foregroundStyle(.secondary)
+                                }
+                            } else {
+                                LabeledContent("Sire", value: relativeName(animal.sireID))
+                                LabeledContent("Dam", value: relativeName(animal.damID))
+                                LabeledContent("Bred with", value: relativeName(animal.bredWithID))
+                            }
+                            Text("Sire and dam are the parents of this animal. Bred with is the current mate.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
                     DetailSection(title: "Herd/group", icon: "rectangle.3.group") {
                         if let name = animal.herdName, !name.isEmpty {
                             LabeledContent("Herd/group", value: name)
@@ -1933,6 +2210,10 @@ struct AnimalDetailView: View {
                     DetailSection(title: "Retirement", icon: "archivebox") {
                         if animal.isRetired {
                             LabeledContent("Reason", value: animal.retirementDisplay)
+                            Text(FixturePresentationBoundary.retiredCorrectionBoundary)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
                             if let saleAmount = animal.saleAmount, let saleOn = animal.saleOn {
                                 LabeledContent("Sale amount", value: LivestockMoney.usd(saleAmount))
                                 LabeledContent("Sale date", value: saleOn.formatted(date: .abbreviated, time: .omitted))
@@ -2139,20 +2420,38 @@ struct AnimalDetailView: View {
                                 }
                             }
                             if careType == .vaccination {
-                                TextField("Shot", text: $shotName)
-                                    .appleIntelligenceDictation($shotName)
-                                Text("Leave this blank, or name the shot.")
+                                LivestockProductFields(
+                                    category: .vaccination,
+                                    fieldTitle: "Shot",
+                                    name: $shotName,
+                                    kind: $medicineKind,
+                                    catalog: $products
+                                )
+                                Text("Leave this blank, or name the shot. Scanning adds it to the list; choose it if you want it.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
                             }
                             if careType == .medicationAdministration {
-                                TextField("Medicine", text: $medicineName)
-                                    .appleIntelligenceDictation($medicineName)
-                                TextField("Kind", text: $medicineKind, prompt: Text("Pills, liquid, paste"))
-                                    .appleIntelligenceDictation($medicineKind)
-                                Text("Leave these blank, or enter the medicine and its kind.")
+                                LivestockProductFields(
+                                    category: .medication,
+                                    fieldTitle: "Medicine",
+                                    kindTitle: "Kind",
+                                    name: $medicineName,
+                                    kind: $medicineKind,
+                                    catalog: $products
+                                )
+                                Text("Leave these blank, or enter the medicine and its kind. Scanning adds it to the list; choose it if you want it.")
                                     .font(.caption)
                                     .foregroundStyle(.secondary)
+                            }
+                            if let type = careType, type.requiresDosage {
+                                LivestockDosageField(dosage: $careDosage, note: type.dosageRequirementNote)
+                                if let problem = type.dosageProblem(careDosage) {
+                                    Text(problem)
+                                        .font(.callout)
+                                        .foregroundStyle(.orange)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                             if let type = careType {
                                 DatePicker("Occurred", selection: $careAt)
@@ -2193,6 +2492,7 @@ struct AnimalDetailView: View {
                                     line: $line,
                                     costs: animal.costs,
                                     feedChoices: feedChoices(for: animal),
+                                    catalog: $products,
                                     showsRemove: feedLines.count > 1,
                                     onRemove: { feedLines.removeAll { $0.id == line.id } }
                                 )
@@ -2270,6 +2570,7 @@ struct AnimalDetailView: View {
                                     shotName = ""
                                     medicineName = ""
                                     medicineKind = ""
+                                    careDosage = ""
                                 }
                                 if result.acceptedCareCost {
                                     careCost = ""
@@ -2337,9 +2638,11 @@ struct AnimalDetailView: View {
                 .onAppear {
                     alignFeedLines(for: animal)
                     refreshSuppliers(fillEmpty: true)
+                    refreshProducts()
                 }
                 .onChange(of: store.animals.map(\.consumptions.count)) { _, _ in
                     refreshSuppliers(fillEmpty: supplier.isEmpty)
+                    refreshProducts()
                 }
                 #if os(iOS)
                 .labeledContentStyle(LivestockWrappingContentStyle())
@@ -2353,6 +2656,9 @@ struct AnimalDetailView: View {
             .onChange(of: animal.id) { _, _ in alignIdentifierChoices(for: animal) }
             .onChange(of: animal.productionType) { _, _ in alignClassification(for: animal) }
             .onChange(of: animal.breed) { _, _ in alignClassification(for: animal) }
+            .onChange(of: animal.sireID) { _, _ in alignClassification(for: animal) }
+            .onChange(of: animal.damID) { _, _ in alignClassification(for: animal) }
+            .onChange(of: animal.bredWithID) { _, _ in alignClassification(for: animal) }
             .alert(
                 "Retire \(pendingRetirement?.animalName ?? "this animal")?",
                 isPresented: Binding(
@@ -2463,10 +2769,55 @@ private extension AnimalDetailView {
     private func alignClassification(for animal: Animal) {
         productionChoice = animal.productionType
         breedChoice = animal.breed
+        sireChoice = animal.sireID
+        damChoice = animal.damID
+        mateChoice = animal.bredWithID
     }
 
     private func classificationChanged(_ animal: Animal) -> Bool {
         productionChoice != animal.productionType || breedChoice?.code != animal.breed?.code
+    }
+
+    private func breedingChanged(_ animal: Animal) -> Bool {
+        sireChoice != animal.sireID || damChoice != animal.damID || mateChoice != animal.bredWithID
+    }
+
+    private func breedingProblem(_ animal: Animal) -> String? {
+        LivestockBreeding.problem(
+            animal: animal,
+            sireID: sireChoice,
+            damID: damChoice,
+            bredWithID: mateChoice,
+            among: store.animals
+        )
+    }
+
+    private func relativeName(_ id: UUID?) -> String {
+        guard let id else { return "None" }
+        return store.animals.first { $0.id == id }?.displayName ?? "Unknown"
+    }
+
+    @ViewBuilder
+    private func breedingPickers(for animal: Animal) -> some View {
+        let relatives = LivestockBreeding.relatives(for: animal.species, excluding: animal.id, among: store.animals)
+        Picker("Sire", selection: $sireChoice) {
+            Text("No sire").tag(nil as UUID?)
+            ForEach(relatives) { relative in
+                Text(relative.displayName).tag(Optional(relative.id))
+            }
+        }
+        Picker("Dam", selection: $damChoice) {
+            Text("No dam").tag(nil as UUID?)
+            ForEach(relatives) { relative in
+                Text(relative.displayName).tag(Optional(relative.id))
+            }
+        }
+        Picker("Bred with", selection: $mateChoice) {
+            Text("Not yet chosen").tag(nil as UUID?)
+            ForEach(relatives) { relative in
+                Text(relative.displayName).tag(Optional(relative.id))
+            }
+        }
     }
 
     /// The inline lifecycle correction corrects a single saved cost or adds the first one.
@@ -2502,6 +2853,24 @@ private struct LifecycleCorrectionPrompt: Identifiable {
     var cost: LivestockCostFix? = nil
 
     var id: UUID { eventID }
+}
+
+private struct LivestockDosageField: View {
+    @Binding var dosage: String
+    var note: String
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Dosage")
+                .foregroundStyle(.secondary)
+            TextField("Dosage", text: $dosage, prompt: Text("5 mL, 2 cc, 1 bolus"))
+                .appleIntelligenceDictation($dosage)
+            Text(note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
 }
 
 enum LivestockCorrectionTarget: Identifiable, Equatable {
@@ -2543,6 +2912,7 @@ private struct LivestockRecordCorrectionSheet: View {
     @State private var when = Date()
     @State private var itemName = ""
     @State private var itemKind = ""
+    @State private var dosage = ""
     @State private var quantity = ""
     @State private var unit: LivestockInputUnit = .scoop
     @State private var frequency: LivestockCostFrequency = .daily
@@ -2552,6 +2922,7 @@ private struct LivestockRecordCorrectionSheet: View {
     @State private var costAmount = ""
     @State private var problem: String?
     @State private var saving = false
+    @State private var products = LivestockProductDirectory()
 
     var body: some View {
         NavigationStack {
@@ -2577,8 +2948,8 @@ private struct LivestockRecordCorrectionSheet: View {
                     Text("The earlier record stays. This correction becomes the current record. Only the owner can correct.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if let problem {
-                        Text(problem).font(.callout).foregroundStyle(.orange)
+                    if let issue = dosageIssue ?? problem {
+                        Text(issue).font(.callout).foregroundStyle(.orange)
                     }
                 }
             }
@@ -2590,14 +2961,17 @@ private struct LivestockRecordCorrectionSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save correction") { save() }
-                        .disabled(saving || correction == nil || correction?.problem != nil)
+                        .disabled(saving || correction == nil || correction?.problem != nil || dosageIssue != nil)
                 }
             }
         }
         #if os(macOS)
         .frame(minWidth: 460, minHeight: 420)
         #endif
-        .onAppear(perform: prefill)
+        .onAppear {
+            products = LivestockProductDirectory.load().merging(animals: store.animals, herds: store.herds)
+            prefill()
+        }
     }
 
     @ViewBuilder private var fields: some View {
@@ -2606,14 +2980,26 @@ private struct LivestockRecordCorrectionSheet: View {
             Section("Care") {
                 DatePicker("Occurred", selection: $when)
                 if event.type == .vaccination {
-                    TextField("Shot", text: $itemName)
-                        .appleIntelligenceDictation($itemName)
+                    LivestockProductFields(
+                        category: .vaccination,
+                        fieldTitle: "Shot",
+                        name: $itemName,
+                        kind: $itemKind,
+                        catalog: $products
+                    )
                 }
                 if event.type == .medicationAdministration {
-                    TextField("Medicine", text: $itemName)
-                        .appleIntelligenceDictation($itemName)
-                    TextField("Kind", text: $itemKind, prompt: Text("Pills, liquid, paste"))
-                        .appleIntelligenceDictation($itemKind)
+                    LivestockProductFields(
+                        category: .medication,
+                        fieldTitle: "Medicine",
+                        kindTitle: "Kind",
+                        name: $itemName,
+                        kind: $itemKind,
+                        catalog: $products
+                    )
+                }
+                if event.type.requiresDosage {
+                    LivestockDosageField(dosage: $dosage, note: event.type.dosageRequirementNote)
                 }
                 Text("The care type stays \(event.type.label). To change the type, record the right care and mark this one a duplicate.")
                     .font(.caption)
@@ -2665,6 +3051,11 @@ private struct LivestockRecordCorrectionSheet: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+
+    private var dosageIssue: String? {
+        guard reason != .duplicateEntry, case .care(let event) = target else { return nil }
+        return event.type.dosageProblem(dosage)
     }
 
     private var duplicateExplanation: String {
@@ -2739,6 +3130,7 @@ private struct LivestockRecordCorrectionSheet: View {
                 reason: reason,
                 itemName: event.type == .observation || event.type == .treatment || event.type == .surgery ? "" : itemName,
                 itemKind: event.type == .medicationAdministration ? itemKind : "",
+                dosage: event.type.requiresDosage ? dosage : "",
                 cost: costFix
             )
         case .feed(let item):
@@ -2769,6 +3161,7 @@ private struct LivestockRecordCorrectionSheet: View {
             when = event.occurredAt
             itemName = event.itemName ?? ""
             itemKind = event.itemKind ?? ""
+            dosage = event.dosage ?? ""
         case .feed(let item):
             when = item.observedAt
             quantity = Self.wholeQuantity(item.quantity)
@@ -2844,7 +3237,7 @@ struct FixtureStateView: View {
         VStack(spacing: 14) {
             Image(systemName: systemImage).font(.largeTitle).foregroundStyle(.secondary)
             Text(title).font(.title2.bold())
-            if case .loading = state { ProgressView("Loading fixture state") }
+            if case .loading = state { ProgressView("Connecting to the DEV database…") }
             if let message = state.message {
                 Text(message).multilineTextAlignment(.center).foregroundStyle(.secondary)
             }

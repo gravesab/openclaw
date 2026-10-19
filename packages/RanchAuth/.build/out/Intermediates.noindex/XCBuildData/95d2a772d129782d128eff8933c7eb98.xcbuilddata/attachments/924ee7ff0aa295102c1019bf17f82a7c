@@ -1,0 +1,4 @@
+module GoogleSignIn {
+umbrella header "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/GoogleSignIn-iOS/GoogleSignIn/Sources/Public/GoogleSignIn/GoogleSignIn.h"
+export *
+}

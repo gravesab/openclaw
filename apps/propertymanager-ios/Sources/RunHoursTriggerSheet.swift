@@ -81,8 +81,10 @@ struct RunHoursTriggerSheet: View {
                 Section("Run hours trigger") {
                     TextField("Due when meter reaches (hours)", text: $triggerText)
                         .keyboardType(.decimalPad)
+                        .appleIntelligenceDictation($triggerText)
                     TextField("Repeat every (hours, optional)", text: $intervalText)
                         .keyboardType(.decimalPad)
+                        .appleIntelligenceDictation($intervalText)
                     Picker("Schedule", selection: $scheduleChoice) {
                         ForEach(ScheduleChoice.allCases) { choice in
                             Text(choice.label).tag(choice)

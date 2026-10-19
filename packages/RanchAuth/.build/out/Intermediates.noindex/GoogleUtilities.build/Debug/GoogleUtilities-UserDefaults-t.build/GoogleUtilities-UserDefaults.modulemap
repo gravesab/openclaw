@@ -1,0 +1,4 @@
+module GoogleUtilities_UserDefaults {
+umbrella "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/GoogleUtilities/GoogleUtilities/UserDefaults/Public"
+export *
+}

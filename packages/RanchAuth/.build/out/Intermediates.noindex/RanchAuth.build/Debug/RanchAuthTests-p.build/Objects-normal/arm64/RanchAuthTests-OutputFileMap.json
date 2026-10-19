@@ -1,0 +1,29 @@
+{
+  "" : {
+    "diagnostics" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests-primary.dia",
+    "emit-module-dependencies" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests-primary-emit-module.d",
+    "emit-module-diagnostics" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests-primary-emit-module.dia",
+    "pch" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests-primary-Bridging-header.pch",
+    "swift-dependencies" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests-primary.swiftdeps"
+  },
+  "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/DerivedSources/test_entry_point.swift" : {
+    "const-values" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/test_entry_point.swiftconstvalues",
+    "dependencies" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/test_entry_point.d",
+    "diagnostics" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/test_entry_point.dia",
+    "index-unit-output-path" : "/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "llvm-bc" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/test_entry_point.bc",
+    "object" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/test_entry_point.o",
+    "swift-dependencies" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/test_entry_point.swiftdeps",
+    "swiftmodule" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/test_entry_point~partial.swiftmodule"
+  },
+  "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/Tests/RanchAuthTests/RanchAuthTests.swift" : {
+    "const-values" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests.swiftconstvalues",
+    "dependencies" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests.d",
+    "diagnostics" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests.dia",
+    "index-unit-output-path" : "/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests.o",
+    "llvm-bc" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests.bc",
+    "object" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests.o",
+    "swift-dependencies" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests.swiftdeps",
+    "swiftmodule" : "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/RanchAuth.build/Debug/RanchAuthTests-p.build/Objects-normal/arm64/RanchAuthTests~partial.swiftmodule"
+  }
+}

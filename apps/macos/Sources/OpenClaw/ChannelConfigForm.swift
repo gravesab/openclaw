@@ -1,4 +1,5 @@
 import SwiftUI
+import OpenClawChatUI
 
 struct ConfigSchemaForm: View {
     @Bindable var store: ChannelsStore
@@ -129,9 +130,11 @@ struct ConfigSchemaForm: View {
             } else if sensitive {
                 SecureField(placeholder, text: self.stringBinding(path, defaultValue: defaultValue))
                     .textFieldStyle(.roundedBorder)
+                    .appleIntelligenceDictation(self.stringBinding(path, defaultValue: defaultValue))
             } else {
                 TextField(placeholder, text: self.stringBinding(path, defaultValue: defaultValue))
                     .textFieldStyle(.roundedBorder)
+                    .appleIntelligenceDictation(self.stringBinding(path, defaultValue: defaultValue))
             }
         }
     }
@@ -159,6 +162,10 @@ struct ConfigSchemaForm: View {
                     isInteger: schema.schemaType == "integer",
                     defaultValue: defaultValue))
                 .textFieldStyle(.roundedBorder)
+                .appleIntelligenceDictation(self.numberBinding(
+                    path,
+                    isInteger: schema.schemaType == "integer",
+                    defaultValue: defaultValue))
         }
     }
 
@@ -234,6 +241,7 @@ struct ConfigSchemaForm: View {
                             TextField("Key", text: self.mapKeyBinding(path: path, key: key))
                                 .textFieldStyle(.roundedBorder)
                                 .frame(width: 160)
+                                .appleIntelligenceDictation(self.mapKeyBinding(path: path, key: key))
                             self.renderNode(additionalSchema, path: itemPath)
                             Button("Remove") {
                                 var next = dict

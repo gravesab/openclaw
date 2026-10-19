@@ -1,79 +1,80 @@
+import CryptoKit
 import XCTest
 
 final class RanchOSFinanceImportResultTests: XCTestCase {
+    private let now = Date(timeIntervalSince1970: 1_759_536_000)
+
     private func sampleData() throws -> Data {
         let bundle = Bundle(for: RanchOSFinanceImportResultTests.self)
-        let url = try XCTUnwrap(bundle.url(forResource: "FinanceImportResultSample", withExtension: "json"))
+        let url = try XCTUnwrap(bundle.url(forResource: "FinanceImportResultSample", withExtension: "csv"))
         return try Data(contentsOf: url)
     }
 
-    func testValidSampleDecodesVerbatim() throws {
-        let result = try FinanceImportResultLoader.decode(sampleData())
+    func testSampleCSVShowsFileDigestRowCountAndError() throws {
+        let data = try sampleData()
+        let result = try FinanceImportResultLoader.parse(data, fileName: "FinanceImportResultSample.csv", now: now)
+        let digest = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
 
-        XCTAssertEqual(result.schema, "ranch-finance-import-result/v1")
-        XCTAssertEqual(result.producedAt, "2026-10-03T12:00:00Z")
-        XCTAssertEqual(result.producedBy, "synthetic-sample-v1")
-        XCTAssertEqual(result.tenantLabel, "DEV sample")
-        XCTAssertEqual(result.artifact.fileName, "apple-card-2026-09.csv")
-        XCTAssertEqual(
-            result.artifact.sha256,
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
-        XCTAssertEqual(result.artifact.rowCount, 10)
-    }
-
-    func testErrorEntriesCarryRowCodeMessage() throws {
-        let result = try FinanceImportResultLoader.decode(sampleData())
-
-        XCTAssertEqual(result.errors.count, 2)
+        XCTAssertEqual(result.fileName, "FinanceImportResultSample.csv")
+        XCTAssertEqual(result.sha256, digest)
+        XCTAssertEqual(result.sha256.count, 64)
+        XCTAssertEqual(result.rowCount, 3)
+        XCTAssertEqual(result.errors.count, 1)
         XCTAssertEqual(result.errors[0].row, 4)
         XCTAssertEqual(result.errors[0].code, "finance_csv_amount_zero")
         XCTAssertEqual(result.errors[0].message, "Row 4: amount is zero")
-        XCTAssertEqual(result.errors[1].row, 9)
-        XCTAssertEqual(result.errors[1].code, "finance_csv_future_date")
     }
 
-    func testUnknownSchemaThrows() {
-        let json = """
-        {"schema":"ranch-finance-import-result/v9","produced_at":"t","produced_by":"x",\
-        "tenant_label":"y","artifact":{"file_name":"f","sha256":"s","row_count":1},"errors":[]}
-        """
-
-        XCTAssertThrowsError(try FinanceImportResultLoader.decode(Data(json.utf8))) { error in
-            guard case FinanceImportResultLoadError.unknownSchema(let schema) = error else {
-                return XCTFail("expected unknownSchema, got \(error)")
-            }
-            XCTAssertEqual(schema, "ranch-finance-import-result/v9")
+    func testWrongHeadersAreNotThisCSV() {
+        let csv = Data("Date,Amount\n01/01/2024,1.00\n".utf8)
+        XCTAssertThrowsError(try FinanceImportResultLoader.parse(csv, fileName: "notes.csv", now: now)) { error in
+            XCTAssertEqual(error as? FinanceImportParseError, .notThisCSV)
         }
     }
 
-    func testGarbageBytesThrow() {
-        XCTAssertThrowsError(try FinanceImportResultLoader.decode(Data("not json".utf8)))
-    }
-
-    func testMissingKeyThrows() {
-        let json = """
-        {"schema":"ranch-finance-import-result/v1","produced_at":"t","produced_by":"x",\
-        "tenant_label":"y","artifact":{"file_name":"f","row_count":1},"errors":[]}
+    func testFutureDateAndDuplicateUseApprovedCodes() throws {
+        let csv = """
+        Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+        01/15/2024,01/16/2024,Feed purchase,North Gate,Other,purchase,-10.00,Alex Sample
+        01/15/2024,01/16/2024,Feed purchase,North Gate,Other,purchase,-10.00,Alex Sample
+        12/01/2099,12/02/2099,Later,North Gate,Other,purchase,-3.00,Alex Sample
         """
-
-        XCTAssertThrowsError(try FinanceImportResultLoader.decode(Data(json.utf8)))
+        let result = try FinanceImportResultLoader.parse(Data(csv.utf8), fileName: "dup.csv", now: now)
+        XCTAssertEqual(result.rowCount, 3)
+        XCTAssertEqual(result.errors.map(\.code), ["finance_csv_duplicate_row", "finance_csv_future_date"])
     }
 
-    func testNegativeRowCountThrows() {
-        let json = """
-        {"schema":"ranch-finance-import-result/v1","produced_at":"t","produced_by":"x",\
-        "tenant_label":"y","artifact":{"file_name":"f","sha256":"s","row_count":-1},"errors":[]}
+    func testWrappedDescriptionStaysOnePurchase() throws {
+        let csv = """
+        Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+        01/15/2024,01/16/2024,Feed
+        purchase,North Gate,Other,Purchase,-42.50,Alex Sample
+        01/20/2024,01/20/2024,Statement credit,Apple Card,Payment,Credit,12.00,Alex Sample
         """
-
-        XCTAssertThrowsError(try FinanceImportResultLoader.decode(Data(json.utf8)))
+        let result = try FinanceImportResultLoader.parse(Data(csv.utf8), fileName: "wrapped.csv", now: now)
+        XCTAssertEqual(result.rowCount, 2)
+        XCTAssertEqual(result.errors, [])
     }
 
-    func testExactStrings() {
-        XCTAssertEqual(FinanceImportResultStrings.schema, "ranch-finance-import-result/v1")
+    func testMissingColumnCodeIsFileLevel() {
+        let csv = Data("Transaction Date,Clearing Date,Description,Merchant,Category,Type,Purchased By\n".utf8)
+        XCTAssertThrowsError(try FinanceImportResultLoader.parse(csv, fileName: "short.csv", now: now)) { error in
+            XCTAssertEqual(error as? FinanceImportParseError, .notThisCSV)
+        }
+    }
+
+    func testExactStringsOmitWithdrawnSampleLanguage() {
         XCTAssertEqual(FinanceImportResultStrings.banner, "DEV · Finance import result · read only")
-        XCTAssertEqual(FinanceImportResultStrings.syntheticMarker, "synthetic sample")
-        XCTAssertEqual(
-            FinanceImportResultStrings.emptySentence,
-            "Synthetic sample only — a real exporter is a later spec")
+        XCTAssertFalse(FinanceImportResultStrings.walletInstructions.isEmpty)
+        let joined = [
+            FinanceImportResultStrings.banner,
+            FinanceImportResultStrings.walletInstructions,
+            FinanceImportResultStrings.unreadable,
+            FinanceImportResultStrings.notThisCSV,
+        ].joined(separator: "\n")
+        XCTAssertNil(joined.range(of: "recorded", options: .caseInsensitive))
+        XCTAssertNil(joined.range(of: "saved", options: .caseInsensitive))
+        XCTAssertNil(joined.range(of: "stored", options: .caseInsensitive))
+        XCTAssertNil(joined.range(of: "synthetic sample", options: .caseInsensitive))
     }
 }

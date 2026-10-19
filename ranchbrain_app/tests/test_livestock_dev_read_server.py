@@ -15,6 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from ranchbrain.livestock_dev_read_server import (
     ANIMALS_PATH,
+    HERD_PATH,
     LOOPBACK_HOST,
     LivestockDevReadServerError,
     create_server,
@@ -22,6 +23,7 @@ from ranchbrain.livestock_dev_read_server import (
     reusable_ticket,
     write_ticket,
 )
+from ranchbrain.livestock_read_api import HubSummaryStatus, build_hub_dashboard_from_live_records
 
 
 class LivestockDevReadServerTests(unittest.TestCase):
@@ -49,6 +51,51 @@ class LivestockDevReadServerTests(unittest.TestCase):
         self.assertEqual(mode, 0o600)
         self.assertNotIn("password", self.ticket.read_text(encoding="utf-8").lower())
 
+    def test_loopback_get_herd_prepares_the_ranchos_dashboard(self) -> None:
+        payload = self._get(self.token, "tenant-a", HERD_PATH)
+        self.assertEqual(payload["origin"], "live")
+        self.assertEqual(payload["operation"], "herd_summary")
+        hub = payload["body"]["hub"]
+        self.assertEqual(hub["provider"], "RanchOSLivestockAuthorizedReadProvider")
+        self.assertEqual(hub["operation"], "readDashboard")
+        self.assertEqual(hub["session"], "live")
+        dashboard = hub["dashboard"]
+        self.assertEqual(dashboard["ranchName"], "North Ranch")
+        self.assertEqual(dashboard["herdCount"], 2)
+        self.assertEqual([card["id"] for card in dashboard["summaries"]], [
+            "herd-count",
+            "fact-freshness",
+            "records-review",
+        ])
+        self.assertNotIn("developmentFixture", repr(payload))
+
+    def test_postgres_herd_summary_covers_dairy_records_without_apple_database_access(self) -> None:
+        class LiveRecords:
+            def hub_dashboard(self, ranch_name: str):
+                return build_hub_dashboard_from_live_records(
+                    ranch_name,
+                    (
+                        {
+                            "display_name": "Daisy",
+                            "species_code": "dairy_cow",
+                            "identifiers": [],
+                            "care_events": [],
+                            "consumptions": [],
+                        },
+                    ),
+                    ({"name": "Milkers"},),
+                )
+
+        self.server.records = LiveRecords()
+        payload = self._get(self.token, "tenant-a", HERD_PATH)
+        dashboard = payload["body"]["hub"]["dashboard"]
+        self.assertEqual(dashboard["herdCount"], 1)
+        review = next(card for card in dashboard["summaries"] if card["id"] == "records-review")
+        self.assertEqual(review["status"], HubSummaryStatus.REVIEW.value)
+        self.assertIn("no active identifier", review["detail"])
+        freshness = next(card for card in dashboard["summaries"] if card["id"] == "fact-freshness")
+        self.assertEqual(freshness["status"], HubSummaryStatus.CURRENT.value)
+
     def test_write_verbs_and_bad_auth_fail_closed(self) -> None:
         for method in ("POST", "PUT", "PATCH", "DELETE"):
             with self.subTest(method=method):
@@ -62,9 +109,9 @@ class LivestockDevReadServerTests(unittest.TestCase):
             require_loopback("0.0.0.0")
         self.assertEqual(require_loopback(LOOPBACK_HOST), LOOPBACK_HOST)
 
-    def _get(self, token: str, tenant: str) -> dict:
+    def _get(self, token: str, tenant: str, path: str = ANIMALS_PATH) -> dict:
         request = urllib.request.Request(
-            self.base_url + ANIMALS_PATH,
+            self.base_url + path,
             headers={"Authorization": f"Bearer {token}", "X-RanchOS-Tenant": tenant},
             method="GET",
         )
@@ -131,6 +178,27 @@ class LivestockPostgresRecordTests(unittest.TestCase):
             records.assign_identifier("11111111-2222-4333-8444-555555555551", "license", "D-1")
         with self.assertRaises(LivestockPostgresError):
             records.assign_identifier("11111111-2222-4333-8444-555555555551", "band", "X")
+
+    def test_hub_dashboard_summarizes_live_rows_for_ranchos(self) -> None:
+        def runner(sql: str) -> str:
+            if "json_agg(animal ORDER BY" in sql:
+                return json.dumps(
+                    [
+                        {
+                            "display_name": "Daisy",
+                            "species_code": "dairy_cow",
+                            "identifiers": [{"kind": "ear_tag", "value": "DY-1"}],
+                            "care_events": [{"type": "observation", "current": True}],
+                            "consumptions": [{"input_type": "hay", "current": True}],
+                        }
+                    ]
+                )
+            return json.dumps([{"id": "herd-a", "name": "Milkers", "retired_at": None}])
+
+        dashboard = LivestockPostgresRecords(runner).hub_dashboard("North Ranch")
+        self.assertEqual(dashboard.herd_count, 1)
+        self.assertEqual(dashboard.summaries[0].detail, "1 current animals in 1 open herd/group")
+        self.assertEqual(dashboard.summaries[2].status.value, "Current")
 
     def test_high_impact_care_and_cost_require_confirmation_before_sql(self) -> None:
         seen: list[str] = []
@@ -250,7 +318,10 @@ class LivestockPostgresRecordTests(unittest.TestCase):
         animal = "11111111-2222-4333-8444-555555555551"
         when = "2026-10-15T14:00:00Z"
         self.assertEqual(records.record_lifecycle(animal, "intake", when), event)
-        self.assertEqual(records.record_care(animal, "vaccination", when, True, "CDT", ""), event)
+        self.assertEqual(
+            records.record_care(animal, "vaccination", when, True, "CDT", "", dosage="2 mL"),
+            event,
+        )
 
         records.record_cost(animal, "18.00", "", True, lifecycle_event_id=event)
         lifecycle_cost = next(sql for sql in seen if "18.00" in sql)
@@ -269,6 +340,46 @@ class LivestockPostgresRecordTests(unittest.TestCase):
         with self.assertRaises(LivestockPostgresError):
             records.record_cost(animal, "5", "", True, lifecycle_event_id="not-a-uuid")
         self.assertEqual(len(seen), before)
+
+    def test_retired_animal_can_correct_existing_care_feed_and_cost(self) -> None:
+        seen: list[str] = []
+        new_id = "11111111-2222-4333-8444-5555555555f8"
+
+        def runner(sql: str) -> str:
+            seen.append(sql)
+            if "SELECT reason FROM ranchos.livestock_animal_retirements" in sql:
+                return "deceased"
+            return new_id
+
+        records = LivestockPostgresRecords(runner)
+        animal = "11111111-2222-4333-8444-555555555551"
+        record = "11111111-2222-4333-8444-555555555571"
+        when = "2026-10-03T14:00:00Z"
+        with self.assertRaisesRegex(LivestockPostgresError, "retired animal cannot"):
+            records.record_care(animal, "observation", when, False)
+        with self.assertRaisesRegex(LivestockPostgresError, "retired animal cannot"):
+            records.record_consumption(animal, "hay", "1", "bale", when, "", "", "daily")
+        with self.assertRaisesRegex(LivestockPostgresError, "retired animal cannot"):
+            records.record_cost(animal, "5", "", True)
+        with self.assertRaisesRegex(LivestockPostgresError, "retired animal cannot"):
+            records.correct_lifecycle(animal, record, when, "incorrect_time", True)
+        self.assertFalse(any("INSERT INTO ranchos.livestock_care_events" in sql for sql in seen))
+        self.assertFalse(any("INSERT INTO ranchos.livestock_input_consumption" in sql for sql in seen))
+        self.assertFalse(any("INSERT INTO ranchos.livestock_cost_attributions" in sql for sql in seen))
+        self.assertFalse(any("INSERT INTO ranchos.livestock_lifecycle_events" in sql for sql in seen))
+
+        self.assertEqual(records.correct_care(animal, record, when, "duplicate_entry", True), new_id)
+        self.assertIn("INSERT INTO ranchos.livestock_care_events", seen[-1])
+        self.assertEqual(
+            records.correct_consumption(
+                animal, record, "1", "bale", "daily", when, "", "", "duplicate_entry", True
+            ),
+            new_id,
+        )
+        self.assertIn("INSERT INTO ranchos.livestock_input_consumption", seen[-1])
+        self.assertEqual(records.correct_cost(animal, record, "", "duplicate_entry", True), new_id)
+        self.assertIn("INSERT INTO ranchos.livestock_cost_attributions", seen[-1])
+        self.assertFalse(any("SELECT reason FROM ranchos.livestock_animal_retirements" in sql for sql in seen[-3:]))
 
     def test_care_feed_and_cost_corrections_supersede_the_current_record(self) -> None:
         seen: list[str] = []
@@ -395,7 +506,7 @@ class LivestockPostgresRecordTests(unittest.TestCase):
         before = len(seen)
         records.correct_care(animal, record, when, "duplicate_entry", True)
         self.assertNotIn("WITH corrected AS", seen[-1])
-        self.assertEqual(len(seen), before + 2)
+        self.assertEqual(len(seen), before + 1)
 
     def test_feed_cost_links_to_its_feed_record(self) -> None:
         seen: list[str] = []
@@ -511,6 +622,7 @@ class LivestockPostgresRecordTests(unittest.TestCase):
                 occurred_at="2026-10-16T14:00:00Z",
                 confirmed=True,
                 item_name="CDT",
+                dosage="2 mL",
                 herd_id=herd,
             ),
             new_id,
@@ -518,6 +630,7 @@ class LivestockPostgresRecordTests(unittest.TestCase):
         care_sql = next(item for item in seen if "INSERT INTO ranchos.livestock_care_events" in item)
         self.assertIn(f"'{herd}'", care_sql)
         self.assertIn("'vaccination'", care_sql)
+        self.assertIn("'2 mL'", care_sql)
         records.record_cost(
             amount="12",
             finance_reference="",
@@ -742,6 +855,49 @@ class LivestockPostgresRecordTests(unittest.TestCase):
         records.update_classification(animal, "breeding", "")
         self.assertIn("breed_code = NULL", seen[-1])
 
+    def test_breeding_saves_sire_dam_and_mate_and_rejects_a_cycle(self) -> None:
+        seen: list[str] = []
+        cow = "11111111-2222-4333-8444-555555555551"
+        bull = "11111111-2222-4333-8444-555555555552"
+        calf = "11111111-2222-4333-8444-555555555553"
+        species = {
+            cow: "cattle",
+            bull: "cattle",
+            calf: "cattle",
+        }
+        descendants: set[str] = set()
+
+        def runner(sql: str) -> str:
+            seen.append(sql)
+            if "SELECT species_code" in sql:
+                for animal_id, code in species.items():
+                    if f"id = '{animal_id}'" in sql:
+                        return code
+                return ""
+            if "WITH RECURSIVE offspring" in sql:
+                return calf if calf in descendants else ""
+            if "SET sire_animal_id" in sql:
+                for animal_id in species:
+                    if f"AND id = '{animal_id}'" in sql:
+                        return animal_id.lower()
+            return cow.lower()
+
+        records = LivestockPostgresRecords(runner)
+        with self.assertRaises(LivestockPostgresError):
+            records.update_breeding(cow, sire_id=cow)
+        records.update_breeding(cow, sire_id="", dam_id="", bred_with_id=bull)
+        saved = next(sql for sql in seen if "SET sire_animal_id" in sql)
+        self.assertIn("bred_with_animal_id", saved)
+        self.assertIn(bull, saved)
+        self.assertIn("species_code <> 'pet'", saved)
+        records.update_breeding(calf, sire_id=bull, dam_id=cow)
+        pedigree = next(sql for sql in reversed(seen) if "SET sire_animal_id" in sql)
+        self.assertIn(bull, pedigree)
+        self.assertIn(cow, pedigree)
+        descendants.add(calf)
+        with self.assertRaisesRegex(LivestockPostgresError, "descendant"):
+            records.update_breeding(bull, sire_id=calf)
+
     def test_rename_trims_names_and_rejects_a_duplicate_herd(self) -> None:
         seen: list[str] = []
         animal = "11111111-2222-4333-8444-555555555551"
@@ -794,14 +950,21 @@ class LivestockPostgresRecordTests(unittest.TestCase):
         self.assertIn("'scoop'", saved)
         records.record_consumption(animal, "prepared_meal", "1", "cup", "2026-10-13T14:00:00Z", "", "", "daily")
         self.assertIn("'cup'", seen[-1])
-        records.record_care(animal, "vaccination", "2026-10-13T14:00:00Z", True, "  CDT  ", "")
+        with self.assertRaisesRegex(LivestockPostgresError, "require a dosage"):
+            records.record_care(animal, "vaccination", "2026-10-13T14:00:00Z", True, "CDT", "")
+        with self.assertRaisesRegex(LivestockPostgresError, "only recorded"):
+            records.record_care(animal, "observation", "2026-10-13T14:00:00Z", False, "", "", dosage="2 mL")
+        records.record_care(animal, "vaccination", "2026-10-13T14:00:00Z", True, "  CDT  ", "", dosage="  2 mL  ")
         shot = seen[-1]
         self.assertIn("'CDT'", shot)
-        self.assertIn("NULL", shot)
-        records.record_care(animal, "medication_administration", "2026-10-13T15:00:00Z", True, "", "pills")
+        self.assertIn("'2 mL'", shot)
+        records.record_care(
+            animal, "medication_administration", "2026-10-13T15:00:00Z", True, "", "pills", dosage="5 mL"
+        )
         medicine = seen[-1]
         self.assertIn("'pills'", medicine)
+        self.assertIn("'5 mL'", medicine)
         with self.assertRaisesRegex(LivestockPostgresError, "too long"):
-            records.record_care(animal, "vaccination", "2026-10-13T14:00:00Z", True, "x" * 81, "")
+            records.record_care(animal, "vaccination", "2026-10-13T14:00:00Z", True, "x" * 81, "", dosage="2 mL")
         with self.assertRaises(LivestockPostgresError):
             records.record_consumption(animal, "corn", "1", "flake", "2026-10-13T14:00:00Z", "", "", "daily")

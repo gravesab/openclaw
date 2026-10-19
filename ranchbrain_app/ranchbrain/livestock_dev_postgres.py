@@ -12,6 +12,8 @@ import subprocess
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
+from ranchbrain.livestock_read_api import HubLivestockDashboardV1, build_hub_dashboard_from_live_records
+
 TENANT_UUID = "11111111-2222-4333-8444-555555555501"
 USER_UUID = "11111111-2222-4333-8444-555555555502"
 PRINCIPAL_UUID = "11111111-2222-4333-8444-555555555503"
@@ -26,6 +28,7 @@ LIFECYCLE_CORRECTION_REASONS = frozenset({"incorrect_time", "incorrect_value", "
 COST_CORRECTION_REASONS = frozenset({"incorrect_value", "duplicate_entry"})
 CARE_TYPES = frozenset({"observation", "treatment", "surgery", "vaccination", "medication_administration"})
 HIGH_IMPACT_CARE = frozenset({"surgery", "vaccination", "medication_administration"})
+MEDICINE_CARE = frozenset({"vaccination", "medication_administration"})
 INPUT_TYPES = frozenset({
     "feed", "hay", "mineral", "supplement", "dry_food", "wet_food",
     "pasture", "grass_hay", "alfalfa_hay", "corn", "corn_silage", "oats", "prepared_meal",
@@ -106,30 +109,34 @@ class LivestockPostgresError(RuntimeError):
 
 
 def ssh_psql(sql: str) -> str:
-    completed = subprocess.run(
-        [
-            "ssh",
-            "SSH-Dev",
-            "docker",
-            "exec",
-            "-i",
-            "openclaw-ai-postgres-dev",
-            "psql",
-            "-U",
-            "ranchos_dev_runtime",
-            "-d",
-            "ranchos_livestock_dev",
-            "-v",
-            "ON_ERROR_STOP=1",
-            "-A",
-            "-t",
-            "-q",
-        ],
-        input=sql,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            [
+                "ssh",
+                "SSH-Dev",
+                "docker",
+                "exec",
+                "-i",
+                "openclaw-ai-postgres-dev",
+                "psql",
+                "-U",
+                "ranchos_dev_runtime",
+                "-d",
+                "ranchos_livestock_dev",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-A",
+                "-t",
+                "-q",
+            ],
+            input=sql,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=45,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise LivestockPostgresError("livestock database query timed out") from error
     if completed.returncode != 0:
         detail = completed.stderr.strip().splitlines()
         message = next((line for line in reversed(detail) if line.startswith("ERROR:")), "livestock database query failed")
@@ -169,6 +176,11 @@ class LivestockPostgresRecords:
         if not isinstance(parsed, list):
             raise LivestockPostgresError("livestock database returned an unexpected herd list")
         return parsed
+
+    def hub_dashboard(self, ranch_name: str) -> HubLivestockDashboardV1:
+        """RanchOS TV/iPhone herd cards, summarized here from DEV Postgres."""
+
+        return build_hub_dashboard_from_live_records(ranch_name, self.animals(), self.herds())
 
     def create_herd(self, name: str, notes: str = "") -> str:
         cleaned = " ".join(name.split())
@@ -418,6 +430,70 @@ class LivestockPostgresRecords:
         if updated.strip().lower() != animal_id.lower():
             raise LivestockPostgresError("the animal was not found")
 
+    def update_breeding(self, animal_id: str, sire_id: str = "", dam_id: str = "", bred_with_id: str = "") -> None:
+        require_uuid(animal_id)
+        species = self._animal_species(animal_id)
+        if species == "pet":
+            raise LivestockPostgresError("a pet does not have a breeding record")
+        sire_sql = self._relative_sql(animal_id, sire_id, species, "sire")
+        dam_sql = self._relative_sql(animal_id, dam_id, species, "dam")
+        mate_sql = self._relative_sql(animal_id, bred_with_id, species, "mate")
+        cleaned_sire = sire_id.strip()
+        cleaned_dam = dam_id.strip()
+        if cleaned_sire and cleaned_dam and cleaned_sire.lower() == cleaned_dam.lower():
+            raise LivestockPostgresError("sire and dam must be two different animals")
+        self._assert_not_descendant(animal_id, cleaned_sire, "sire")
+        self._assert_not_descendant(animal_id, cleaned_dam, "dam")
+        updated = self._runner(_session(self._breeding_sql(animal_id, sire_sql, dam_sql, mate_sql)))
+        if updated.strip().lower() != animal_id.lower():
+            raise LivestockPostgresError("the animal was not found")
+
+    def _relative_sql(self, animal_id: str, relative_id: str, species: str, role: str) -> str:
+        cleaned = relative_id.strip()
+        if not cleaned:
+            return "NULL"
+        require_uuid(cleaned)
+        if cleaned.lower() == animal_id.lower():
+            raise LivestockPostgresError(f"an animal cannot be its own {role}")
+        relative_species = self._animal_species(cleaned)
+        if relative_species != species:
+            raise LivestockPostgresError(f"{role} must be the same species")
+        return quote(cleaned)
+
+    def _assert_not_descendant(self, animal_id: str, relative_id: str, role: str) -> None:
+        cleaned = relative_id.strip()
+        if not cleaned:
+            return
+        found = self._runner(_session(self._descendant_sql(animal_id, cleaned)))
+        if found.strip().lower() == cleaned.lower():
+            raise LivestockPostgresError(f"{role} cannot be a descendant of this animal")
+
+    def _breeding_sql(self, animal_id: str, sire_sql: str, dam_sql: str, mate_sql: str) -> str:
+        return f"""
+        UPDATE ranchos.livestock_animals
+        SET sire_animal_id = {sire_sql}, dam_animal_id = {dam_sql}, bred_with_animal_id = {mate_sql}
+        WHERE tenant_id = {quote(TENANT_UUID)}
+          AND id = {quote(animal_id)}
+          AND species_code <> 'pet'
+        RETURNING id::text
+        """
+
+    def _descendant_sql(self, animal_id: str, relative_id: str) -> str:
+        return f"""
+        WITH RECURSIVE offspring AS (
+          SELECT child.id
+          FROM ranchos.livestock_animals child
+          WHERE child.tenant_id = {quote(TENANT_UUID)}
+            AND (child.sire_animal_id = {quote(animal_id)} OR child.dam_animal_id = {quote(animal_id)})
+          UNION
+          SELECT child.id
+          FROM ranchos.livestock_animals child
+          JOIN offspring parent ON child.tenant_id = {quote(TENANT_UUID)}
+            AND (child.sire_animal_id = parent.id OR child.dam_animal_id = parent.id)
+        )
+        SELECT id::text FROM offspring WHERE id = {quote(relative_id)}
+        """
+
     def _require_retirement_reason(self, reason: str) -> None:
         if reason not in RETIREMENT_REASONS:
             raise LivestockPostgresError("retirement reason is not accepted")
@@ -449,6 +525,7 @@ class LivestockPostgresRecords:
         item_name: str = "",
         item_kind: str = "",
         herd_id: str = "",
+        dosage: str = "",
     ) -> str:
         animal = animal_id.strip()
         herd = herd_id.strip()
@@ -462,6 +539,7 @@ class LivestockPostgresRecords:
             raise LivestockPostgresError("surgery, vaccination, and medication require confirmation")
         name = _blankable_label(item_name, "shot or medicine")
         kind = _blankable_label(item_kind, "kind")
+        dose = _care_dosage(event_type, dosage, required=True)
         if animal:
             require_uuid(animal)
             self._assert_open_for_records(animal)
@@ -469,7 +547,7 @@ class LivestockPostgresRecords:
             require_uuid(herd)
             self._assert_herd_open(herd)
         return self._runner(
-            _session(self._care_sql(animal, event_type, occurred_at, confirmed, name, kind, herd))
+            _session(self._care_sql(animal, event_type, occurred_at, confirmed, name, kind, herd, dose))
         ).strip()
 
     def record_consumption(
@@ -644,6 +722,7 @@ class LivestockPostgresRecords:
         cost_id: str = "",
         cost_amount: str = "",
         herd_id: str = "",
+        dosage: str = "",
     ) -> str:
         animal = animal_id.strip()
         herd = herd_id.strip()
@@ -662,8 +741,10 @@ class LivestockPostgresRecords:
             raise LivestockPostgresError("care time is not accepted")
         name = _blankable_label(item_name, "shot or medicine")
         kind = _blankable_label(item_kind, "kind")
+        dose = _blankable_label(dosage, "dosage")
         name_sql = "NULL" if not name else quote(name)
         kind_sql = "NULL" if not kind else quote(kind)
+        dose_sql = "NULL" if not dose else quote(dose)
         follow = self._cost_follow(reason, cost_id, cost_amount)
         guard = ""
         if follow:
@@ -671,19 +752,17 @@ class LivestockPostgresRecords:
                 "livestock_care_events", "supersedes_event_id", "care_event_id",
                 animal, event_id, follow[0], herd_id=herd,
             )
-        if animal:
-            self._assert_open_for_records(animal)
-        else:
+        if herd:
             self._assert_herd_open(herd)
         statement = f"""
         INSERT INTO ranchos.livestock_care_events (
-          tenant_id, id, animal_id, herd_id, event_type, occurred_at, confirmed_at, item_name, item_kind,
+          tenant_id, id, animal_id, herd_id, event_type, occurred_at, confirmed_at, item_name, item_kind, dosage,
           supersedes_event_id, correction_reason,
           provenance_source_type, provenance_source_id, provenance_source_version, provenance_observed_at,
           created_by_user_id
         )
         SELECT {quote(TENANT_UUID)}, gen_random_uuid(), target.animal_id, target.herd_id, target.event_type,
-               {quote(occurred_at)}::timestamptz, CURRENT_TIMESTAMP, {name_sql}, {kind_sql},
+               {quote(occurred_at)}::timestamptz, CURRENT_TIMESTAMP, {name_sql}, {kind_sql}, {dose_sql},
                target.id, {quote(reason)},
                'ranch_record', gen_random_uuid()::text, 'read-model-v1', CURRENT_TIMESTAMP, {quote(USER_UUID)}
         FROM ranchos.livestock_care_events target
@@ -749,9 +828,7 @@ class LivestockPostgresRecords:
                 "livestock_input_consumption", "supersedes_consumption_id", "consumption_id",
                 animal, consumption_id, follow[0], herd_id=herd,
             )
-        if animal:
-            self._assert_open_for_records(animal)
-        else:
+        if herd:
             self._assert_herd_open(herd)
         statement = f"""
         INSERT INTO ranchos.livestock_input_consumption (
@@ -812,9 +889,7 @@ class LivestockPostgresRecords:
             raise LivestockPostgresError("cost correction reason is not accepted")
         # A duplicate keeps the earlier amount; the read model drops the whole chain from totals.
         value_sql = "target.amount" if reason == "duplicate_entry" else _nonzero(amount, "amount")
-        if animal:
-            self._assert_open_for_records(animal)
-        else:
+        if herd:
             self._assert_herd_open(herd)
         inserted = self._runner(
             _session(
@@ -985,6 +1060,9 @@ class LivestockPostgresRecords:
             'pet_mix_two', a.pet_mix_two,
             'pet_species', a.pet_species,
             'pet_species_other', a.pet_species_other,
+            'sire_animal_id', a.sire_animal_id,
+            'dam_animal_id', a.dam_animal_id,
+            'bred_with_animal_id', a.bred_with_animal_id,
             'lifecycle_status', 'active',
             'retirement_reason', (
               SELECT r.reason FROM ranchos.livestock_animal_retirements r
@@ -1043,6 +1121,7 @@ class LivestockPostgresRecords:
                 'occurred_at', to_char(c.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
                 'item_name', c.item_name,
                 'item_kind', c.item_kind,
+                'dosage', c.dosage,
                 'supersedes_id', c.supersedes_event_id,
                 'correction_reason', c.correction_reason,
                 'current', NOT EXISTS (
@@ -1139,6 +1218,7 @@ class LivestockPostgresRecords:
                 'occurred_at', to_char(c.occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
                 'item_name', c.item_name,
                 'item_kind', c.item_kind,
+                'dosage', c.dosage,
                 'supersedes_id', c.supersedes_event_id,
                 'correction_reason', c.correction_reason,
                 'current', NOT EXISTS (
@@ -1425,20 +1505,22 @@ class LivestockPostgresRecords:
         item_name: str,
         item_kind: str,
         herd_id: str = "",
+        dosage: str = "",
     ) -> str:
         confirmed_sql = "CURRENT_TIMESTAMP" if confirmed else "NULL"
         name_sql = "NULL" if not item_name else quote(item_name)
         kind_sql = "NULL" if not item_kind else quote(item_kind)
+        dose_sql = "NULL" if not dosage else quote(dosage)
         animal_sql = "NULL" if herd_id else quote(animal_id)
         herd_sql = quote(herd_id) if herd_id else "NULL"
         return f"""
         INSERT INTO ranchos.livestock_care_events (
-          tenant_id, id, animal_id, herd_id, event_type, occurred_at, confirmed_at, item_name, item_kind,
+          tenant_id, id, animal_id, herd_id, event_type, occurred_at, confirmed_at, item_name, item_kind, dosage,
           provenance_source_type, provenance_source_id, provenance_source_version, provenance_observed_at,
           created_by_user_id
         ) VALUES (
           {quote(TENANT_UUID)}, gen_random_uuid(), {animal_sql}, {herd_sql}, {quote(event_type)}, {quote(occurred_at)}::timestamptz,
-          {confirmed_sql}, {name_sql}, {kind_sql},
+          {confirmed_sql}, {name_sql}, {kind_sql}, {dose_sql},
           'ranch_record', gen_random_uuid()::text, 'read-model-v1', CURRENT_TIMESTAMP, {quote(USER_UUID)}
         )
         RETURNING id::text
@@ -1569,6 +1651,17 @@ def _nonzero(value: str, label: str) -> str:
     if number == 0:
         raise LivestockPostgresError(f"{label} must be a number other than zero")
     return format(number, "f")
+
+
+def _care_dosage(event_type: str, dosage: str, *, required: bool) -> str:
+    dose = _blankable_label(dosage, "dosage")
+    if event_type in MEDICINE_CARE:
+        if required and not dose:
+            raise LivestockPostgresError("vaccination and medication require a dosage")
+        return dose
+    if dose:
+        raise LivestockPostgresError("dosage is only recorded for vaccination and medication")
+    return ""
 
 
 def _blankable_label(value: str, label: str) -> str:

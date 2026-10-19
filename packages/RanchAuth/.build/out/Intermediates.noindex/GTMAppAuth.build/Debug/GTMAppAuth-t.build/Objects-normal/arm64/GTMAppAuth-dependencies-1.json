@@ -1,0 +1,344 @@
+[
+  {
+    "isFramework" : true,
+    "moduleName" : "Combine",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Combine-2XVH8LXT0J9MT.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "CoreFoundation",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/CoreFoundation-77NIKAFGG8FO.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Darwin",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Darwin-2FCSCBPAPLQBG.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Dispatch",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Dispatch-1395Q10XG9NX0.swiftmodule"
+  },
+  {
+    "isFramework" : true,
+    "moduleName" : "Foundation",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Foundation-SCLPUTW4D1K3.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "IOKit",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/IOKit-KQTDYWPX32B8.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "ObjectiveC",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/ObjectiveC-1F3VR74IY4U4Q.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Observation",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Observation-3U3Q811HV8JR7.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "Swift",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Swift-3NDDGIHLPP5MQ.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "SwiftOnoneSupport",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/SwiftOnoneSupport-3LNCGOP6B2HVL.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "System",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/System-1VE4ZGV17UDQH.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "XPC",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/XPC-3OS5CXT6DKMNS.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_Builtin_float",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Builtin_float-3AMFWDS2Z2IZC.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_Concurrency",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Concurrency-21JO0A65L4A88.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation1",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_DarwinFoundation1-3535EWKZ6SGZP.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation2",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_DarwinFoundation2-2HSYNAL6NE8SL.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation3",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_DarwinFoundation3-2HJML36ZIYSFY.swiftmodule"
+  },
+  {
+    "isFramework" : false,
+    "moduleName" : "_StringProcessing",
+    "modulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_StringProcessing-B2S4HI1A0GQ6.swiftmodule"
+  },
+  {
+    "clangModuleMapPath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/Intermediates.noindex\/GeneratedModuleMaps\/AppAuthCore.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/Intermediates.noindex\/SwiftExplicitPrecompiledModules\/AppAuthCore-15YQ7ZYCY7BXQZK0R52EE4JMJ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "AppAuthCore"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/System\/Library\/Frameworks\/CFNetwork.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/CFNetwork-CWKE0RVUK9GLBF8H4G1QKFGM4.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CFNetwork"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/System\/Library\/Frameworks\/CoreFoundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/CoreFoundation-E5NIUH19FE8DJSYQ23FOYCFS.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreFoundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/System\/Library\/Frameworks\/CoreServices.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/CoreServices-27U5SEX1NI0VWK2Y72ADFYDM5.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "CoreServices"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/Darwin.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Darwin-4NGU3DM90FPNAARM4ZA1962II.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Darwin"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/System\/Library\/Frameworks\/DiskArbitration.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/DiskArbitration-DMXEUE1K7DAC0OKC2BG2NGRRP.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "DiskArbitration"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/dispatch.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Dispatch-CVASXG48Q2IZFETIFJYSR12AX.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Dispatch"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/System\/Library\/Frameworks\/Foundation.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Foundation-2W0D8DMC0TRHZ8I66VC20H6BS.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Foundation"
+  },
+  {
+    "clangModuleMapPath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/Intermediates.noindex\/GeneratedModuleMaps\/GTMSessionFetcherCore.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/Intermediates.noindex\/SwiftExplicitPrecompiledModules\/GTMSessionFetcherCore-96FS706K661NM3BJVG5V5Q9ID.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "GTMSessionFetcherCore"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/System\/Library\/Frameworks\/IOKit.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/IOKit-3BMQPJ3VLP7LHTZNIY3IOTEBS.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "IOKit"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/DarwinBasic.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/MachO-9I0AZUJN51WBQOETIHFJE2O7Z.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "MachO"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/ObjectiveC.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/ObjectiveC-9M81PL6C0P08S345UNBRVTCI4.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ObjectiveC"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/System\/Library\/Frameworks\/Security.framework\/Modules\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/Security-E8HBC1JNG0F9IGV0ZS6VCFRSD.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "Security"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/lib\/swift\/shims\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/SwiftShims-D0EI9PJZJ2YOD0VYQEGFIUHX0.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "SwiftShims"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/xpc.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/XPC-7WD5U2FRU17QBCI5NYZ2LQAO6.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "XPC"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/DarwinFoundation1.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_AvailabilityInternal-DDOO414N4EMPI8BEZGTKTTXC.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_AvailabilityInternal"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Builtin_float-B8U39UBZAR8539SJ338M2THXK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_float"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Builtin_inttypes-CECTEUZE1OLQ1Q8X4QJOMBD10.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_inttypes"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Builtin_limits-7GX47ODXDZ4DP1QK0JH51ND9L.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_limits"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Builtin_stdarg-4YQ2O4WHXVNEGVPDQBCWNS88J.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdarg"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Builtin_stdbool-79PE1LW1CE4QJLBB0Q25KVG67.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdbool"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Builtin_stddef-1HCORK20518XK0RV5W73SUQTK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stddef"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_Builtin_stdint-CPDVPYLUG0N8Q1ILRK8R4U8FL.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_Builtin_stdint"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/DarwinFoundation1.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_DarwinFoundation1-ERXMBTKH2WBCGE2JL6CWBRD8C.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation1"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/DarwinFoundation2.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_DarwinFoundation2-1MMGEAX735Z1O2K3ZJ0TK3GGG.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation2"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/DarwinFoundation3.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_DarwinFoundation3-4ONPT7ZOAYXL26QS3CIZZYRZU.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_DarwinFoundation3"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/lib\/swift\/shims\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/_SwiftConcurrencyShims-BUW3KFQGV2UX7ANFP9CPO0LV9.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "_SwiftConcurrencyShims"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/launch.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/launch-OD9B9FUO1WRVM7RZSZV8XMOV.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "launch"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/libDER\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/libDER-8T4IESP07NIWUHE9CMXB55QXO.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "libDER"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/libkern.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/libkern-8ZNUMBV2A1V7PR2LO7ANL6E17.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "libkern"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/os_object-BR5OBFY9JQZD08HOFZK845ALS.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os_object"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/os.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/os_workgroup-8LT2R01FMWHIGKXPC4JINS7LZ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "os_workgroup"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/ptrauth-C44RLCW09XESASXJ3C64EKIU8.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ptrauth"
+  },
+  {
+    "clangModuleMapPath" : "\/Library\/Developer\/CommandLineTools\/usr\/lib\/clang\/21\/include\/module.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/ptrcheck-9QFASI1BXRET5N2OCD49DEGUK.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "ptrcheck"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/c_standard_library.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/string_h-1TKFHFGYP95HIAMOJGS9SZBY9.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "string_h"
+  },
+  {
+    "clangModuleMapPath" : "\/Applications\/Xcode-beta.app\/Contents\/Developer\/Platforms\/MacOSX.platform\/Developer\/SDKs\/MacOSX.sdk\/usr\/include\/DarwinFoundation2.modulemap",
+    "clangModulePath" : "\/Users\/andrewgraves\/Developer\/OpenClaw-DEV\/packages\/RanchAuth\/.build\/out\/SDKExplicitPrecompiledModules\/sys_types-DCF7IGSHR5MQY52JT3QRNLCUQ.pcm",
+    "isBridgingHeaderDependency" : false,
+    "isFramework" : false,
+    "moduleName" : "sys_types"
+  }
+]

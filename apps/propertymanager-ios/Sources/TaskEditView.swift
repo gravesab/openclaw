@@ -53,23 +53,31 @@ struct TaskEditView: View {
                     ForEach($parts) { $part in
                         VStack(alignment: .leading, spacing: 10) {
                             TextField("Part name", text: $part.name)
+                                .appleIntelligenceDictation($part.name)
                             TextField("Vendor", text: $part.vendor)
+                                .appleIntelligenceDictation($part.vendor)
                             TextField("Part #", text: $part.partNumber)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .appleIntelligenceDictation($part.partNumber)
                             TextField("OEM part #", text: $part.oemPartNumber)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .appleIntelligenceDictation($part.oemPartNumber)
                             TextField("Quantity", text: $part.quantityText)
                                 .keyboardType(.decimalPad)
+                                .appleIntelligenceDictation($part.quantityText)
                             TextField("Cost", text: $part.costText)
                                 .keyboardType(.decimalPad)
+                                .appleIntelligenceDictation($part.costText)
                             TextField("Supply / buy URL", text: $part.buyURL)
                                 .textInputAutocapitalization(.never)
                                 .keyboardType(.URL)
                                 .autocorrectionDisabled()
+                                .appleIntelligenceDictation($part.buyURL)
                             TextField("Part notes", text: $part.notes, axis: .vertical)
                                 .lineLimit(2...5)
+                                .appleIntelligenceDictation($part.notes)
                             Button("Remove part", role: .destructive) {
                                 parts.removeAll { $0.id == part.id }
                             }
@@ -91,17 +99,22 @@ struct TaskEditView: View {
 
                 Section("Primary part fields") {
                     TextField("Vendor", text: $vendor)
+                        .appleIntelligenceDictation($vendor)
                     TextField("Part #", text: $partNumber)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .appleIntelligenceDictation($partNumber)
                     TextField("Part URL", text: $partURL)
                         .textInputAutocapitalization(.never)
                         .keyboardType(.URL)
                         .autocorrectionDisabled()
+                        .appleIntelligenceDictation($partURL)
                     TextField("Part cost", text: $partCostText)
                         .keyboardType(.decimalPad)
+                        .appleIntelligenceDictation($partCostText)
                     TextField("Annual cost", text: $annualCostText)
                         .keyboardType(.decimalPad)
+                        .appleIntelligenceDictation($annualCostText)
                 }
 
 
@@ -109,8 +122,10 @@ struct TaskEditView: View {
                     Section("Run hours trigger") {
                         TextField("Due when meter reaches (hours)", text: $triggerHoursText)
                             .keyboardType(.decimalPad)
+                            .appleIntelligenceDictation($triggerHoursText)
                         TextField("Repeat every (hours)", text: $intervalHoursText)
                             .keyboardType(.decimalPad)
+                            .appleIntelligenceDictation($intervalHoursText)
                         if let badge = task.runHoursBadge {
                             Text(badge)
                                 .font(.caption)
@@ -126,10 +141,13 @@ struct TaskEditView: View {
                     }
                     TextField("Description", text: $taskDescription, axis: .vertical)
                         .lineLimit(3...8)
+                        .appleIntelligenceDictation($taskDescription)
                     TextField("Supplies needed", text: $suppliesNeeded, axis: .vertical)
                         .lineLimit(2...6)
+                        .appleIntelligenceDictation($suppliesNeeded)
                     TextField("Notes", text: $notes, axis: .vertical)
                         .lineLimit(3...8)
+                        .appleIntelligenceDictation($notes)
                 }
 
                 if let localError {

@@ -1,4 +1,5 @@
 import Foundation
+import OpenClawChatUI
 import OpenClawKit
 import SwiftUI
 
@@ -123,6 +124,7 @@ private struct ManualEntryStep: View {
                 TextField("Paste setup code", text: self.$setupCode)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .appleIntelligenceDictation(self.$setupCode)
 
                 Button("Apply setup code") {
                     self.applySetupCode()
@@ -140,19 +142,23 @@ private struct ManualEntryStep: View {
                 TextField("Host", text: self.$manualHost)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .appleIntelligenceDictation(self.$manualHost)
 
                 TextField("Port", text: self.$manualPortText)
                     .keyboardType(.numberPad)
+                    .appleIntelligenceDictation(self.$manualPortText)
 
                 Toggle("Use TLS", isOn: self.$manualUseTLS)
 
                 TextField("Gateway token", text: self.$manualToken)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .appleIntelligenceDictation(self.$manualToken)
 
                 SecureField("Gateway password", text: self.$manualPassword)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .appleIntelligenceDictation(self.$manualPassword)
             }
 
             gatewayConnectionStatusSection(

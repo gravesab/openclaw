@@ -1,3 +1,4 @@
+import OpenClawChatUI
 import SwiftUI
 
 struct VoiceWakeOverlayView: View {
@@ -32,6 +33,9 @@ struct VoiceWakeOverlayView: View {
                         .focused(self.$textFocused)
                         .frame(maxWidth: .infinity, minHeight: 32, maxHeight: .infinity, alignment: .topLeading)
                         .id("editing")
+                        .appleIntelligenceDictation(Binding(
+                            get: { self.controller.model.text },
+                            set: { self.controller.updateText($0) }))
                 } else {
                     VibrantLabelView(
                         attributed: self.controller.model.attributed,

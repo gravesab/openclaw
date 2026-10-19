@@ -2,6 +2,7 @@ import AppKit
 import Observation
 import SwiftUI
 import UniformTypeIdentifiers
+import OpenClawChatUI
 
 struct DebugSettings: View {
     @Bindable var state: AppState
@@ -381,6 +382,7 @@ struct DebugSettings: View {
                             .textFieldStyle(.roundedBorder)
                             .font(.caption.monospaced())
                             .onSubmit { self.saveRelayRoot() }
+                            .appleIntelligenceDictation(self.$gatewayRootInput)
                         Button("Save") { self.saveRelayRoot() }
                             .buttonStyle(.borderedProminent)
                         Button("Reset") {
@@ -407,6 +409,7 @@ struct DebugSettings: View {
                                     .textFieldStyle(.roundedBorder)
                                     .font(.caption.monospaced())
                                     .frame(width: 360)
+                                    .appleIntelligenceDictation(self.$sessionStorePath)
                                 Button("Save") { self.saveSessionStorePath() }
                                     .buttonStyle(.borderedProminent)
                             }
@@ -553,6 +556,7 @@ struct DebugSettings: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.caption.monospaced())
                         .frame(width: 160)
+                        .appleIntelligenceDictation(self.$canvasSessionKey)
                     Button("Show panel") {
                         Task { await self.canvasPresent() }
                     }
@@ -575,6 +579,7 @@ struct DebugSettings: View {
                         .textFieldStyle(.roundedBorder)
                         .font(.caption.monospaced())
                         .frame(maxWidth: 520)
+                        .appleIntelligenceDictation(self.$canvasEvalJS)
                     Button("Eval") {
                         Task { await self.canvasEval() }
                     }

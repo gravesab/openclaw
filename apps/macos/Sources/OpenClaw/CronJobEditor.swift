@@ -1,6 +1,7 @@
 import Observation
 import OpenClawProtocol
 import SwiftUI
+import OpenClawChatUI
 
 struct CronJobEditor: View {
     let job: CronJob?
@@ -94,18 +95,21 @@ struct CronJobEditor: View {
                                 TextField("Required (e.g. “Daily summary”)", text: self.$name)
                                     .textFieldStyle(.roundedBorder)
                                     .frame(maxWidth: .infinity)
+                                    .appleIntelligenceDictation(self.$name)
                             }
                             GridRow {
                                 self.gridLabel("Description")
                                 TextField("Optional notes", text: self.$description)
                                     .textFieldStyle(.roundedBorder)
                                     .frame(maxWidth: .infinity)
+                                    .appleIntelligenceDictation(self.$description)
                             }
                             GridRow {
                                 self.gridLabel("Agent ID")
                                 TextField("Optional (default agent)", text: self.$agentId)
                                     .textFieldStyle(.roundedBorder)
                                     .frame(maxWidth: .infinity)
+                                    .appleIntelligenceDictation(self.$agentId)
                             }
                             GridRow {
                                 self.gridLabel("Enabled")
@@ -191,6 +195,7 @@ struct CronJobEditor: View {
                                     TextField("10m, 1h, 1d", text: self.$everyText)
                                         .textFieldStyle(.roundedBorder)
                                         .frame(maxWidth: .infinity)
+                                        .appleIntelligenceDictation(self.$everyText)
                                 }
                             case .cron:
                                 GridRow {
@@ -198,12 +203,14 @@ struct CronJobEditor: View {
                                     TextField("e.g. 0 9 * * 3", text: self.$cronExpr)
                                         .textFieldStyle(.roundedBorder)
                                         .frame(maxWidth: .infinity)
+                                        .appleIntelligenceDictation(self.$cronExpr)
                                 }
                                 GridRow {
                                     self.gridLabel("Timezone")
                                     TextField("Optional (e.g. America/Los_Angeles)", text: self.$cronTz)
                                         .textFieldStyle(.roundedBorder)
                                         .frame(maxWidth: .infinity)
+                                        .appleIntelligenceDictation(self.$cronTz)
                                 }
                             }
                         }
@@ -246,6 +253,7 @@ struct CronJobEditor: View {
                                         .textFieldStyle(.roundedBorder)
                                         .lineLimit(3...7)
                                         .frame(maxWidth: .infinity)
+                                        .appleIntelligenceDictation(self.$systemEventText)
                                 case .agentTurn:
                                     self.agentTurnEditor
                                 }
@@ -312,18 +320,21 @@ struct CronJobEditor: View {
                         .textFieldStyle(.roundedBorder)
                         .lineLimit(3...7)
                         .frame(maxWidth: .infinity)
+                        .appleIntelligenceDictation(self.$agentMessage)
                 }
                 GridRow {
                     self.gridLabel("Thinking")
                     TextField("Optional (e.g. low)", text: self.$thinking)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: .infinity)
+                        .appleIntelligenceDictation(self.$thinking)
                 }
                 GridRow {
                     self.gridLabel("Timeout")
                     TextField("Seconds (optional)", text: self.$timeoutSeconds)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 180, alignment: .leading)
+                        .appleIntelligenceDictation(self.$timeoutSeconds)
                 }
                 GridRow {
                     self.gridLabel("Delivery")
@@ -354,6 +365,7 @@ struct CronJobEditor: View {
                         TextField("Optional override (phone number / chat id / Discord channel)", text: self.$to)
                             .textFieldStyle(.roundedBorder)
                             .frame(maxWidth: .infinity)
+                            .appleIntelligenceDictation(self.$to)
                     }
                     GridRow {
                         self.gridLabel("Best-effort")

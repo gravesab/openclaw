@@ -1,0 +1,4 @@
+module AppAuth {
+umbrella "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/AppAuth-iOS/Sources/AppAuth"
+export *
+}

@@ -42,6 +42,7 @@ def install_stubs():
     flask.abort = lambda code: (_ for _ in ()).throw(PermissionError(code))
     flask.send_from_directory = lambda *_args, **_kwargs: None
     flask.stream_with_context = lambda function: function
+    flask.url_for = lambda *_args, **_kwargs: ""
     sys.modules["flask"] = flask
 
     requests = types.ModuleType("requests")
@@ -856,7 +857,73 @@ Kind          : Network
         arguments = run.call_args.args[0]
         self.assertIn("tmutil status", arguments[-1])
         self.assertIn("tmutil latestbackup", arguments[-1])
+        self.assertIn("OPENCLAW_SNAPSHOT", arguments[-1])
         self.assertNotIn("tmutil startbackup", arguments[-1])
+
+    def test_m4_time_machine_probe_uses_snapshot_when_backup_list_is_blocked(self):
+        output = """Andrew-M4-Max
+Backup session status:
+{
+    Running = 0;
+}
+OPENCLAW_LATEST_BACKUP
+tmutil: latestbackup requires Full Disk Access privileges.
+OPENCLAW_DESTINATION
+Name          : MacTimeMachine
+Kind          : Network
+OPENCLAW_SNAPSHOT
+2026-07-26-131055
+0
+"""
+        completed = mock.Mock(returncode=0, stdout=output, stderr="")
+        current = dashboard.datetime(2026, 7, 26, 14, 0, 0)
+        with (
+            mock.patch.object(
+                dashboard.subprocess,
+                "run",
+                return_value=completed,
+            ),
+            mock.patch.object(
+                dashboard,
+                "datetime",
+                wraps=dashboard.datetime,
+            ) as datetime_mock,
+        ):
+            datetime_mock.now.return_value = current
+            result = dashboard.backup_center_m4_time_machine()
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["status"], "healthy")
+        self.assertEqual(result["status_label"], "Current")
+        self.assertIn("MacTimeMachine", result["content"])
+        self.assertIn("2026-07-26", result["content"])
+
+    def test_m4_time_machine_probe_reports_failed_snapshot_result(self):
+        output = """Andrew-M4-Max
+Backup session status:
+{
+    Running = 0;
+}
+OPENCLAW_LATEST_BACKUP
+tmutil: latestbackup requires Full Disk Access privileges.
+OPENCLAW_DESTINATION
+Name          : MacTimeMachine
+OPENCLAW_SNAPSHOT
+2026-07-26-131055
+11
+"""
+        completed = mock.Mock(returncode=0, stdout=output, stderr="")
+        with mock.patch.object(
+            dashboard.subprocess,
+            "run",
+            return_value=completed,
+        ):
+            result = dashboard.backup_center_m4_time_machine()
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["status"], "critical")
+        self.assertEqual(result["status_label"], "Failed")
+        self.assertIn("result 11", result["content"])
 
     def test_backup_center_uses_remote_inventory_and_safe_controls(self):
         now = 1785110400.0

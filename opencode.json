@@ -1,0 +1,44 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "share": "disabled",
+  "formatter": false,
+  "instructions": [
+    "/Users/andrewgraves/.config/opencode/openclaw-dev-instructions.md"
+  ],
+  "enabled_providers": [
+    "ollama", "moonshot"
+  ],
+  "model": "ollama/openclaw-opencode-qwen3.5:9b",
+  "small_model": "ollama/openclaw-opencode-qwen3.5:9b",
+  "provider": {
+    "ollama": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Ollama on M4 (local only)",
+      "options": {
+        "baseURL": "http://127.0.0.1:11434/v1"
+      },
+      "models": {
+        "openclaw-opencode-qwen3.5:9b": {
+          "name": "Qwen3.5 9B \u00b7 OpenClaw DEV \u00b7 32K",
+          "tool_call": true,
+          "limit": {
+            "context": 32768,
+            "output": 4096
+          },
+          "options": {
+            "reasoningEffort": "none"
+          }
+        }
+      }
+    }
+  },
+  "snapshot": false,
+  "agent": {
+    "build": {
+      "temperature": 0.2
+    },
+    "plan": {
+      "temperature": 0.2
+    }
+  }
+}

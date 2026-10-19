@@ -1,0 +1,23 @@
+dependencies: \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX27.0.sdk/SDKSettings.json \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/DeviceCheckProvider/GACDeviceCheckProvider.m \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/GACAppCheckAvailability.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/Foundation-DWZAVYZ6QSY79VBSXJ0DY6DKL.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/usr/include/DarwinFoundation1.modulemap \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/Foundation.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/FBLPromises-1AJNGA6ZGQ9GU3UC2WH1URYB5.pcm \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/promises/Sources/FBLPromises/include/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/GACDeviceCheckProvider.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/GACAppCheckProvider.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Core/GACAppCheckLogger+Internal.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/GACAppCheckErrors.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/GACAppCheckLogger.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/DeviceCheckProvider/API/GACDeviceCheckAPIService.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/DeviceCheckProvider/DCDevice+GACDeviceCheckTokenGenerator.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/out/Intermediates.noindex/ExplicitPrecompiledModules/DeviceCheck-EJNODDQB2N1HLKUR5ANGUZACA.pcm \
+  /Applications/Xcode-beta.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk/System/Library/Frameworks/DeviceCheck.framework/Modules/module.modulemap \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/DeviceCheckProvider/GACDeviceCheckTokenGenerator.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/GACAppCheckToken.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/_GACAppCheckAPIService.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/_GACAppCheckBackoffWrapper.h \
+  /Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/app-check/AppCheckCore/Sources/Public/AppCheckCore/_GACAppCheckErrorUtil.h

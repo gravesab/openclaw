@@ -151,6 +151,8 @@ def list_memories(
         return results
 
     for path in sorted(base.rglob("*.json"), reverse=True):
+        if "_archive" in path.parts:
+            continue
         try:
             data = json.loads(path.read_text())
             memory = Memory.from_dict(data)

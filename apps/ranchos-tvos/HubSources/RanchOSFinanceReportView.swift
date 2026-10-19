@@ -1,16 +1,82 @@
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(iOS)
+import UIKit
+#endif
 
 /// Finance's Reports page: one month for one account, as the summary cards
-/// read it. tvOS compiles this and never presents it.
+/// read it. The iPhone and Apple TV open this summary. The Mac and iPad keep
+/// the full Finance screens.
+
+/// Monthly expense report for the iPhone and Apple TV. Accounts, categories,
+/// and statements stay on the Mac and iPad.
+struct RanchOSFinancePhoneSummary: View {
+    @State private var store = RanchOSFinanceStore()
+
+    var body: some View {
+#if os(iOS)
+        summary
+            .navigationBarTitleDisplayMode(.inline)
+            .safeAreaInset(edge: .top, spacing: 0) { summaryBanner }
+#elseif os(tvOS)
+        summary
+            .safeAreaInset(edge: .top, spacing: 0) { summaryBanner }
+#else
+        summary
+#endif
+    }
+
+    private var summary: some View {
+        RanchOSFinanceReportsPage(store: store)
+            .navigationTitle("Finance")
+            .background(.background)
+    }
+
+    private var summaryBanner: some View {
+        Text("Monthly summary. Accounts, categories, and statements stay on the Mac and iPad.")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background {
+#if os(tvOS)
+                Rectangle().fill(.regularMaterial)
+#else
+                Rectangle().fill(.bar)
+#endif
+            }
+    }
+}
 struct RanchOSFinanceReportsPage: View {
     let store: RanchOSFinanceStore
 
+    @Environment(\.scenePhase) private var scenePhase
     @State private var account = RanchOSFinanceChartAccountFilter.all
     @State private var monthID: String?
     @State private var openCategoryIDs: Set<UUID> = []
     @State private var exporting = false
     @State private var exportMessage: String?
+
+    /// Menu pickers fit the iPhone. Apple TV keeps the focus picker.
+    private var usesMenuPickers: Bool {
+#if os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+#else
+        false
+#endif
+    }
+
+    /// iPhone and Apple TV use the same stacked summary. Mac and iPad keep one line.
+    private var usesStackedSummary: Bool {
+#if os(tvOS)
+        true
+#elseif os(iOS)
+        UIDevice.current.userInterfaceIdiom == .phone
+#else
+        false
+#endif
+    }
 
     private var months: [RanchOSFinanceReadyMonth] { store.reportMonths(account: account) }
 
@@ -39,6 +105,10 @@ struct RanchOSFinanceReportsPage: View {
             .padding(20)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .onAppear { store.reloadFromDisk() }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { store.reloadFromDisk() }
+        }
     }
 
     private var filters: some View {
@@ -53,6 +123,7 @@ struct RanchOSFinanceReportsPage: View {
                         Text("No account").tag(RanchOSFinanceChartAccountFilter.unassigned)
                     }
                 }
+                .ranchReportPicker(phone: usesMenuPickers)
                 .onChange(of: account) { _, _ in
                     monthID = nil
                     openCategoryIDs = []
@@ -64,8 +135,9 @@ struct RanchOSFinanceReportsPage: View {
                             Text(month.label).tag(month.id)
                         }
                     }
+                    .ranchReportPicker(phone: usesMenuPickers)
                 }
-                Text("Opens on the latest month with transactions.")
+                Text("Opens on the latest month. Totals include every transaction kept for that month, through the newest one.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -87,24 +159,31 @@ struct RanchOSFinanceReportsPage: View {
         RanchOSFinanceChartBox("Monthly summary") {
             VStack(alignment: .leading, spacing: 8) {
                 Text("\(report.month.label) · \(report.accountLabel)")
-                    .font(.headline)
-                LabeledContent("Income", value: RanchOSFinanceMoney.format(report.income))
-                LabeledContent("Expenses", value: RanchOSFinanceMoney.format(report.expenses))
+                    .font(usesStackedSummary ? .subheadline.weight(.medium) : .headline)
+                Text(report.throughLabel)
+                    .font(.subheadline)
+                Text("These totals match the transactions kept for this month.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                reportLine("Income", value: RanchOSFinanceMoney.format(report.income))
+                reportLine("Expenses", value: RanchOSFinanceMoney.format(report.expenses))
                 Divider()
-                LabeledContent("Remaining") {
-                    Text(RanchOSFinanceMoney.format(report.remaining))
-                        .fontWeight(.semibold)
-                        .foregroundStyle(report.remaining < 0 ? Color.red : Color.primary)
-                }
-                LabeledContent("Transactions", value: "\(report.transactionCount)")
+                reportLine(
+                    "Remaining",
+                    value: RanchOSFinanceMoney.format(report.remaining),
+                    emphasize: true,
+                    tint: report.remaining < 0 ? Color.red : Color.primary)
+                reportLine("Transactions", value: "\(report.transactionCount)")
                 if report.duplicatesLeftOut > 0 {
-                    LabeledContent("Duplicates left out", value: "\(report.duplicatesLeftOut)")
+                    reportLine("Duplicates left out", value: "\(report.duplicatesLeftOut)")
                 }
-                LabeledContent(
+                reportLine(
                     RanchOSFinanceSuggestionLabels.uncategorized,
                     value: RanchOSFinanceMoney.format(report.uncategorizedExpenses))
                 if report.uncategorizedExpenses > 0 {
-                    Text("Assign these on Recent transactions or the Categories page.")
+                    Text(usesStackedSummary
+                        ? "These are assigned on the Mac or iPad."
+                        : "Assign these on Recent transactions or the Categories page.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -131,29 +210,22 @@ struct RanchOSFinanceReportsPage: View {
                             openCategoryIDs.insert(category.categoryID)
                         }
                     } label: {
-                        HStack {
-                            Image(systemName: openCategoryIDs.contains(category.categoryID)
-                                ? "chevron.down" : "chevron.right")
-                                .foregroundStyle(.secondary)
-                            Text(category.name)
-                            Spacer()
-                            Text("\(RanchOSFinanceMoney.format(category.total)) · \(category.percent)")
-                                .monospacedDigit()
-                        }
-                        .contentShape(Rectangle())
+                        categoryLine(category)
+                            .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
                     .accessibilityHint("Shows the vendors in this category")
                     if openCategoryIDs.contains(category.categoryID) {
                         ForEach(category.vendors) { vendor in
-                            LabeledContent(vendor.name, value: RanchOSFinanceMoney.format(vendor.total))
-                                .font(.subheadline)
+                            reportLine(vendor.name, value: RanchOSFinanceMoney.format(vendor.total))
                                 .padding(.leading, 28)
                         }
                     }
                 }
                 if !report.categories.isEmpty {
-                    Text("Largest first. Click a category to see its vendors.")
+                    Text(usesStackedSummary
+                        ? "Largest first. Select a category to see its vendors."
+                        : "Largest first. Click a category to see its vendors.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -166,13 +238,15 @@ struct RanchOSFinanceReportsPage: View {
         RanchOSFinanceChartBox("Expenses by chart filter") {
             VStack(alignment: .leading, spacing: 8) {
                 if report.groups.isEmpty {
-                    Text("No chart filters yet. On Charts, use New filter to make groups such as Ranch or Household.")
+                    Text(usesStackedSummary
+                        ? "No chart filters yet. Filters are made on the Mac or iPad."
+                        : "No chart filters yet. On Charts, use New filter to make groups such as Ranch or Household.")
                         .foregroundStyle(.secondary)
                 } else {
                     ForEach(report.groups) { group in
-                        LabeledContent(group.name, value: RanchOSFinanceMoney.format(group.expenses))
+                        reportLine(group.name, value: RanchOSFinanceMoney.format(group.expenses))
                     }
-                    LabeledContent("In no chart filter", value: RanchOSFinanceMoney.format(report.expensesOutsideGroups))
+                    reportLine("In no chart filter", value: RanchOSFinanceMoney.format(report.expensesOutsideGroups))
                         .foregroundStyle(.secondary)
                     Text(report.groupsOverlap
                         ? "Some categories are in more than one filter, so they count in each, and these lines add up to more than Expenses."
@@ -190,7 +264,7 @@ struct RanchOSFinanceReportsPage: View {
         return RanchOSFinanceChartBox("Same month last year") {
             VStack(alignment: .leading, spacing: 8) {
                 Text("\(report.month.label) compared with \(prior.label)")
-                    .font(.headline)
+                    .font(usesStackedSummary ? .subheadline.weight(.medium) : .headline)
                 compareRow("Income", now: report.income, then: prior.income)
                 compareRow("Expenses", now: report.expenses, then: prior.expenses)
                 if prior.categories.isEmpty {
@@ -212,17 +286,99 @@ struct RanchOSFinanceReportsPage: View {
     }
 
     private func compareRow(_ name: String, now: Decimal, then: Decimal) -> some View {
-        HStack {
-            Text(name)
-            Spacer()
-            Text("\(RanchOSFinanceMoney.format(now)) · \(RanchOSFinanceMoney.format(then))")
-                .monospacedDigit()
+        let figures = "\(RanchOSFinanceMoney.format(now)) · \(RanchOSFinanceMoney.format(then))"
+        return Group {
+            if usesStackedSummary {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name)
+                        .font(.subheadline)
+                    Text(figures)
+                        .font(.subheadline)
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                HStack {
+                    Text(name)
+                    Spacer()
+                    Text(figures)
+                        .monospacedDigit()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func categoryLine(_ category: RanchOSFinanceReportCategory) -> some View {
+        let figures = "\(RanchOSFinanceMoney.format(category.total)) · \(category.percent)"
+        if usesStackedSummary {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: openCategoryIDs.contains(category.categoryID)
+                        ? "chevron.down" : "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(category.name)
+                        .font(.subheadline.weight(.medium))
+                        .lineLimit(2)
+                }
+                Text(figures)
+                    .font(.subheadline)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 20)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } else {
+            HStack {
+                Image(systemName: openCategoryIDs.contains(category.categoryID)
+                    ? "chevron.down" : "chevron.right")
+                    .foregroundStyle(.secondary)
+                Text(category.name)
+                Spacer()
+                Text(figures)
+                    .monospacedDigit()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func reportLine(
+        _ title: String, value: String, emphasize: Bool = false, tint: Color = .primary
+    ) -> some View {
+        if usesStackedSummary {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.subheadline)
+                Text(value)
+                    .font(.subheadline.weight(emphasize ? .semibold : .regular))
+                    .monospacedDigit()
+                    .foregroundStyle(tint)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.vertical, 2)
+        } else if emphasize {
+            LabeledContent(title) {
+                Text(value)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(tint)
+            }
+        } else {
+            LabeledContent(title, value: value)
         }
     }
 
     @ViewBuilder
     private func export(_ report: RanchOSFinanceSummaryReport) -> some View {
-#if !os(tvOS)
+#if os(tvOS)
+        RanchOSFinanceChartBox("Export") {
+            Text("Export the CSV from the Mac or iPad.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+#elseif !os(tvOS)
         RanchOSFinanceChartBox("Export") {
             VStack(alignment: .leading, spacing: 8) {
                 Button("Export CSV") {
@@ -254,6 +410,17 @@ struct RanchOSFinanceReportsPage: View {
             }
         }
 #endif
+    }
+}
+
+private extension View {
+    @ViewBuilder
+    func ranchReportPicker(phone: Bool) -> some View {
+        if phone {
+            self.pickerStyle(.menu)
+        } else {
+            self
+        }
     }
 }
 

@@ -33,6 +33,12 @@ struct RanchOSFinanceScreen: View {
     @FocusState private var focusedLoanName: UUID?
     @State private var linkDrafts: [UUID: String] = [:]
     @State private var linkProblems: [UUID: String] = [:]
+#if os(macOS)
+    @State private var principalDrafts: [UUID: String] = [:]
+    @State private var principalDates: [UUID: Date] = [:]
+    @State private var principalProblems: [UUID: String] = [:]
+    @FocusState private var focusedPrincipal: UUID?
+#endif
     @FocusState private var focusedLink: UUID?
     @State private var editingLinks: Set<UUID> = []
     @State private var accountPendingRemoval: RanchOSFinanceAccount?
@@ -448,6 +454,11 @@ struct RanchOSFinanceScreen: View {
 #endif
                         .ranchEntry(loanPurposeBinding(account))
                     }
+#if os(macOS)
+                    if account.kind == .loan {
+                        loanPrincipalSection(account)
+                    }
+#endif
                     downloadLinkEditor(account)
                     Text("\(count) transactions on this account")
                         .font(.subheadline)
@@ -1758,6 +1769,93 @@ struct RanchOSFinanceScreen: View {
             set: { store.setLoanPurpose(accountID: account.id, purpose: $0) })
     }
 
+#if os(macOS)
+    @ViewBuilder
+    private func loanPrincipalSection(_ account: RanchOSFinanceAccount) -> some View {
+        if let current = store.principalBalance(accountID: account.id) {
+            Text("Payoff balance \(RanchOSFinanceMoney.dollarsAndCents(current.amount)) as of \(RanchOSFinanceDates.display(current.date))")
+                .font(.subheadline)
+            let earlier = store.principalHistory(accountID: account.id)
+                .filter { $0.date != current.date }
+                .sorted { $0.date > $1.date }
+            ForEach(earlier, id: \.date) { snap in
+                Text("Payoff balance \(RanchOSFinanceMoney.dollarsAndCents(snap.amount)) as of \(RanchOSFinanceDates.display(snap.date))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } else {
+            Text("Payoff balance as of \(RanchOSFinanceDates.display(principalDates[account.id] ?? Date()))")
+                .font(.subheadline)
+        }
+        HStack(spacing: 8) {
+            TextField("Balance", text: principalDraft(account), prompt: Text("$0.00"))
+                .textFieldStyle(.roundedBorder)
+                .frame(width: 160)
+                .ranchEntry(principalDraft(account), kind: .number)
+                .focused($focusedPrincipal, equals: account.id)
+                .onChange(of: focusedPrincipal) { _, focused in
+                    if focused != account.id { formatPrincipalDraft(account.id) }
+                }
+            DatePicker("Date", selection: principalDate(account), displayedComponents: .date)
+                .datePickerStyle(.field)
+                .fixedSize()
+            Button("Save payoff") { commitPrincipal(account.id) }
+                .buttonStyle(.bordered)
+                .help("Saves this amount as the payoff balance for the date shown. The newest date is the loan balance.")
+        }
+        .onAppear {
+            if principalDates[account.id] == nil {
+                principalDates[account.id] = Date()
+            }
+        }
+        if let problem = principalProblems[account.id] {
+            Text(problem)
+                .font(.caption)
+                .foregroundStyle(.red)
+        }
+    }
+
+    private func principalDraft(_ account: RanchOSFinanceAccount) -> Binding<String> {
+        Binding(
+            get: { principalDrafts[account.id] ?? "" },
+            set: { text in
+                principalDrafts[account.id] = text
+                principalProblems[account.id] = nil
+            })
+    }
+
+    /// The date for a typed balance. Opens on today until a date is chosen.
+    private func principalDate(_ account: RanchOSFinanceAccount) -> Binding<Date> {
+        Binding(
+            get: { principalDates[account.id] ?? Date() },
+            set: { date in
+                principalDates[account.id] = date
+                principalProblems[account.id] = nil
+            })
+    }
+
+    private func formatPrincipalDraft(_ accountID: UUID) {
+        guard let text = principalDrafts[accountID], !text.isEmpty,
+            let amount = RanchOSFinanceCSV.parseAmount(text)
+        else { return }
+        principalDrafts[accountID] = RanchOSFinanceMoney.dollarsAndCents(amount)
+    }
+
+    private func commitPrincipal(_ accountID: UUID) {
+        formatPrincipalDraft(accountID)
+        let amountText = principalDrafts[accountID] ?? ""
+        guard let amount = RanchOSFinanceCSV.parseAmount(amountText) else {
+            principalProblems[accountID] = "Enter the balance as a number, like 12500.00."
+            return
+        }
+        let date = principalDates[accountID] ?? Date()
+        store.recordPrincipalSnapshot(accountID: accountID, date: date, amount: amount)
+        principalDrafts[accountID] = nil
+        principalDates[accountID] = nil
+        principalProblems[accountID] = nil
+    }
+#endif
+
     @ViewBuilder
     private func downloadLinkEditor(_ account: RanchOSFinanceAccount) -> some View {
         if let link = account.downloadURL, let url = URL(string: link), !editingLinks.contains(account.id) {
@@ -1971,13 +2069,31 @@ struct RanchOSFinanceScreen: View {
 #endif
     }
 
-    private func noteImport(_ outcome: (file: RanchOSFinanceFile, newVendors: [RanchOSFinanceVendor])) {
+    private func noteImport(_ outcome: (file: RanchOSFinanceFile, newVendors: [RanchOSFinanceVendor], principal: RanchOSFinancePrincipalOutcome?)) {
         for vendor in outcome.newVendors where vendor.categoryID == store.uncategorizedID {
             Task { await store.requestSuggestion(vendorID: vendor.id) }
+        }
+        if let message = principalMessage(outcome) {
+            if let existing = fileNotice, !existing.isEmpty {
+                fileNotice = existing + "\n" + message
+            } else {
+                fileNotice = message
+            }
         }
         let months = store.accountsReadyToArchive()
         guard !months.isEmpty else { return }
         presentArchivePrompt()
+    }
+
+    private func principalMessage(_ outcome: (file: RanchOSFinanceFile, newVendors: [RanchOSFinanceVendor], principal: RanchOSFinancePrincipalOutcome?)) -> String? {
+        switch outcome.principal {
+        case .recorded(let date, let amount):
+            return "Kept the principal balance from \(outcome.file.fileName): \(RanchOSFinanceMoney.format(amount)) as of \(RanchOSFinanceDates.display(date))."
+        case .missing:
+            return "\(outcome.file.fileName) has no principal balance."
+        case nil:
+            return nil
+        }
     }
 
     private func earlierMonthButton(_ offers: [RanchOSFinanceArchiveOffer]) -> String {

@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 #if !os(tvOS)
 private enum RanchOSDestination: Hashable {
@@ -231,10 +234,16 @@ private struct RanchOSModuleHostView: View {
         }
     }
 
+    /// Mac and iPad keep the full Finance screens. The iPhone shows the
+    /// monthly expense report. Apple TV uses its own read-only overview.
     @ViewBuilder
-    private func financeModuleView(dashboard: RanchOSFinanceDashboard) -> some View {
-#if os(tvOS)
-        RanchOSFinanceModuleView(dashboard: dashboard)
+    private func financeModuleView(dashboard _: RanchOSFinanceDashboard) -> some View {
+#if os(iOS)
+        if UIDevice.current.userInterfaceIdiom == .phone {
+            RanchOSFinancePhoneSummary()
+        } else {
+            RanchOSFinanceScreen()
+        }
 #else
         RanchOSFinanceScreen()
 #endif

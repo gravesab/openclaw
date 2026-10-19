@@ -89,6 +89,14 @@ private struct RanchOSTVModuleDetailView: View {
     let module: RanchOSModule
 
     var body: some View {
+        if module == .finance {
+            RanchOSFinancePhoneSummary()
+        } else {
+            fixtureDetail
+        }
+    }
+
+    private var fixtureDetail: some View {
         ZStack {
             LinearGradient(
                 colors: [.indigo.opacity(0.8), .green.opacity(0.55), .black],

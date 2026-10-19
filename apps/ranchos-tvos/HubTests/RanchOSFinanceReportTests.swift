@@ -190,6 +190,7 @@ final class RanchOSFinanceReportTests: XCTestCase {
         XCTAssertEqual(Data(first.utf8), Data(second.utf8))
         let lines = first.split(separator: "\n").map(String.init)
         XCTAssertEqual(lines.first, "RanchOS Finance summary,version 1,,")
+        XCTAssertTrue(lines.contains("Through,\"Through Jul 2, 2026\",,"))
         XCTAssertTrue(lines.contains("Summary,Expenses,1234.50,0.00"))
         XCTAssertTrue(lines.contains("Summary,Remaining,-1194.50,0.00"))
         XCTAssertTrue(lines.contains("Category,\"Feed, Seed\",1234.50,0.00"))
@@ -200,6 +201,57 @@ final class RanchOSFinanceReportTests: XCTestCase {
         XCTAssertEqual(
             RanchOSFinanceReportCSV.fileName(store.summaryReport(month: july, account: .all)),
             "RanchOS Finance summary 2026-07.csv")
+    }
+
+    @MainActor
+    func testReportIncludesTheNewestTransactionAndMatchesAfterReload() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("ledger.json")
+        let store = RanchOSFinanceStore(persistenceURL: url, suggester: ReportFakeSuggester())
+        let card = try XCTUnwrap(store.createAccount(name: "Apple Card", kind: .creditCard))
+        let feed = try XCTUnwrap(store.createCategory(name: "Feed"))
+        let julyCSV = """
+        Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+        07/31/2026,07/31/2026,A,Prairie Farm Store,Feed,purchase,10.00,Sam
+        """
+        _ = store.ingest(fileName: "july.csv", bytes: Data(julyCSV.utf8), source: card.name, accountID: card.id)
+        let octoberCSV = """
+        Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+        10/02/2026,10/02/2026,B,Hilltop Hardware,Hardware,purchase,5.00,Sam
+        """
+        _ = store.ingest(fileName: "october.csv", bytes: Data(octoberCSV.utf8), source: card.name, accountID: card.id)
+
+        let months = store.reportMonths(account: .all)
+        XCTAssertEqual(months.first, RanchOSFinanceReadyMonth(year: 2026, month: 10))
+        let october = store.summaryReport(month: try XCTUnwrap(months.first), account: .all)
+        XCTAssertEqual(october.transactionCount, 1)
+        XCTAssertEqual(october.expenses, 5)
+        XCTAssertEqual(october.throughLabel, "Through Oct 2, 2026")
+        XCTAssertEqual(october.categories.reduce(Decimal(0)) { $0 + $1.total }, october.expenses)
+
+        let julyReport = store.summaryReport(month: july, account: .all)
+        XCTAssertEqual(julyReport.transactionCount, 1)
+        XCTAssertEqual(julyReport.expenses, 10)
+        XCTAssertEqual(julyReport.throughLabel, "Through Jul 31, 2026")
+        XCTAssertEqual(julyReport.categories.reduce(Decimal(0)) { $0 + $1.total }, julyReport.expenses)
+        XCTAssertEqual(julyReport.categories.first?.categoryID, feed.id)
+
+        let added = """
+        Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+        10/16/2026,10/16/2026,C,Creek Supply,Feed,purchase,7.00,Sam
+        """
+        let fresh = RanchOSFinanceStore(persistenceURL: url, suggester: ReportFakeSuggester())
+        _ = fresh.ingest(fileName: "later.csv", bytes: Data(added.utf8), source: card.name, accountID: card.id)
+        store.reloadFromDisk()
+        let reloaded = store.summaryReport(
+            month: RanchOSFinanceReadyMonth(year: 2026, month: 10), account: .all)
+        XCTAssertEqual(reloaded.throughLabel, "Through Oct 16, 2026")
+        XCTAssertEqual(reloaded.transactionCount, 2)
+        XCTAssertEqual(reloaded.expenses, 12)
+        XCTAssertEqual(reloaded.categories.reduce(Decimal(0)) { $0 + $1.total }, reloaded.expenses)
     }
 
     // MARK: - Helpers

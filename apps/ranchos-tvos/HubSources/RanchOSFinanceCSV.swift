@@ -74,6 +74,12 @@ enum RanchOSFinanceCSV {
 
     // MARK: - Entry point
 
+    /// The Downloads watch asks this before filing: only a recognized
+    /// statement files and ingests itself. Anything else goes to the panel.
+    static func isRecognizedStatement(bytes: Data, now: Date = Date()) -> Bool {
+        parse(bytes: bytes, now: now).kind != .unrecognized
+    }
+
     static func parse(bytes: Data, now: Date = Date()) -> ParsedFile {
         let digest = SHA256.hash(data: bytes)
         let sha = digest.map { String(format: "%02x", $0) }.joined()

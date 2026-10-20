@@ -85,11 +85,6 @@ let feishuClientSdk: FeishuClientSdk = defaultFeishuClientSdk;
 
 export { FEISHU_HTTP_TIMEOUT_ENV_VAR, FEISHU_HTTP_TIMEOUT_MAX_MS, FEISHU_HTTP_TIMEOUT_MS };
 
-type FeishuHttpInstanceLike = Pick<
-  typeof feishuClientSdk.defaultHttpInstance,
-  "request" | "get" | "post" | "put" | "patch" | "delete" | "head" | "options"
->;
-
 async function getWsProxyAgent() {
   return resolveAmbientNodeProxyAgent<Agent>();
 }
@@ -119,7 +114,9 @@ function resolveDomain(domain: FeishuDomain | undefined): Lark.Domain | string {
  * indefinite hangs and set a standardized User-Agent per OAPI best practices.
  */
 function createTimeoutHttpInstance(defaultTimeoutMs: number): Lark.HttpInstance {
-  const base: FeishuHttpInstanceLike = feishuClientSdk.defaultHttpInstance;
+  // The SDK's default axios instance unwraps `response.data` in an interceptor, so it already
+  // behaves as Lark.HttpInstance; axios >= 1.20 conditional response types cannot express that.
+  const base = feishuClientSdk.defaultHttpInstance as unknown as Lark.HttpInstance;
 
   function injectTimeout<D>(opts?: Lark.HttpRequestOptions<D>): Lark.HttpRequestOptions<D> {
     return { timeout: defaultTimeoutMs, ...opts } as Lark.HttpRequestOptions<D>;

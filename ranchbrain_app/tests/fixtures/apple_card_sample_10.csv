@@ -1,0 +1,11 @@
+﻿Transaction Date,Clearing Date,Description,Merchant,Category,Type,Amount (USD),Purchased By
+01/03/2024,01/04/2024,Hay delivery,"North Gate Feed, LLC",Farm,Purchase,186.40,Alex Sample
+01/05/2024,01/05/2024,Grocery run,Market Basket,Groceries,Purchase,64.18,Alex Sample
+01/08/2024,01/09/2024,Clinic visit,County Clinic,Health,Purchase,40.00,Blair Sample
+01/12/2024,01/12/2024,Monthly payment,Apple Card,Payment,Payment,-250.00,Alex Sample
+01/15/2024,01/16/2024,Returned hose,Hardware Counter,Home,Refund,-18.22,Blair Sample
+01/18/2024,01/18/2024,Statement credit,Apple Card,Adjustment,Adjustment,-3.50,Alex Sample
+01/20/2024,01/21/2024,Paper statement fee,Apple Card,Fee,Fee,1.25,Alex Sample
+01/22/2024,01/23/2024,Diesel,Town Pump,Fuel,Purchase,73.09,Alex Sample
+02/02/2024,02/03/2024,Mineral tub,Ranch Supply,Livestock,Purchase,29.99,Blair Sample
+02/11/2024,02/12/2024,Electric bill,Rural Electric,Utilities,Purchase,112.47,Alex Sample

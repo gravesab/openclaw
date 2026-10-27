@@ -3690,6 +3690,7 @@ struct TaskListHeaderView: View {
     @State private var categoryPendingDelete: CategoryDefinition?
     @State private var reassignToName = "House"
     @State private var newCategoryName = ""
+    @State private var showFilterHelp = false
 
     private var deletableCategories: [CategoryDefinition] {
         categories
@@ -3733,14 +3734,36 @@ struct TaskListHeaderView: View {
                 .buttonStyle(.borderedProminent)
             }
 
-            Picker("Show", selection: $listFilter) {
-                ForEach(TaskListFilter.allCases) { filter in
-                    Text(filter.rawValue).tag(filter)
+            HStack(spacing: 6) {
+                Picker("Show", selection: $listFilter) {
+                    ForEach(TaskListFilter.allCases) { filter in
+                        Text(filter.rawValue).tag(filter)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(maxWidth: 420)
+
+                Button(action: { showFilterHelp.toggle() }) {
+                    Image(systemName: "questionmark.circle")
+                        .font(.system(size: 14))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Filter definitions")
+                .popover(isPresented: $showFilterHelp, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Group { Text("To Do: ").bold() + Text("All active incomplete tasks that are not yet due — Last Done + Frequency calculated Next Due is in the future beyond the Due window. Your backlog of upcoming maintenance not yet in the current scheduling window.") }
+                        Group { Text("Due: ").bold() + Text("Selected in your screenshot — tasks where Next Due falls inside the current 2-week scheduling window (e.g., November 13, 2026 within next 14 days). This is your 'do this week' list — what the DatePicker 10/13/2026 + Frequency drives.") }
+                        Group { Text("Overdue: ").bold() + Text("Tasks where Next Due date is before today and not marked Complete/Bypass. Past due — needs immediate attention. Calculates from Warning Days / Critical Days width 100 turning yellow/red.") }
+                        Group { Text("All: ").bold() + Text("No date filter — shows every task including To Do + Due + Overdue + Completed + Bypassed + Item (Shared) linked assets. Full 140 tasks list with Ranch Name RedBud Ranch footer.") }
+                    }
+                    .font(.system(size: 12))
+                    .lineLimit(nil).fixedSize(horizontal: false, vertical: true)
+                    .padding(12)
+                    .frame(width: 360)
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(maxWidth: 420)
 
             HStack {
                 Spacer(minLength: 0)

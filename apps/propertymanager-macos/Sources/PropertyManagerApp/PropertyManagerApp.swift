@@ -3979,7 +3979,8 @@ struct TaskRowView: View {
 
                     Text(TaskTitle.highlightingSafety(displayTitle))
                         .fontWeight(.semibold)
-                        .lineLimit(2)
+                        .lineLimit(nil)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text(equipmentSubtitle(for: task))
@@ -4554,20 +4555,30 @@ struct TaskEditorView: View {
                     .foregroundStyle(.secondary)
 
                 LabeledField(title: "Linked Asset") {
-                    Picker(
-                        "Linked Asset",
-                        selection: Binding(
-                            get: { task.assetId },
-                            set: { task.assetId = $0 }
-                        )
-                    ) {
-                        Text("No linked asset").tag(nil as UUID?)
-                        ForEach(assets.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })) { asset in
-                            Text(asset.name).tag(asset.id as UUID?)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Picker(
+                            "Linked Asset",
+                            selection: Binding(
+                                get: { task.assetId },
+                                set: { task.assetId = $0 }
+                            )
+                        ) {
+                            Text("No linked asset").tag(nil as UUID?)
+                            ForEach(assets.sorted(by: { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })) { asset in
+                                Text(asset.name).tag(asset.id as UUID?)
+                            }
+                        }
+                        .labelsHidden()
+                        .frame(maxWidth: 360, alignment: .leading)
+                        if let assetId = task.assetId,
+                           let assetName = assets.first(where: { $0.id == assetId })?.name {
+                            Text(assetName)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(3)
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                     }
-                    .labelsHidden()
-                    .frame(maxWidth: 360, alignment: .leading)
                 }
 
                 Text("Link the task to its asset to enable runtime-hours, mileage, or cycle scheduling.")
@@ -4575,8 +4586,14 @@ struct TaskEditorView: View {
                     .foregroundStyle(.secondary)
 
                 LabeledField(title: "Item (Shared)") {
-                    TextField("Item", text: $task.item)
-                        .textFieldStyle(.roundedBorder)
+                    TextEditor(text: $task.item)
+                        .frame(minHeight: 52)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .scrollContentBackground(.hidden)
+                        .padding(6)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.35)))
                         .voiceInput($task.item)
                 }
 
@@ -4603,8 +4620,14 @@ struct TaskEditorView: View {
                 }
 
                 LabeledField(title: "Description") {
-                    TextField("Description", text: $task.taskDescription, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
+                    TextEditor(text: $task.taskDescription)
+                        .frame(minHeight: 88)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .scrollContentBackground(.hidden)
+                        .padding(6)
+                        .background(Color(nsColor: .textBackgroundColor))
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.secondary.opacity(0.35)))
                         .voiceInput($task.taskDescription)
                 }
             }
@@ -4612,7 +4635,7 @@ struct TaskEditorView: View {
     }
 
     var scheduleCard: some View {
-        CardView(title: "Schedule (Shared with Intel)", icon: "calendar") {
+        CardView(title: "Schedule", icon: "calendar") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 16) {
                     LabeledField(title: "Frequency") {
@@ -4631,7 +4654,7 @@ struct TaskEditorView: View {
                         .frame(maxWidth: 220, alignment: .leading)
                     }
 
-                    LabeledField(title: "Last Done (Shared)") {
+                    LabeledField(title: "Last Done") {
                         Group {
                             if task.lastDone != nil {
                                 DatePicker(
@@ -4645,6 +4668,8 @@ struct TaskEditorView: View {
                                     ),
                                     displayedComponents: [.date]
                                 )
+                                .labelsHidden()
+                                .datePickerStyle(.compact)
                             } else {
                                 HStack {
                                     Text("Never completed")
@@ -4660,26 +4685,36 @@ struct TaskEditorView: View {
                         .frame(maxWidth: 180)
                     }
 
-                    LabeledField(title: "Next Due (Shared)") {
-                        Text(task.lastDone == nil ? "Set automatically on completion" : DateHelper.isoDate(task.nextDue))
-                            .foregroundStyle(task.lastDone == nil ? .secondary : .primary)
-                            .frame(maxWidth: 220, alignment: .leading)
+                    LabeledField(title: "Next Due") {
+                        HStack {
+                            Image(systemName: "calendar")
+                                .foregroundStyle(.secondary)
+                            if task.lastDone == nil {
+                                Text("Set automatically on completion")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text(task.nextDue, style: .date)
+                            }
+                        }
+                        .padding(6)
+                        .background(Color(nsColor: .controlBackgroundColor))
+                        .cornerRadius(6)
                     }
 
                     Spacer()
                 }
 
                 HStack(spacing: 16) {
-                    LabeledField(title: "Warning Days (Shared)") {
+                    LabeledField(title: "Warning Days") {
                         TextField("Warning Days", value: $task.warningDays, formatter: NumberFormatter())
                             .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 160)
+                            .frame(width: 100)
                     }
 
-                    LabeledField(title: "Critical Days (Shared)") {
+                    LabeledField(title: "Critical Days") {
                         TextField("Critical Days", value: $task.criticalDays, formatter: NumberFormatter())
                             .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 160)
+                            .frame(width: 100)
                     }
 
                     Spacer(minLength: 0)
@@ -5143,7 +5178,7 @@ struct SummaryCard: View {
                 Text(value)
                     .font(.headline)
                     .fontWeight(.bold)
-                    .lineLimit(1)
+                    .lineLimit(nil)
 
                 Text(subtitle)
                     .font(.caption)

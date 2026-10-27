@@ -53,6 +53,11 @@ enum AppEnvironment {
         isDevelopment ? "DEV" : "Production"
     }
 
+    /// Single chrome title. DEV carries the suffix; PROD is the unmarked case.
+    static var windowTitle: String {
+        isDevelopment ? "Property Manager - DEV" : "Property Manager"
+    }
+
     static var defaultAPIBaseURL: String {
         isDevelopment ? "http://100.85.188.74:5062" : "http://100.85.36.72:5062"
     }
@@ -77,29 +82,47 @@ enum AppEnvironment {
     }
 }
 
+/// Ranch name from the People app's UserDefaults, raw with no suffix.
+/// Falls back to RedBud Ranch when People has stored nothing yet.
+enum PeopleRanchName {
+    static let fallback = "RedBud Ranch"
+
+    static var current: String {
+        let suites = AppEnvironment.isDevelopment
+            ? ["ai.openclaw.ranchpeopleos.macos.dev", "ai.openclaw.ranchpeopleos.macos.prod"]
+            : ["ai.openclaw.ranchpeopleos.macos.prod", "ai.openclaw.ranchpeopleos.macos.dev"]
+        let keys = ["ranchName", "currentRanchName", "selectedRanchName", "RanchName"]
+        for suite in suites {
+            guard let defaults = UserDefaults(suiteName: suite) else { continue }
+            for key in keys {
+                if let name = defaults.string(forKey: key)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !name.isEmpty {
+                    return name
+                }
+            }
+        }
+        return fallback
+    }
+}
+
 @main
 struct PropertyManagerApp: App {
     @StateObject private var store = MaintenanceStore()
     @AppStorage("propertyManager.appearance") private var appearanceRaw: String = AppAppearance.system.rawValue
 
     var body: some Scene {
-        WindowGroup {
+        WindowGroup(AppEnvironment.windowTitle) {
             ContentView(store: store)
-                .frame(minWidth: 1050, minHeight: 720)
+                .frame(minWidth: 1050, minHeight: 800)
                 .preferredColorScheme(AppAppearance.from(storageValue: appearanceRaw).colorScheme)
                 .fullWritingTools()
                 .onAppear { TextChecking.install() }
                 .toolbar {
                     ToolbarItem(placement: .principal) {
-                        HStack(spacing: 6) {
-                            Text(AppEnvironment.label)
-                                .fontWeight(.bold)
-                                .foregroundStyle(AppEnvironment.isDevelopment ? Color.orange : Color.green)
-                            Text(AppEnvironment.visibleVersionBuild)
-                                .font(.caption.monospacedDigit())
-                        }
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel("Property Manager \(AppEnvironment.label) \(AppEnvironment.visibleVersionBuild)")
+                        Text(AppEnvironment.visibleVersionBuild)
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("\(AppEnvironment.windowTitle) \(AppEnvironment.visibleVersionBuild)")
                     }
                 }
                 .onAppear {
@@ -2922,7 +2945,7 @@ struct ContentView: View {
 
                     Divider()
 
-                    ScrollView {
+                    ScrollView(.vertical, showsIndicators: true) {
                         LazyVStack(alignment: .leading, spacing: 12) {
                             ForEach(groupedTasks) { section in
                                 Text(section.name)
@@ -3173,20 +3196,14 @@ struct SidebarView: View {
     }
 
     var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
         VStack(alignment: .leading, spacing: 16) {
             VStack(spacing: 10) {
-                Image(systemName: "house.fill")
-                    .font(.system(size: 34))
-                    .foregroundStyle(.blue)
-                    .frame(width: 60, height: 60)
-                    .background(Color.blue.opacity(0.12))
-                    .clipShape(RoundedRectangle(cornerRadius: 16))
-
                 Text("Property Manager")
                     .font(.title3)
                     .fontWeight(.bold)
 
-                Text("RedBud Ranch")
+                Text(PeopleRanchName.current)
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -3394,6 +3411,7 @@ struct SidebarView: View {
             .padding(.bottom, 12)
         }
         .padding()
+        }
         .frame(width: 220)
         .background(Color(nsColor: .controlBackgroundColor).opacity(0.55))
     }
@@ -3434,6 +3452,13 @@ struct ConnectionStatusCard: View {
                 .textFieldStyle(.roundedBorder)
                 .font(.caption2)
                 .noWritingTools()
+
+            Text("Ranch Name")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            Text(PeopleRanchName.current)
+                .font(.caption2)
+                .textSelection(.enabled)
 
             Text("API Key")
                 .font(.caption2)
@@ -4315,7 +4340,7 @@ struct TaskEditorView: View {
             Divider()
 
             ScrollViewReader { proxy in
-                ScrollView {
+                ScrollView(.vertical, showsIndicators: true) {
                     VStack(alignment: .leading, spacing: 16) {
                         Color.clear.frame(height: 0).id("editorTop")
                         summaryStrip
@@ -4334,16 +4359,19 @@ struct TaskEditorView: View {
                     }
                     .padding(20)
                 }
+                .safeAreaInset(edge: .bottom) {
+                    VStack(spacing: 0) {
+                        Divider()
+                        bottomActionBar
+                            .background(Color(nsColor: .windowBackgroundColor))
+                    }
+                }
                 .onChange(of: task.id) { _ in
                     withAnimation {
                         proxy.scrollTo("editorTop", anchor: .top)
                     }
                 }
             }
-
-            Divider()
-
-            bottomActionBar
         }
         .onChange(of: task) { newValue in
             autosaveAction(newValue)

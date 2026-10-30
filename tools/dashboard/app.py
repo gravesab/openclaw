@@ -2318,8 +2318,16 @@ def get_ranchbrain_notes(category):
 
 def openclaw_shared_navigation():
     """Return the canonical navigation for OpenClaw dashboard pages."""
+    try:
+        from flask import request as _req
+        cur_path = _req.path if _req else "/"
+    except Exception:
+        cur_path = "/"
+    cur_path = (cur_path or "/").rstrip("/") or "/"
+
     links = (
         ("/", "Overview"),
+        ("/ai-cost", "AI Cost"),
         ("/ranchbrain", "RanchBrain"),
         ("/notes", "Vault"),
         ("/ai-scorecard?view=all", "All Models Scorecard"),
@@ -2328,28 +2336,29 @@ def openclaw_shared_navigation():
         ("/backup-recovery", "Backup & Recovery Center"),
     )
 
-    link_style = (
-        "background:#334155;"
-        "color:white;"
-        "text-decoration:none;"
-        "padding:10px 14px;"
-        "border-radius:7px;"
-        "font-weight:bold;"
-        "display:inline-block;"
-    )
+    base_style = "color:white;text-decoration:none;padding:10px 14px;border-radius:7px;font-weight:bold;display:inline-block;"
+    inactive_bg = "background:#334155;"
+    active_bg = "background:#60a5fa;color:black;"
 
-    anchors = "".join(
-        f'<a href="{href}" style="{link_style}">{label}</a>'
-        for href, label in links
-    )
-
+    anchors = []
+    for href, label in links:
+        href_path = href.split("?")[0].rstrip("/") or "/"
+        if href_path == "/":
+            is_active = (cur_path == "/")
+        else:
+            is_active = (cur_path == href_path or cur_path.startswith(href_path + "/"))
+            if href_path == "/ai-scorecard" and cur_path.startswith("/ai-scorecard"):
+                is_active = True
+        style = base_style + (active_bg if is_active else inactive_bg)
+        anchors.append(f'<a href="{href}" style="{style}">{label}</a>')
     return (
         '<div class="nav openclaw-shared-navigation" '
         'style="display:flex;gap:10px;flex-wrap:wrap;'
         'margin-bottom:20px;">'
-        f"{anchors}"
+        + "".join(anchors) +
         "</div>"
     )
+
 
 
 def ranchbrain_shell(title, body):

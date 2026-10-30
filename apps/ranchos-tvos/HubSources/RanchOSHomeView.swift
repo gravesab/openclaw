@@ -12,7 +12,7 @@ struct RanchOSHomeView: View {
     let liveSession: RanchOSLiveSession
     let propertyStore: RanchOSPropertyLiveStore
     let livestockStore: RanchOSLivestockStore
-    let peopleDirectory: RanchOSPeopleDirectory
+    let peopleStore: RanchOSPeopleStore
     @Binding var appearance: RanchOSAppearance
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var selection: RanchOSDestination = .home
@@ -26,7 +26,7 @@ struct RanchOSHomeView: View {
                     liveSession: liveSession,
                     propertyStore: propertyStore,
                     livestockStore: livestockStore,
-                    peopleDirectory: peopleDirectory,
+                    peopleStore: peopleStore,
                     appearance: $appearance)
             } else {
                 NavigationSplitView {
@@ -46,7 +46,7 @@ struct RanchOSHomeView: View {
                                 propertyStore: propertyStore,
                                 livestockStore: livestockStore)
                         case .people:
-                            RanchOSPeopleView(directory: peopleDirectory)
+                            RanchOSPeopleView(store: peopleStore)
                         }
                     }
                 }
@@ -68,7 +68,7 @@ private struct RanchOSCompactHomeView: View {
     let liveSession: RanchOSLiveSession
     let propertyStore: RanchOSPropertyLiveStore
     let livestockStore: RanchOSLivestockStore
-    let peopleDirectory: RanchOSPeopleDirectory
+    let peopleStore: RanchOSPeopleStore
     @Binding var appearance: RanchOSAppearance
     @Environment(\.ranchOSRuntimeEnvironment) private var environment
 
@@ -107,7 +107,7 @@ private struct RanchOSCompactHomeView: View {
                         }
 
                         NavigationLink {
-                            RanchOSPeopleView(directory: peopleDirectory)
+                            RanchOSPeopleView(store: peopleStore)
                         } label: {
                             Label {
                                 VStack(alignment: .leading, spacing: 4) {

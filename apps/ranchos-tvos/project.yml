@@ -33,6 +33,16 @@ schemes:
     build:
       targets:
         RanchOSTV: all
+  RanchPeopleOS:
+    shared: true
+    build:
+      targets:
+        RanchPeopleOS: all
+  RanchPeopleOSProd:
+    shared: true
+    build:
+      targets:
+        RanchPeopleOSProd: all
   RanchOSHubTests:
     shared: true
     build:
@@ -55,10 +65,13 @@ targets:
           - RanchOSJarvisStore.swift
           - RanchOSJarvisLivestock.swift
           - RanchOSJarvisSessionProvider.swift
+          - RanchPeopleOSApp.swift
+          - RanchOSPeopleClient.swift
     info:
       path: HubSources/RanchOSiOS-Info.plist
       properties:
         CFBundleDisplayName: RanchOS DEV
+        NSLocalNetworkUsageDescription: RanchOS Hub (DEV) loads the livestock summary from the DEV Mac on your local network.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -70,7 +83,11 @@ targets:
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
         NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
           NSExceptionDomains:
+            100.104.100.96:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
             100.85.188.74:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
@@ -78,6 +95,9 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
             intelmini.local:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            Andrew-M4-Pro-2.local:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
     settings:
@@ -100,10 +120,14 @@ targets:
           - RanchOSJarvisStore.swift
           - RanchOSJarvisLivestock.swift
           - RanchOSJarvisSessionProvider.swift
+          - RanchPeopleOSApp.swift
+          - RanchOSPeopleClient.swift
     info:
       path: HubSources/RanchOSMac-Info.plist
       properties:
         CFBundleDisplayName: RanchOS DEV
+        NSMicrophoneUsageDescription: RanchOS uses the microphone so you can dictate into a text field. Speech stays on this device.
+        NSSpeechRecognitionUsageDescription: RanchOS turns what you say into text on this device.
         NSAppTransportSecurity:
           NSExceptionDomains:
             100.85.188.74:
@@ -135,20 +159,26 @@ targets:
           - RanchOSJarvisStore.swift
           - RanchOSJarvisLivestock.swift
           - RanchOSJarvisSessionProvider.swift
+          - RanchPeopleOSApp.swift
+          - RanchOSPeopleClient.swift
     info:
       path: HubSources/RanchOSTV-Info.plist
       properties:
         CFBundleDisplayName: RanchOS DEV
-        NSLocalNetworkUsageDescription: RanchOS reaches PropertyManager on this home network for DEV and Production live data.
+        NSLocalNetworkUsageDescription: RanchOS Hub (DEV) loads PropertyManager tasks and the livestock summary from DEV machines on your local network.
         NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true
           NSExceptionDomains:
+            100.104.100.96:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
             100.85.188.74:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
             100.85.36.72:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
-            andrew-m4-pro.local:
+            Andrew-M4-Pro-2.local:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
             intelmini.local:
@@ -162,11 +192,65 @@ targets:
         ASSETCATALOG_COMPILER_APPICON_NAME: TVAppIcon
         TARGETED_DEVICE_FAMILY: "3"
         TVOS_DEPLOYMENT_TARGET: "18.0"
+        CODE_SIGNING_ALLOWED: YES
+        CODE_SIGNING_REQUIRED: YES
+        CODE_SIGN_IDENTITY: "Apple Development"
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ZYJVHJWT3P
+  RanchPeopleOS:
+    type: application
+    platform: macOS
+    sources:
+      - path: HubSources/RanchPeopleOSApp.swift
+      - path: HubSources/RanchOSPeopleView.swift
+      - path: HubSources/RanchOSPeopleStore.swift
+      - path: HubSources/RanchOSPeopleDirectory.swift
+      - path: HubSources/DataIsolationVerifier.swift
+      - path: HubSources/RanchSaveView.swift
+      - path: HubSources/RanchPeopleOSAssets.xcassets
+    info:
+      path: HubSources/RanchPeopleOS-Info.plist
+      properties:
+        CFBundleDisplayName: Ranch People OS DEV
+        CFBundleName: Ranch People OS DEV
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchpeopleos.macos.dev
+        PRODUCT_NAME: "Ranch People OS DEV"
+        GENERATE_INFOPLIST_FILE: NO
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+  RanchPeopleOSProd:
+    type: application
+    platform: macOS
+    sources:
+      - path: HubSources/RanchPeopleOSApp.swift
+      - path: HubSources/RanchOSPeopleView.swift
+      - path: HubSources/RanchOSPeopleStore.swift
+      - path: HubSources/RanchOSPeopleDirectory.swift
+      - path: HubSources/DataIsolationVerifier.swift
+      - path: HubSources/RanchSaveView.swift
+      - path: HubSources/RanchPeopleOSAssets.xcassets
+    info:
+      path: HubSources/RanchPeopleOSProd-Info.plist
+      properties:
+        CFBundleDisplayName: Ranch People OS PROD
+        CFBundleName: Ranch People OS PROD
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchpeopleos.macos.prod
+        PRODUCT_NAME: "Ranch People OS PROD"
+        GENERATE_INFOPLIST_FILE: NO
+        MACOSX_DEPLOYMENT_TARGET: "15.0"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: RANCHPEOPLEOS_PROD
   RanchOSHubTests:
     type: bundle.unit-test
     platform: macOS
     sources:
       - path: HubTests
+      - path: HubTests/RanchOSPeopleClientTests.swift
+      - path: HubTests/RanchOSPeopleStoreTests.swift
       - path: HubSources/RanchOSHubModel.swift
       - path: HubSources/RanchOSRuntimeEnvironment.swift
       - path: HubSources/RanchOSLivestockConnection.swift
@@ -181,6 +265,10 @@ targets:
       - path: HubSources/RanchBrainFacts.swift
       - path: HubSources/RanchOSFinanceImportResult.swift
       - path: HubSources/RanchOSJarvisSessionProvider.swift
+      - path: HubSources/RanchOSPeopleStore.swift
+      - path: HubSources/RanchOSPeopleDirectory.swift
+      - path: HubSources/RanchOSPeopleClient.swift
+      - path: HubSources/DataIsolationVerifier.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests

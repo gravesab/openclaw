@@ -1,7 +1,7 @@
 import Foundation
 
 /// One person's ranch-wide role. It covers every RanchOS component.
-enum RanchOSPersonRole: String, CaseIterable, Identifiable, Sendable {
+enum RanchOSPersonRole: String, CaseIterable, Identifiable, Sendable, Codable, Hashable {
     case owner
     case manager
     case viewer
@@ -17,7 +17,7 @@ enum RanchOSPersonRole: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-struct RanchOSPerson: Identifiable, Equatable, Sendable {
+struct RanchOSPerson: Identifiable, Equatable, Sendable, Codable {
     let id: UUID
     var name: String
     var email: String

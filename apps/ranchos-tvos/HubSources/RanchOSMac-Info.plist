@@ -47,5 +47,9 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>RanchOS uses the microphone so you can dictate into a text field. Speech stays on this device.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>RanchOS turns what you say into text on this device.</string>
 </dict>
 </plist>

@@ -31,7 +31,7 @@ struct RanchOSApp: App {
     @State private var liveSession = RanchOSLiveSession()
     @State private var propertyStore = RanchOSPropertyLiveStore()
     @State private var livestockStore = RanchOSLivestockStore()
-    @State private var peopleDirectory = RanchOSPeopleDirectory.developmentOwner()
+    @State private var peopleStore = RanchOSPeopleStore()
 
     var body: some Scene {
         WindowGroup(RanchOSBuildInfo.display(for: liveSession.environment)) {
@@ -49,7 +49,7 @@ struct RanchOSApp: App {
                     liveSession: liveSession,
                     propertyStore: propertyStore,
                     livestockStore: livestockStore,
-                    peopleDirectory: peopleDirectory,
+                    peopleStore: peopleStore,
                     appearance: $appearance)
                 #endif
             }

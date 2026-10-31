@@ -3370,8 +3370,13 @@ function createRoom(canvas, labelsEl, startFilter) {
     }
     const shot = pointerRay(event);
     const planeY = Number.isFinite(drag.planeY) ? drag.planeY : 0;
-    const plane = hitPlane(shot.origin, shot.dir, planeY);
-    if (!plane || !drag.offset) return;
+    // Fall back to the floor when the ray misses the drag plane: All-transactions sits high,
+    // and a top-down camera below that plane would otherwise freeze the ball mid-drag.
+    // Stick to whichever plane hit so the ball never flip-flops between planes.
+    const pick = pickDragPlane(shot.origin, shot.dir, planeY, 0);
+    if (!pick || !drag.offset) return;
+    drag.planeY = pick.y;
+    const plane = pick.point;
     const x = plane[0] + drag.offset[0];
     const z = plane[2] + drag.offset[1];
     if (!Number.isFinite(x) || !Number.isFinite(z)) return;
@@ -3400,6 +3405,13 @@ function createRoom(canvas, labelsEl, startFilter) {
     }
     if (done.kind === "menu") return;
     if (done.kind === "orbit" && !done.moved && groupIds.size) setGroup(new Set());
+    // An empty click clears the lingering focus, so Unpin with nothing selected falls through
+    // to every held bubble in this view instead of the last-touched one.
+    if ((done.kind === "orbit" || done.kind === "pan") && !done.moved && !done.menu && focusId) {
+      focusId = "";
+      if (hooks.onSelect) hooks.onSelect(null);
+      notifyPin();
+    }
     if (done.kind === "move" && done.moved) {
       const dropped = done.grouped ? groupTops() : objects.filter(obj => obj.id === done.id);
       dropped.forEach(obj => { obj.placed = true; });
@@ -4065,6 +4077,8 @@ function runSelfChecks() {
     || validView({ yaw: 0.1, pitch: 1, dist: 9 }) || validView({ yaw: 0.1, pitch: 1, dist: 9, target: [6000, 0.3, 2] })) throw new Error("saved camera check");
   const missedHigh = pickDragPlane([0, 2, 10], [0, -1, -0.2], 8, 0);
   if (!missedHigh || missedHigh.y !== 0 || Math.abs(missedHigh.point[2] - 9.6) > 1e-6) throw new Error("drag plane fallback");
+  const hitHigh = pickDragPlane([0, 10, 10], [0, -1, -0.2], 8, 0);
+  if (!hitHigh || hitHigh.y !== 8 || Math.abs(hitHigh.point[2] - 9.6) > 1e-6) throw new Error("drag plane preferred");
   const pinProbe = [{ id: "p", parentId: "", placed: true }, { id: "c", parentId: "p", placed: true }, { id: "o", parentId: "", placed: true }];
   if (unpinFamily(pinProbe, ["p"]) !== 2 || pinProbe[0].placed || pinProbe[1].placed || !pinProbe[2].placed) throw new Error("unpin family");
   if (unpinFamily(pinProbe, ["p"]) !== 0) throw new Error("unpin idle");

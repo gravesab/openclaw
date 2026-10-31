@@ -6,12 +6,83 @@ from flask import (
     request,
     send_from_directory,
     stream_with_context,
-    url_for,
 )
 from werkzeug.exceptions import HTTPException
 from pathlib import Path
 from datetime import datetime
 import os
+
+def get_openrouter_cost():
+    # v2-spec: credits endpoint, zeros on failure, never raises.
+    out = {"cost": 0.0, "answers": 0, "tokens": 0, "ok": False, "error": ""}
+    try:
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not key:
+            out["error"] = "missing-key"
+            return out
+        headers = {"Authorization": "Bearer %s" % key}
+        r = requests.get("https://openrouter.ai/api/v1/credits", headers=headers, timeout=5)
+        if not r.ok:
+            out["error"] = "http-%s" % r.status_code
+            return out
+        data = (r.json() or {}).get("data", {}) or {}
+        try:
+            out["cost"] = float(data.get("total_usage", 0) or 0)
+        except (TypeError, ValueError):
+            out["cost"] = 0.0
+        out["ok"] = True
+        try:
+            a = requests.get("https://openrouter.ai/api/v1/activity", headers=headers, timeout=5)
+            if a.ok:
+                _ai_cost_fill_activity(a.json(), out)
+        except Exception:
+            pass
+    except Exception as exc:
+        out["error"] = type(exc).__name__
+    return out
+
+
+def _ai_cost_fill_activity(doc, out):
+    try:
+        data = doc.get("data") if isinstance(doc, dict) else None
+        rows = []
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict):
+            for k in ("models", "usage", "days", "rows"):
+                if isinstance(data.get(k), list):
+                    rows = data.get(k)
+                    break
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                tok = row.get("tokens") or row.get("total_tokens") or (
+                    (row.get("prompt_tokens") or 0) + (row.get("completion_tokens") or 0))
+                out["tokens"] += int(tok or 0)
+                out["answers"] += int(row.get("answers") or row.get("requests") or row.get("count") or 0)
+            except (TypeError, ValueError):
+                pass
+        per = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("model") or row.get("name") or row.get("id") or "")
+            try:
+                tok = int(row.get("tokens") or row.get("total_tokens") or 0)
+            except (TypeError, ValueError):
+                tok = 0
+            try:
+                cost = float(row.get("cost") or row.get("usage") or row.get("total_cost") or 0)
+            except (TypeError, ValueError):
+                cost = 0.0
+            if name and (tok or cost):
+                per.append({"model": name, "tokens": tok, "cost": cost,
+                            "answers": 0})
+        out["per_model"] = sorted(per, key=lambda d: -d["cost"])[:12]
+    except Exception:
+        pass
+
 import sys
 import subprocess
 import shutil
@@ -23,7 +94,6 @@ import json
 import time
 import base64
 import hashlib
-import hmac
 import uuid
 import psycopg2
 import html as html_module
@@ -43,14 +113,8 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 from tools.ai_intelligence.ollama_config import OllamaConfig
-from tools.ai_intelligence.omlx_config import OMLXConfig, OMLXConfigurationError
 from tools.dashboard.pm_asset_page import register_pm_asset_routes
 from tools.dashboard.document_inventory import ensure_document_inventory
-from tools.property_manager.mcp_boundary import (
-    MCP_DATABASE_URL_ENV,
-    MCP_ENABLED_ENV,
-    MCP_ENVIRONMENT_ENV,
-)
 
 app = Flask(__name__)
 register_pm_asset_routes(app)
@@ -58,7 +122,7 @@ register_pm_asset_routes(app)
 OLLAMA_CONFIG = OllamaConfig.from_env()
 OLLAMA_HOST = OLLAMA_CONFIG.base_url
 OLLAMA_TIMEOUT_SECONDS = OLLAMA_CONFIG.default_timeout_seconds
-M4_SSH_HOST = os.environ.get("OPENCLAW_M4_SSH_HOST", "192.168.50.117")
+M4_SSH_HOST = os.environ.get("OPENCLAW_M4_SSH_HOST", "100.104.100.96")
 M4_SSH_USER = os.environ.get("OPENCLAW_M4_SSH_USER", "andrewgraves")
 M4_SSH_KEY = os.environ.get(
     "OPENCLAW_M4_SSH_KEY",
@@ -76,15 +140,6 @@ INTELMINI_STORAGE_KEY = os.environ.get(
     "OPENCLAW_INTELMINI_STORAGE_KEY",
     str(Path.home() / ".ssh/openclaw_dev_backup_ed25519"),
 )
-PROPERTYMANAGER_API_BASE = os.environ.get(
-    "PROPERTYMANAGER_API_BASE",
-    "http://127.0.0.1:5062",
-).rstrip("/")
-PROPERTYMANAGER_API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "").strip()
-PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN = os.environ.get(
-    "PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN",
-    "",
-).strip()
 
 REPORT_DIR = Path.home() / "ai/projects/openclaw/reports"
 GRAPH_DIR = REPORT_DIR / "graphs"
@@ -121,12 +176,6 @@ AI_PROMOTION_DIR = AI_REPORT_DIR / "scorecard_promotions"
 AI_SCORECARD_PATH = OPENCLAW_ROOT / "config/ai_intelligence/scorecard.json"
 AI_MODEL_REGISTRY_PATH = (
     OPENCLAW_ROOT / "config/ai_intelligence/model_registry.json"
-)
-AI_DEPLOYMENT_MAP_PATH = (
-    OPENCLAW_ROOT / "config/ai_intelligence/deployment_map.json"
-)
-AI_MODEL_RUNTIME_ALIASES_PATH = (
-    OPENCLAW_ROOT / "config/ai_intelligence/model_runtime_aliases.json"
 )
 AI_APPROVAL_TOOL = (
     OPENCLAW_ROOT / "tools/ai_intelligence/approve_evaluation_lab.py"
@@ -316,119 +365,6 @@ def get_external_storage_info():
     return get_remote_external_storage_info()
 
 
-def format_storage_bytes(value):
-    try:
-        size = float(value)
-    except (TypeError, ValueError):
-        return "unknown"
-
-    units = ["B", "KiB", "MiB", "GiB", "TiB"]
-    for unit in units:
-        if size < 1024 or unit == units[-1]:
-            precision = 0 if unit == "B" else 1
-            return f"{size:.{precision}f}{unit}"
-        size /= 1024
-    return "unknown"
-
-
-def get_remote_internal_storage_info():
-    remote_command = (
-        "root_source=$(findmnt -n -T / -o SOURCE) && "
-        "findmnt -n -T / -o TARGET,SOURCE,FSTYPE && "
-        "df -P -B1 -- / && "
-        "printf '__ROOT_CHAIN__\\n' && "
-        "lsblk -b -s -n -o NAME,SIZE,TYPE \"$root_source\""
-    )
-    try:
-        out = subprocess.check_output(
-            [
-                "ssh",
-                "-i",
-                INTELMINI_STORAGE_KEY,
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "IdentitiesOnly=yes",
-                "-o",
-                "StrictHostKeyChecking=yes",
-                "-o",
-                "ConnectTimeout=5",
-                f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
-                remote_command,
-            ],
-            text=True,
-            timeout=10,
-            stderr=subprocess.STDOUT,
-        ).strip()
-        lines = out.splitlines()
-        marker_index = lines.index("__ROOT_CHAIN__")
-        if marker_index < 3:
-            raise ValueError("remote internal storage probe returned incomplete data")
-
-        mount_fields = lines[0].split()
-        disk_fields = lines[marker_index - 1].split()
-        if len(mount_fields) < 3 or len(disk_fields) < 6:
-            raise ValueError("remote internal storage data is incomplete")
-
-        root_total_bytes = int(disk_fields[1])
-        root_used_bytes = int(disk_fields[2])
-        root_free_bytes = int(disk_fields[3])
-        pct_num = int(disk_fields[4].replace("%", ""))
-
-        physical_disks = []
-        for line in lines[marker_index + 1 :]:
-            fields = line.split()
-            if len(fields) == 3 and fields[2] == "disk":
-                physical_disks.append((fields[0], int(fields[1])))
-        if not physical_disks:
-            raise ValueError("root physical disk was not identified")
-        physical_name, physical_total_bytes = physical_disks[-1]
-        unallocated_bytes = max(physical_total_bytes - root_total_bytes, 0)
-
-        if pct_num >= 90:
-            color, status = "#ef4444", "Critical"
-        elif pct_num >= 80:
-            color, status = "#facc15", "Warning"
-        else:
-            color, status = "#22c55e", "Healthy"
-
-        return {
-            "label": "Intel Mini Internal Drive",
-            "path": "/",
-            "total": format_storage_bytes(root_total_bytes),
-            "used": format_storage_bytes(root_used_bytes),
-            "free": format_storage_bytes(root_free_bytes),
-            "pct": f"{pct_num}%",
-            "pct_num": pct_num,
-            "color": color,
-            "status": status,
-            "available": True,
-            "source": mount_fields[1],
-            "filesystem": mount_fields[2],
-            "remote_host": INTELMINI_STORAGE_HOST,
-            "physical_device": f"/dev/{physical_name}",
-            "physical_total": format_storage_bytes(physical_total_bytes),
-            "root_allocated": format_storage_bytes(root_total_bytes),
-            "outside_root_allocation": format_storage_bytes(unallocated_bytes),
-        }
-    except Exception:
-        return {
-            "label": "Intel Mini Internal Drive",
-            "path": "/",
-            "total": "unavailable",
-            "used": "unavailable",
-            "free": "unavailable",
-            "pct": "—",
-            "pct_num": None,
-            "color": "#64748b",
-            "status": "Intel Mini probe unavailable",
-            "available": False,
-            "source": "unknown",
-            "filesystem": "unknown",
-            "remote_host": INTELMINI_STORAGE_HOST,
-        }
-
-
 def get_disk_used_percent(path):
     try:
         out = subprocess.check_output(
@@ -511,7 +447,7 @@ def storage_chart_html(external_now=None):
             internal_values,
             marker="o",
             linewidth=2,
-            label="Development VM Internal Disk (/)",
+            label="Internal Ubuntu Disk (/)",
         )
     if any(value is not None for value in external_values):
         ax.plot(
@@ -552,8 +488,7 @@ def storage_chart_html(external_now=None):
 def storage_panel_html():
     external_disk = get_external_storage_info()
     disks = [
-        get_disk_info("/", "Development VM Internal Disk"),
-        get_remote_internal_storage_info(),
+        get_disk_info("/", "Internal Ubuntu Disk"),
         external_disk,
     ]
 
@@ -615,15 +550,6 @@ def storage_panel_html():
         <div><b>Free:</b> {d['free']}</div>
         <div><b>Total:</b> {d['total']}</div>
     </div>
-    {
-        '<div style="color:#e5e7eb;margin-top:10px;font-size:15px;">'
-        f"<b>Entire physical drive:</b> {html_module.escape(d['physical_total'])} &nbsp; "
-        f"<b>Allocated to root:</b> {html_module.escape(d['root_allocated'])} &nbsp; "
-        f"<b>Outside root allocation:</b> {html_module.escape(d['outside_root_allocation'])}"
-        '</div>'
-        if d.get('physical_total')
-        else ''
-    }
     {
         '<div style="color:#cbd5e1;margin-top:8px;font-size:14px;">'
         f"Read-only source: {html_module.escape(d.get('source', 'local'))} "
@@ -1046,23 +972,7 @@ def check_service(name, command, scope):
     return (name, scope, "Offline / Warning", "#b91c1c")
 
 
-def get_propertymanager_mcp_status():
-    """Report whether the DEV-only, on-demand MCP can be started safely.
-
-    PropertyManager MCP uses stdio and is launched by its client, so there is
-    no persistent process to probe. Its health is the readiness of its narrow
-    DEV-only configuration contract; the database URL itself is never exposed.
-    """
-    if os.environ.get(MCP_ENABLED_ENV) != "1":
-        return {"ready": False, "status": "Disabled"}
-    if os.environ.get(MCP_ENVIRONMENT_ENV) != "development":
-        return {"ready": False, "status": "DEV-only gate not satisfied"}
-    if not os.environ.get(MCP_DATABASE_URL_ENV, "").strip():
-        return {"ready": False, "status": "Credentials not configured"}
-    return {"ready": True, "status": "Ready (on demand)"}
-
-
-def build_system_health(omlx=None, propertymanager_mcp=None, llama_cpp=None):
+def build_system_health():
     checks = []
 
     checks.append(
@@ -1130,37 +1040,7 @@ def build_system_health(omlx=None, propertymanager_mcp=None, llama_cpp=None):
         )
     )
 
-    omlx = omlx or get_omlx_status()
-    checks.append(
-        (
-            "oMLX API",
-            "HTTP endpoint",
-            "Connected" if omlx["connected"] else omlx["status"],
-            "#16a34a" if omlx["connected"] else "#b91c1c",
-        )
-    )
-
-    llama_cpp = llama_cpp if llama_cpp is not None else get_llama_cpp_status()
-    checks.append(
-        (
-            "llama.cpp API",
-            "HTTP endpoint",
-            "Connected" if llama_cpp["connected"] else llama_cpp["status"],
-            "#16a34a" if llama_cpp["connected"] else "#b91c1c",
-        )
-    )
-
-    propertymanager_mcp = propertymanager_mcp or get_propertymanager_mcp_status()
-    checks.append(
-        (
-            "PropertyManager MCP",
-            "On-demand stdio server",
-            propertymanager_mcp["status"],
-            "#16a34a" if propertymanager_mcp["ready"] else "#b91c1c",
-        )
-    )
-
-    return sorted(checks, key=lambda service: service[0].casefold())
+    return checks
 
 
 def service_scope_panel_html(services):
@@ -1172,9 +1052,9 @@ def service_scope_panel_html(services):
     return f"""
     <div class='panel'>
         <h2>Service Health by Scope</h2>
-        <p>User services, system services, containers, HTTP endpoints, and
-        on-demand stdio servers are checked differently. The scope below
-        identifies which control plane owns each item.</p>
+        <p>User services, system services, containers, and HTTP endpoints are
+        checked differently. The scope below identifies which control plane owns
+        each item.</p>
         <table style="width:100%;text-align:left;border-collapse:collapse">
           <thead><tr><th>Service</th><th>Scope</th><th>Status</th></tr></thead>
           <tbody>{rows}</tbody>
@@ -1209,68 +1089,6 @@ def collect_trend_sample():
 
 
 
-def load_intelmini_host_trend_rows():
-    """Return recent Intel Mini trend rows, which also carry the M4 columns."""
-    key = Path(INTELMINI_STORAGE_KEY)
-    if not key.is_file():
-        return None
-    remote_command = (
-        "python3 -c \"import csv,sys; from pathlib import Path; "
-        "p=Path.home()/'ai/projects/openclaw/reports/trends.csv'; "
-        "rows=list(csv.reader(p.open())); "
-        "w=csv.writer(sys.stdout); w.writerow(rows[0]); "
-        "w.writerows(rows[-36:])\""
-    )
-    try:
-        out = subprocess.check_output(
-            [
-                "ssh",
-                "-i",
-                str(key),
-                "-o",
-                "BatchMode=yes",
-                "-o",
-                "IdentitiesOnly=yes",
-                "-o",
-                "StrictHostKeyChecking=yes",
-                "-o",
-                "ConnectTimeout=5",
-                f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
-                remote_command,
-            ],
-            text=True,
-            timeout=12,
-            stderr=subprocess.DEVNULL,
-        )
-        return list(csv.DictReader(out.splitlines()))
-    except Exception:
-        return None
-
-
-def trend_rows_include_m4(rows):
-    for row in rows[-48:]:
-        for key in (
-            "m4_mem_used_gib",
-            "m4_cpu_used_pct",
-            "m4_disk_used_pct",
-            "m4_ollama_response_ms",
-        ):
-            value = parse_number(row.get(key))
-            if value is not None and value > 0:
-                return True
-    return False
-
-
-def trend_rows_are_dev_guest(rows):
-    """Guest samples report about 8 GiB. The Intel Mini host reports about 62 GiB."""
-    totals = []
-    for row in rows[-48:]:
-        total = parse_number(row.get("mem_total_gib"))
-        if total is not None and total > 0:
-            totals.append(total)
-    return bool(totals) and max(totals) < 32
-
-
 def generate_trend_charts():
     if not TREND_FILE.exists():
         return []
@@ -1283,21 +1101,11 @@ def generate_trend_charts():
     except Exception:
         return []
 
-    machine_name = "Intel Mini"
-    if rows and (
-        trend_rows_are_dev_guest(rows) or not trend_rows_include_m4(rows)
-    ):
-        remote_rows = load_intelmini_host_trend_rows()
-        if remote_rows:
-            rows = remote_rows
-        elif trend_rows_are_dev_guest(rows):
-            machine_name = "DEV virtual machine"
-
     if not rows:
         return []
 
     time_col = find_column(rows, ["timestamp", "time", "datetime", "date"])
-    recent_rows = rows[-48:]
+    recent_rows = rows[-24:]
 
     labels = []
     for row in recent_rows:
@@ -1315,12 +1123,23 @@ def generate_trend_charts():
             return None
 
         values = []
+        last_good = None
+
+        for row in rows:
+            v = parse_number(row.get(col))
+            if v is not None and v > 0:
+                last_good = v
+
         for row in recent_rows:
-            value = parse_number(row.get(col))
-            if value is not None and value > 0:
-                values.append(value)
+            v = parse_number(row.get(col))
+            if v is not None and v > 0:
+                last_good = v
+                values.append(v)
+            elif last_good is not None:
+                values.append(last_good)
             else:
-                values.append(float("nan"))
+                values.append(0)
+
         return values
 
     def style_chart(ax, title, ylabel, percent_axis=False):
@@ -1363,61 +1182,71 @@ def generate_trend_charts():
 
     chart_files = []
 
-    def measured(values):
-        return bool(values) and any(value == value and value > 0 for value in values)
-
-    def add_chart(filename, title, ylabel, series, percent_axis=False):
-        drawn = [(label, values) for label, values in series if measured(values)]
-        if not drawn:
-            return
+    latency = values_for("ollama_latency_ms")
+    if latency:
         chart_files.append(
-            save_line_chart(filename, title, ylabel, drawn, percent_axis=percent_axis)
+            save_line_chart(
+                "ollama_latency.png",
+                "Intel Mini Ollama Latency",
+                "Latency (ms)",
+                [("Intel Mini Ollama Latency", latency)],
+            )
         )
 
-    add_chart(
-        "ollama_latency.png",
-        "Ollama Response",
-        "Response (ms)",
-        [
-            (machine_name, values_for("ollama_latency_ms")),
-            ("M4", values_for("m4_ollama_response_ms")),
-        ],
-    )
-    add_chart(
-        "memory_usage.png",
-        "Memory",
-        "Memory Used (GiB)",
-        [
-            (machine_name, values_for("mem_used_gib")),
-            ("M4", values_for("m4_mem_used_gib")),
-        ],
-    )
-    disk_series = [
-        (
-            machine_name if machine_name == "DEV virtual machine" else "Intel Mini internal",
-            values_for("disk_used_pct"),
-        ),
-        ("M4", values_for("m4_disk_used_pct")),
-    ]
-    if machine_name == "Intel Mini":
-        disk_series.insert(
-            1,
-            ("Intel Mini external", values_for("external_disk_used_pct")),
+    intel_mem = values_for("mem_used_gib")
+    m4_mem = values_for("m4_mem_used_gib")
+    memory_series = []
+
+    if intel_mem:
+        memory_series.append(("Intel Mini Memory Usage", intel_mem))
+
+    if m4_mem:
+        memory_series.append(("M4 Memory Usage", m4_mem))
+
+    if memory_series:
+        chart_files.append(
+            save_line_chart(
+                "memory_usage.png",
+                "Memory Usage Over Time (Both Computers)",
+                "Memory Used (GiB)",
+                memory_series,
+            )
         )
-    add_chart(
-        "intelmini_disk_usage.png",
-        "Disk",
-        "Disk Used (%)",
-        disk_series,
-        percent_axis=True,
-    )
-    add_chart(
-        "m4_cpu_usage.png",
-        "CPU",
-        "CPU Used (%)",
-        [("M4", values_for("m4_cpu_used_pct"))],
-        percent_axis=True,
-    )
+
+    m4_cpu = values_for("m4_cpu_used_pct")
+    if m4_cpu:
+        chart_files.append(
+            save_line_chart(
+                "m4_cpu_usage.png",
+                "M4 CPU Usage",
+                "CPU Used (%)",
+                [("M4 CPU Usage", m4_cpu)],
+                percent_axis=True,
+            )
+        )
+
+    m4_disk = values_for("m4_disk_used_pct")
+    if m4_disk:
+        chart_files.append(
+            save_line_chart(
+                "m4_disk_usage.png",
+                "M4 Disk Usage",
+                "Disk Used (%)",
+                [("M4 Disk Usage", m4_disk)],
+                percent_axis=True,
+            )
+        )
+
+    m4_ollama = values_for("m4_ollama_response_ms")
+    if m4_ollama:
+        chart_files.append(
+            save_line_chart(
+                "m4_ollama_response.png",
+                "M4 Ollama Response Time",
+                "Response Time (ms)",
+                [("M4 Ollama Response Time", m4_ollama)],
+            )
+        )
 
     return chart_files
 
@@ -1431,68 +1260,12 @@ def graphs(filename):
 
 
 
-def load_model_runtime_aliases():
-    """Return declared routing-model to installed-runtime-tag aliases."""
+def ai_routing_telemetry_panel_html():
+    report_path = REPORT_DIR / "ai_intelligence" / "routing-telemetry-latest.json"
+    text_path = REPORT_DIR / "ai_intelligence" / "routing-telemetry-latest.txt"
 
-    try:
-        payload = json.loads(
-            AI_MODEL_RUNTIME_ALIASES_PATH.read_text(encoding="utf-8")
-        )
-    except (OSError, json.JSONDecodeError):
-        return {}
-
-    aliases = payload.get("aliases", {})
-    if not isinstance(aliases, dict):
-        return {}
-    return {
-        str(model_id): tuple(
-            str(tag) for tag in tags if isinstance(tag, str) and tag
-        )
-        for model_id, tags in aliases.items()
-        if isinstance(tags, list)
-    }
-
-
-def model_process_usage_panel_html() -> str:
-    """Render configured assignments beside the current router selection."""
-
-    # Imported on use so dashboard tests can load this module without the routing database stack.
-    from tools.dashboard.model_usage import (
-        build_model_usage,
-        model_usage_panel_html,
-    )
-
-    try:
-        deployment_map = json.loads(
-            AI_DEPLOYMENT_MAP_PATH.read_text(encoding="utf-8")
-        )
-        registry = json.loads(
-            AI_MODEL_REGISTRY_PATH.read_text(encoding="utf-8")
-        )
-        snapshot = build_model_usage(deployment_map, registry)
-    except (OSError, json.JSONDecodeError, ValueError) as exc:
-        return f"""
-        <div class='panel'>
-            <h2>Models by process</h2>
-            <div class='warning-box'>
-                The model assignment view could not be built.<br><br>
-                {html.escape(str(exc)[:160])}
-            </div>
-        </div>
-        """
-    return model_usage_panel_html(snapshot)
-
-
-def ai_routing_telemetry_panel_html(
-    *,
-    installed_model_names=(),
-):
-    report_path = AI_REPORT_DIR / "routing-telemetry-latest.json"
-    text_path = AI_REPORT_DIR / "routing-telemetry-latest.txt"
-
-    usage_panel = model_process_usage_panel_html()
     if not report_path.exists():
-        return usage_panel + """
+        return """
         <div class='panel'>
             <h2>AI Routing Telemetry</h2>
             <div class='warning-box'>
@@ -1505,7 +1278,7 @@ def ai_routing_telemetry_panel_html(
     try:
         summary = json.loads(report_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        return usage_panel + f"""
+        return f"""
         <div class='panel'>
             <h2>AI Routing Telemetry</h2>
             <div class='warning-box'>
@@ -1622,109 +1395,13 @@ def ai_routing_telemetry_panel_html(
         if difference_items
         else "<p>No model-routing differences were recorded.</p>"
     )
-    model_usage = summary.get("model_usage", {})
-    if not isinstance(model_usage, dict):
-        model_usage = {}
-    model_usage_limit = int(
-        model_usage.get("observation_limit", 0) or 0
-    )
-    model_usage_rows = model_usage.get("rows", [])
-    if not isinstance(model_usage_rows, list):
-        model_usage_rows = []
-    model_usage_items = []
-    for row in model_usage_rows:
-        if not isinstance(row, dict):
-            continue
-        model_id = html.escape(str(row.get("model_id", "unknown")))
-        observed_count = int(row.get("observed_attempt_count", 0) or 0)
-        latest_observed = html.escape(
-            str(row.get("latest_observed_at") or "No request observed")
-        )
-        assignments = row.get("configured_assignments", [])
-        if not isinstance(assignments, list):
-            assignments = []
-        assignment_text = ", ".join(
-            f"{item.get('component_id', 'unknown')} "
-            f"({'/'.join(str(role) for role in item.get('assignment_types', [])) or 'assigned'})"
-            for item in assignments
-            if isinstance(item, dict)
-        ) or "Observed only; no current assignment"
-        if row.get("usage_status") == "used":
-            activity = "Used"
-            activity_class = "telemetry-status--used"
-        else:
-            activity = "No observed request"
-            activity_class = "telemetry-status--unobserved"
-        model_usage_items.append(
-            "<tr>"
-            f"<td><code>{model_id}</code></td>"
-            f"<td><span class='telemetry-status {activity_class}'>{activity}</span></td>"
-            f"<td>{observed_count}</td>"
-            f"<td>{html.escape(assignment_text)}</td>"
-            f"<td>{latest_observed}</td>"
-            "</tr>"
-        )
-    model_usage_html = (
-        "<div class='table-scroll'><table class='dashboard-table'>"
-        "<thead><tr><th>Model</th><th>Activity</th>"
-        "<th>Attempts</th><th>Current assignment</th>"
-        "<th>Latest observation</th></tr></thead><tbody>"
-        + "".join(model_usage_items)
-        + "</tbody></table></div>"
-        if model_usage_items
-        else "<p>No configured or observed models were found in this report.</p>"
-    )
-    aliases = load_model_runtime_aliases()
-    alias_to_model_id = {
-        runtime_tag: model_id
-        for model_id, runtime_tags in aliases.items()
-        for runtime_tag in runtime_tags
-    }
-    usage_by_model_id = {
-        str(row.get("model_id")): row
-        for row in model_usage_rows
-        if isinstance(row, dict) and row.get("model_id")
-    }
-    installed_usage_items = []
-    for runtime_tag in sorted({str(name) for name in installed_model_names if name}):
-        model_id = alias_to_model_id.get(runtime_tag)
-        usage = usage_by_model_id.get(model_id) if model_id else None
-        if usage and usage.get("usage_status") == "used":
-            activity = "Used"
-            activity_class = "telemetry-status--used"
-        elif usage:
-            activity = "No observed request"
-            activity_class = "telemetry-status--unobserved"
-        elif model_id:
-            activity = "No telemetry record"
-            activity_class = "telemetry-status--no-record"
-        else:
-            activity = "No routing identity mapped"
-            activity_class = "telemetry-status--unmapped"
-        installed_usage_items.append(
-            "<tr>"
-            f"<td><code>{html.escape(runtime_tag)}</code></td>"
-            f"<td>{html.escape(model_id or '—')}</td>"
-            f"<td><span class='telemetry-status {activity_class}'>{activity}</span></td>"
-            "</tr>"
-        )
-    installed_usage_html = (
-        "<div class='table-scroll'><table class='dashboard-table telemetry-coverage-table'>"
-        "<colgroup><col style='width:29%'><col style='width:31%'><col style='width:40%'></colgroup>"
-        "<thead><tr><th>Installed model</th><th>Routing identity</th>"
-        "<th>Telemetry activity</th></tr></thead><tbody>"
-        + "".join(installed_usage_items)
-        + "</tbody></table></div>"
-        if installed_usage_items
-        else "<p>The live model inventory was unavailable for this dashboard refresh.</p>"
-    )
     preview = ""
     if text_path.exists():
         preview = html.escape(
             "\n".join(text_path.read_text(encoding="utf-8").splitlines()[:12])
         )
 
-    return usage_panel + f"""
+    return f"""
     <div class='panel'>
         <h2>AI Routing Telemetry</h2>
         <div class='status-box'>
@@ -1750,36 +1427,6 @@ def ai_routing_telemetry_panel_html(
                 {not_observed_count} configured component(s) had no request
                 telemetry in this reporting window. “Not observed” means no
                 request was recorded; it does not mean the component failed.
-            </p>
-        </div>
-        <div class="status-box telemetry-section" style="margin-top:14px;">
-            <h3>Model usage in this telemetry window</h3>
-            {model_usage_html}
-            <p class="telemetry-note">
-                “No observed request” means this report did not record a request
-                for that configured model in its latest {model_usage_limit or 'available'}
-                telemetry record(s). It is not evidence that the model is safe to remove.
-            </p>
-        </div>
-        <div class="status-box telemetry-section" style="margin-top:14px;">
-            <div class="telemetry-heading">
-                <div>
-                    <h3>Installed-model telemetry coverage</h3>
-                    <p>Live Ollama inventory matched to declared routing identities.</p>
-                </div>
-                <span class="telemetry-inventory-count">{len(installed_usage_items)} installed</span>
-            </div>
-            <div class="telemetry-legend" aria-label="Telemetry activity legend">
-                <span class="telemetry-status telemetry-status--used">Used</span>
-                <span class="telemetry-status telemetry-status--unobserved">No observed request</span>
-                <span class="telemetry-status telemetry-status--unmapped">No routing identity mapped</span>
-            </div>
-            {installed_usage_html}
-            <p class="telemetry-note">
-                Every model tag returned by the live Ollama inventory is shown.
-                An unmapped tag has no declared routing identity, so telemetry
-                cannot classify it as used or unused. Map it before using this
-                table for any removal decision.
             </p>
         </div>
         <details style="margin-top:14px;">
@@ -1809,19 +1456,19 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
     if "permission denied" in message:
         return {
             "status": "Credentials rejected",
-            "summary": "The metrics host rejected the configured SSH account or key.",
+            "summary": "The M4 rejected the configured SSH account or key.",
             "technical": "SSH authentication failed.",
         }
     if "host key verification failed" in message or "remote host identification has changed" in message:
         return {
             "status": "Host identity not trusted",
-            "summary": "The saved metrics host identity must be reviewed.",
+            "summary": "The saved M4 host identity must be reviewed.",
             "technical": "SSH host-key verification failed.",
         }
     if "connection refused" in message:
         return {
             "status": "SSH service unavailable",
-            "summary": "The metrics host answered on the network but did not accept SSH.",
+            "summary": "The M4 answered on the network but did not accept SSH.",
             "technical": "SSH connection was refused.",
         }
     if any(
@@ -1830,13 +1477,13 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
     ):
         return {
             "status": "Host unreachable",
-            "summary": "The dashboard cannot currently reach the metrics host over the network.",
-            "technical": "Metrics host network route is unavailable.",
+            "summary": "The dashboard cannot currently reach the M4 over the network.",
+            "technical": "M4 network route is unavailable.",
         }
     if isinstance(error, subprocess.TimeoutExpired) or "timed out" in message:
         return {
             "status": "Connection timed out",
-            "summary": "The metrics host SSH probe did not respond in time.",
+            "summary": "The M4 SSH metrics probe did not respond in time.",
             "technical": "SSH metrics probe timed out.",
         }
     if isinstance(error, FileNotFoundError):
@@ -1847,28 +1494,18 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
         }
     return {
         "status": "Metrics probe failed",
-        "summary": "Optional host metrics could not be collected.",
+        "summary": "Optional M4 metrics could not be collected.",
         "technical": "SSH metrics probe failed; review the dashboard service log.",
     }
 
 
-def m4_ai_health_panel_html(ollama=None, omlx=None, llama_cpp=None):
+def m4_ai_health_panel_html(ollama=None):
     ollama = ollama or get_m4_ollama_status()
-    omlx = omlx or get_omlx_status()
-    llama_cpp = llama_cpp if llama_cpp is not None else get_llama_cpp_status()
     ollama_status = "Online" if ollama["connected"] else "Offline"
     ollama_color = "#22c55e" if ollama["connected"] else "#ef4444"
     response_ms = ollama.get("response_ms", "unknown")
     model_count = ollama.get("model_count", "unknown")
     model_names = ollama.get("detected_models") or ollama.get("error", "unknown")
-    omlx_status = omlx["status"]
-    omlx_color = "#22c55e" if omlx["connected"] else "#fbbf24"
-    omlx_response_ms = omlx.get("response_ms", "unknown")
-    omlx_models = omlx.get("detected_models") or omlx.get("error", "unknown")
-    llama_status = llama_cpp["status"]
-    llama_color = "#22c55e" if llama_cpp["connected"] else "#ef4444"
-    llama_response_ms = llama_cpp.get("response_ms", "unknown")
-    llama_models = llama_cpp.get("detected_models") or llama_cpp.get("error", "unknown")
 
     m4 = {
         "reachable": False,
@@ -1971,7 +1608,7 @@ PY_REMOTE
 
     html = f"""
 <div class='panel'>
-<h2>🧠 Intel Mini AI Server Health</h2>
+<h2>🧠 M4 AI Server Health</h2>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;">
 
@@ -1979,7 +1616,7 @@ PY_REMOTE
 <b>Remote metrics (optional)</b><br><br>
 <span style="color:{ssh_color};font-weight:bold;">{html_module.escape(ssh_status)}</span><br>
 {html_module.escape(m4['ssh_summary'])}<br>
-Metrics host: {html_module.escape(M4_SSH_HOST)}
+M4 SSH host: {html_module.escape(M4_SSH_HOST)}
 </div>
 
 <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
@@ -1989,21 +1626,7 @@ Response: {response_ms} ms
 </div>
 
 <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
-<b>oMLX API</b><br><br>
-<span style="color:{omlx_color};font-weight:bold;">{html_module.escape(omlx_status)}</span><br>
-Response: {html_module.escape(str(omlx_response_ms))} ms<br>
-Models: {omlx.get('model_count', 0)}
-</div>
-
-<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
-<b>llama.cpp</b><br><br>
-<span style="color:{llama_color};font-weight:bold;">{html_module.escape(llama_status)}</span><br>
-Response: {html_module.escape(str(llama_response_ms))} ms<br>
-Models: {llama_cpp.get('model_count', 0)}
-</div>
-
-<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
-<b>Memory</b><br><br>
+<b>M4 Memory</b><br><br>
 Used: {m4['memory_used_gib']} GiB / {m4['memory_total_gib']} GiB<br>
 Percent: {m4['memory_percent']}
 </div>
@@ -2022,13 +1645,7 @@ Models Loaded: {model_count}
 Detected Models:
 {model_names}
 
-oMLX Models:
-{html_module.escape(omlx_models)}
-
-llama.cpp Models:
-{html_module.escape(llama_models)}
-
-Uptime:
+M4 Uptime:
 {m4['uptime']}
 
 Errors:
@@ -2080,104 +1697,6 @@ def get_m4_ollama_status():
             "primary": "Unavailable",
             "detected_models": "",
             "model_names": [],
-            "response_ms": "failed",
-        }
-
-
-def get_llama_cpp_status():
-    """Probe the llama.cpp model catalog without sending a generation request.
-
-    The dashboard host reaches the M4 llama-server through the DEV loopback
-    tunnel. OPENCLAW_LLAMA_CPP_BASE_URL overrides that address.
-    """
-    base_url = os.environ.get(
-        "OPENCLAW_LLAMA_CPP_BASE_URL",
-        "http://127.0.0.1:18088/v1",
-    ).rstrip("/")
-    endpoint = f"{base_url}/models"
-    started = time.time()
-    try:
-        response = requests.get(endpoint, timeout=5)
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError("llama.cpp model catalog must be an object")
-        models = payload.get("data")
-        if not isinstance(models, list):
-            raise ValueError("llama.cpp model catalog data must be a list")
-        model_ids = [
-            item.get("id", "")
-            for item in models
-            if isinstance(item, dict) and item.get("id")
-        ]
-        return {
-            "connected": True,
-            "status": "Online",
-            "endpoint": endpoint,
-            "model_count": len(model_ids),
-            "detected_models": ", ".join(model_ids),
-            "response_ms": int((time.time() - started) * 1000),
-        }
-    except (requests.RequestException, ValueError, TypeError):
-        return {
-            "connected": False,
-            "status": "Offline",
-            "endpoint": endpoint,
-            "error": "The configured llama.cpp API did not return a model catalog.",
-            "model_count": 0,
-            "detected_models": "",
-            "response_ms": "failed",
-        }
-
-
-def get_omlx_status():
-    """Probe the authenticated oMLX model catalog without sending a generation request."""
-    try:
-        config = OMLXConfig.from_env()
-    except OMLXConfigurationError:
-        return {
-            "connected": False,
-            "status": "Credentials not configured",
-            "error": "The dashboard oMLX credential is not configured.",
-            "model_count": 0,
-            "detected_models": "",
-            "response_ms": "not attempted",
-        }
-
-    endpoint = f"{config.base_url}/models"
-    started = time.time()
-    try:
-        response = requests.get(
-            endpoint,
-            headers={"Authorization": f"Bearer {config.api_key}"},
-            timeout=min(5, config.default_timeout_seconds),
-        )
-        response.raise_for_status()
-        payload = response.json()
-        if not isinstance(payload, dict):
-            raise ValueError("oMLX model catalog must be an object")
-        models = payload.get("data")
-        if not isinstance(models, list):
-            raise ValueError("oMLX model catalog data must be a list")
-        model_ids = [
-            item.get("id", "")
-            for item in models
-            if isinstance(item, dict) and item.get("id")
-        ]
-        return {
-            "connected": True,
-            "status": "Online",
-            "model_count": len(model_ids),
-            "detected_models": ", ".join(model_ids),
-            "response_ms": int((time.time() - started) * 1000),
-        }
-    except (requests.RequestException, ValueError, TypeError):
-        return {
-            "connected": False,
-            "status": "Offline",
-            "error": "The configured oMLX API did not return a model catalog.",
-            "model_count": 0,
-            "detected_models": "",
             "response_ms": "failed",
         }
 
@@ -2317,48 +1836,37 @@ def get_ranchbrain_notes(category):
 
 
 def openclaw_shared_navigation():
-    """Return the canonical navigation for OpenClaw dashboard pages."""
     try:
         from flask import request as _req
         cur_path = _req.path if _req else "/"
-    except Exception:
+    except:
         cur_path = "/"
     cur_path = (cur_path or "/").rstrip("/") or "/"
-
     links = (
         ("/", "Overview"),
-        ("/ai-cost", "AI Cost"),
-        ("/ranchbrain", "RanchBrain"),
-        ("/notes", "Vault"),
-        ("/ai-scorecard?view=all", "All Models Scorecard"),
-        ("/documentation", "Foundational Documentation"),
-        ("/pdf", "PDF"),
-        ("/backup-recovery", "Backup & Recovery Center"),
+        ("/ranchbrain","RanchBrain"),
+        ("/notes","Vault"),
+        ("/ai-scorecard?view=all","All Models Scorecard"),
+        ("/documentation","Foundational Documentation"),
+        ("/pdf","PDF"),
+        ("/ai-cost","AI Cost"),
+        ("/backup-recovery","Backup & Recovery Center"),
     )
-
     base_style = "color:white;text-decoration:none;padding:10px 14px;border-radius:7px;font-weight:bold;display:inline-block;"
-    inactive_bg = "background:#334155;"
-    active_bg = "background:#60a5fa;color:black;"
-
-    anchors = []
-    for href, label in links:
+    inactive = "background:#334155;"
+    active = "background:#60a5fa;color:black;"
+    out = []
+    for href,label in links:
         href_path = href.split("?")[0].rstrip("/") or "/"
         if href_path == "/":
             is_active = (cur_path == "/")
+        elif href_path == "/ai-scorecard":
+            is_active = cur_path.startswith("/ai-scorecard")
         else:
-            is_active = (cur_path == href_path or cur_path.startswith(href_path + "/"))
-            if href_path == "/ai-scorecard" and cur_path.startswith("/ai-scorecard"):
-                is_active = True
-        style = base_style + (active_bg if is_active else inactive_bg)
-        anchors.append(f'<a href="{href}" style="{style}">{label}</a>')
-    return (
-        '<div class="nav openclaw-shared-navigation" '
-        'style="display:flex;gap:10px;flex-wrap:wrap;'
-        'margin-bottom:20px;">'
-        + "".join(anchors) +
-        "</div>"
-    )
-
+            is_active = (cur_path == href_path or cur_path.startswith(href_path+"/"))
+        style = base_style + (active if is_active else inactive)
+        out.append(f"<a href=\"{href}\" style=\"{style}\">{label}</a>")
+    return "<div class=\"nav openclaw-shared-navigation\" style=\"display:flex;gap:10px;flex-wrap:wrap;margin-bottom:20px;\">" + "".join(out) + "</div>"
 
 
 def ranchbrain_shell(title, body):
@@ -2445,79 +1953,6 @@ table.dashboard-table tbody tr:hover td {{
 table.dashboard-table code {{
   white-space:normal;
   overflow-wrap:anywhere;
-}}
-.telemetry-section h3 {{
-  margin:0;
-  font-size:17px;
-}}
-.telemetry-heading {{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:16px;
-  margin-bottom:10px;
-}}
-.telemetry-heading p {{
-  margin:5px 0 0;
-  color:#cbd5e1;
-}}
-.telemetry-inventory-count {{
-  flex:none;
-  border:1px solid #64748b;
-  border-radius:999px;
-  padding:4px 9px;
-  color:#e2e8f0;
-  font-size:13px;
-  font-weight:bold;
-  white-space:nowrap;
-}}
-.telemetry-legend {{
-  display:flex;
-  flex-wrap:wrap;
-  gap:8px;
-  margin:0 0 12px;
-}}
-.telemetry-status {{
-  display:inline-block;
-  border-radius:999px;
-  padding:3px 8px;
-  font-size:13px;
-  font-weight:bold;
-  line-height:1.25;
-  white-space:nowrap;
-}}
-.telemetry-status--used {{
-  color:#bbf7d0;
-  background:#14532d;
-  border:1px solid #22c55e;
-}}
-.telemetry-status--unobserved,
-.telemetry-status--no-record {{
-  color:#fef3c7;
-  background:#78350f;
-  border:1px solid #fbbf24;
-}}
-.telemetry-status--unmapped {{
-  color:#ffedd5;
-  background:#7c2d12;
-  border:1px solid #fb923c;
-}}
-.telemetry-coverage-table {{
-  min-width:760px;
-}}
-.telemetry-note {{
-  margin:12px 0 0;
-  padding:10px 12px;
-  border-left:3px solid #64748b;
-  border-radius:0 6px 6px 0;
-  background:#1e293b;
-  color:#cbd5e1;
-}}
-@media (max-width:640px) {{
-  .telemetry-heading {{
-    flex-direction:column;
-    gap:8px;
-  }}
 }}
 button {{
   border:0;
@@ -3425,7 +2860,6 @@ DOCUMENTATION_INVENTORY = DOCUMENTATION_ROOT / "document-inventory.json"
 
 DOCUMENTATION_FEATURED_PATHS = (
     "foundation/FOUNDATIONAL_DOCUMENTS.md",
-    "foundation/HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md",
     "foundation/PROJECT_OVERVIEW.md",
     "foundation/SOUL.md",
     "foundation/AI_GOVERNANCE_MANIFEST.md",
@@ -4023,77 +3457,6 @@ def pdf_upload_sha256(path):
     return digest.hexdigest()
 
 
-def pdf_upload_normalize_known_bom(path):
-    """Remove only the observed UTF-16 BOM immediately before a PDF header.
-
-    This retains strict PDF validation: arbitrary leading bytes still fail.
-    The canonicalized temporary file is the one hashed and stored on the
-    IntelMini external drive.
-    """
-    candidate = Path(path)
-    with candidate.open("rb") as handle:
-        leading = handle.read(7)
-    if not leading.startswith(b"\xff\xfe%PDF-"):
-        return False
-    data = candidate.read_bytes()
-    candidate.write_bytes(data[2:])
-    return True
-
-
-def propertymanager_manual_library_headers():
-    if not PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN:
-        raise RuntimeError("PropertyManager manual-library service authentication is not configured.")
-    return {
-        "Content-Type": "application/json",
-        "X-PropertyManager-Manual-Library-Token": PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN,
-    }
-
-
-def propertymanager_manual_library_register(asset_id, payload):
-    response = requests.post(
-        f"{PROPERTYMANAGER_API_BASE}/v1/internal/manual-library/assets/{asset_id}/manuals",
-        headers=propertymanager_manual_library_headers(),
-        json=payload,
-        timeout=20,
-    )
-    if response.status_code >= 400:
-        try:
-            message = str(response.json().get("message") or "PropertyManager manual registration failed.")
-        except (ValueError, AttributeError):
-            message = "PropertyManager manual registration failed."
-        raise RuntimeError(message)
-    return response.json()
-
-
-def propertymanager_manual_library_source(asset_id, manual_id, version_id):
-    response = requests.get(
-        f"{PROPERTYMANAGER_API_BASE}/v1/internal/manual-library/assets/{asset_id}/manuals/{manual_id}/versions/{version_id}/source",
-        headers=propertymanager_manual_library_headers(),
-        timeout=20,
-    )
-    if response.status_code >= 400:
-        raise FileNotFoundError("Manual source is unavailable.")
-    payload = response.json()
-    locator = str(payload.get("source_locator") or "")
-    prefix = "dashboard-library://"
-    if not locator.startswith(prefix):
-        raise ValueError("Manual source locator is invalid.")
-    relative_path = pdf_library_validate_relative_path(locator.removeprefix(prefix))
-    return relative_path, str(payload.get("mime_type") or "application/pdf")
-
-
-def propertymanager_manual_library_client_authorized():
-    """Authorize a Mac PropertyManager client without logging its credential."""
-    expected = PROPERTYMANAGER_API_KEY
-    if not expected:
-        return False
-    supplied = request.headers.get("X-API-Key") or ""
-    authorization = request.headers.get("Authorization") or ""
-    if authorization.lower().startswith("bearer "):
-        supplied = authorization[7:].strip()
-    return bool(supplied) and hmac.compare_digest(supplied, expected)
-
-
 def pdf_upload_find_duplicate(sha256):
     conn = ranchbrain_db()
     cur = conn.cursor()
@@ -4113,40 +3476,6 @@ def pdf_upload_find_duplicate(sha256):
         if not row:
             return None
         return {"relative_path": row[0], "title": row[1]}
-    finally:
-        cur.close()
-        conn.close()
-
-
-def pdf_upload_find_available_asset_pdf(relative_path):
-    """Return verified library metadata for an existing Asset PDF, never its bytes."""
-    relative = pdf_library_validate_relative_path(relative_path)
-    if not relative.startswith("Assets/"):
-        raise ValueError("Only PDFs stored in the Assets library can be linked to a PropertyManager asset.")
-    conn = ranchbrain_db()
-    cur = conn.cursor()
-    try:
-        cur.execute(
-            """
-            SELECT relative_path, original_filename, title, size_bytes, sha256
-            FROM reference_documents
-            WHERE storage_root = %s AND relative_path = %s
-              AND category = 'Assets' AND document_type = 'pdf'
-              AND mime_type = 'application/pdf' AND storage_state = 'available'
-            LIMIT 1
-            """,
-            (str(PDF_DOCUMENT_ROOT), relative),
-        )
-        row = cur.fetchone()
-        if not row:
-            raise FileNotFoundError("The selected PDF is not an available Assets-library record.")
-        return {
-            "relative_path": str(row[0]),
-            "original_filename": str(row[1]),
-            "title": str(row[2] or ""),
-            "size_bytes": int(row[3]),
-            "sha256": str(row[4]),
-        }
     finally:
         cur.close()
         conn.close()
@@ -4375,7 +3704,6 @@ def documentation_upload_pdf():
                     f"openclaw-pdf-upload-{time.time_ns()}.pdf"
                 )
                 upload.save(temporary_path)
-                pdf_upload_normalize_known_bom(temporary_path)
                 validation = pdf_upload_validate(temporary_path)
                 duplicate = pdf_upload_find_duplicate(validation["sha256"])
                 if duplicate:
@@ -4431,7 +3759,6 @@ def documentation_upload_pdf():
                 )
 
                 upload.save(temporary_path)
-                pdf_upload_normalize_known_bom(temporary_path)
                 validation = pdf_upload_validate(temporary_path)
                 duplicate = pdf_upload_find_duplicate(validation["sha256"])
                 if duplicate:
@@ -4582,287 +3909,6 @@ Only valid PDF files up to 50 MB are accepted.
 """
 
     return documentation_shell("Upload PDF", body)
-
-
-def propertymanager_manual_library_list_assets():
-    if not PROPERTYMANAGER_API_KEY:
-        raise RuntimeError("PropertyManager API authentication is not configured.")
-    response = requests.get(
-        f"{PROPERTYMANAGER_API_BASE}/v1/assets",
-        headers={"Authorization": f"Bearer {PROPERTYMANAGER_API_KEY}"},
-        timeout=20,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    return payload if isinstance(payload, list) else []
-
-
-def propertymanager_manual_library_list_manuals(asset_id):
-    if not PROPERTYMANAGER_API_KEY:
-        raise RuntimeError("PropertyManager API authentication is not configured.")
-    response = requests.get(
-        f"{PROPERTYMANAGER_API_BASE}/v1/assets/{asset_id}/manuals",
-        headers={"Authorization": f"Bearer {PROPERTYMANAGER_API_KEY}"},
-        timeout=20,
-    )
-    response.raise_for_status()
-    payload = response.json()
-    return payload if isinstance(payload, list) else []
-
-
-@app.post("/pm/manual-library/link-existing")
-def propertymanager_manual_library_link_existing():
-    """Link an already checksum-verified Dashboard PDF without copying it again."""
-    asset_id = str(request.form.get("asset_id") or "").strip()
-    relative_path = str(request.form.get("relative_path") or "").strip()
-    try:
-        assets = propertymanager_manual_library_list_assets()
-        if asset_id not in {str(asset.get("id") or "") for asset in assets}:
-            raise ValueError("Choose an active PropertyManager asset.")
-        existing = pdf_upload_find_available_asset_pdf(relative_path)
-        propertymanager_manual_library_register(
-            asset_id,
-            {
-                "source_locator": f"dashboard-library://{existing['relative_path']}",
-                "source_display_name": existing["original_filename"],
-                "source_sha256": existing["sha256"],
-                "byte_size": existing["size_bytes"],
-                "title": str(request.form.get("title") or "").strip() or existing["title"],
-                "document_type": str(request.form.get("document_type") or "operator_manual"),
-                "manufacturer": str(request.form.get("manufacturer") or "").strip(),
-                "model_number": str(request.form.get("model_number") or "").strip(),
-            },
-        )
-    except (FileNotFoundError, ValueError, RuntimeError):
-        return redirect(url_for("propertymanager_manual_library", asset_id=asset_id, library_notice="link_failed"))
-    return redirect(url_for("propertymanager_manual_library", asset_id=asset_id, library_notice="linked"))
-
-
-@app.route("/pm/manual-library", methods=["GET", "POST"])
-def propertymanager_manual_library():
-    """Dashboard-only binary library for PropertyManager manuals.
-
-    The dashboard writes PDFs to the IntelMini external drive first, then
-    registers only the opaque Dashboard-library locator with PropertyManager.
-    """
-    selected_asset_id = str(
-        request.form.get("asset_id") if request.method == "POST" else request.args.get("asset_id") or ""
-    ).strip()
-    notice = str(request.args.get("library_notice") or "")
-    message = "" if not notice else (
-        "Existing PDF linked to this asset. Open PropertyManager for Mac and choose Manual Library → Extract."
-        if notice == "linked" else "The existing PDF could not be linked. It remains unchanged in the Dashboard library."
-    )
-    message_class = "empty-state"
-    if notice == "linked":
-        message_class = "document-viewer"
-    elif notice:
-        message_class = "empty-state error"
-    remote_mode = not pdf_document_storage_is_local()
-    assets = []
-
-    try:
-        assets = propertymanager_manual_library_list_assets()
-    except Exception:
-        message = "PropertyManager assets are unavailable. No manual was uploaded."
-        message_class = "empty-state error"
-
-    if request.method == "POST" and not message:
-        upload = request.files.get("pdf_file")
-        temporary_path = None
-        try:
-            if not selected_asset_id:
-                raise ValueError("Choose the asset this manual belongs to.")
-            if not upload or not upload.filename:
-                raise ValueError("Select a PDF file before uploading.")
-            if selected_asset_id not in {str(asset.get("id") or "") for asset in assets}:
-                raise ValueError("Choose an active PropertyManager asset.")
-            temporary_path = Path("/tmp") / f"openclaw-propertymanager-manual-{time.time_ns()}.pdf"
-            upload.save(temporary_path)
-            normalized_bom = pdf_upload_normalize_known_bom(temporary_path)
-            validation = pdf_upload_validate(temporary_path)
-            duplicate = pdf_upload_find_duplicate(validation["sha256"])
-            if duplicate:
-                raise ValueError(
-                    "This PDF is already stored in the IntelMini library. "
-                    "Use the existing library record instead of uploading another copy."
-                )
-            relative_path = pdf_upload_remote_destination(
-                "Assets",
-                upload.filename,
-                validation["sha256"],
-            )
-            created = False
-            if remote_mode:
-                created = pdf_upload_copy_remote(
-                    temporary_path,
-                    relative_path,
-                    validation["sha256"],
-                )
-            else:
-                destination = pdf_upload_safe_destination("Assets", upload.filename)
-                temporary_path.replace(destination)
-                temporary_path = None
-                relative_path = str(destination.relative_to(PDF_DOCUMENT_ROOT))
-                created = True
-            metadata = {
-                "uploaded_at": datetime.now().astimezone().isoformat(),
-                "original_filename": str(upload.filename),
-                "stored_filename": Path(relative_path).name,
-                "relative_path": relative_path,
-                "category": "Assets",
-                "title": str(request.form.get("title") or "").strip() or Path(relative_path).stem,
-                "notes": "PropertyManager asset manual",
-                "size_bytes": validation["size_bytes"],
-                "page_count": validation["page_count"],
-                "encrypted": validation["encrypted"],
-                "sha256": validation["sha256"],
-                "source_host": INTELMINI_STORAGE_HOST if remote_mode else os.uname().nodename,
-            }
-            pdf_upload_record(metadata)
-            try:
-                propertymanager_manual_library_register(
-                    selected_asset_id,
-                    {
-                        "source_locator": f"dashboard-library://{relative_path}",
-                        "source_display_name": str(upload.filename),
-                        "source_sha256": validation["sha256"],
-                        "byte_size": validation["size_bytes"],
-                        "title": str(request.form.get("title") or "").strip(),
-                        "document_type": str(request.form.get("document_type") or "operator_manual"),
-                        "manufacturer": str(request.form.get("manufacturer") or "").strip(),
-                        "model_number": str(request.form.get("model_number") or "").strip(),
-                    },
-                )
-            except Exception:
-                # The PDF remains in its governed external library rather than
-                # risking deletion of a verified copy. It cannot be extracted
-                # until the operator resolves this explicit linking failure.
-                message = "PDF stored on the IntelMini library, but asset linking failed. No extraction is available yet."
-                message_class = "empty-state error"
-            else:
-                message = (
-                    "PDF stored on the IntelMini external drive and linked to this asset. "
-                    "Open PropertyManager for Mac and choose Manual Library → Extract."
-                )
-                if normalized_bom:
-                    message += " The known leading PDF BOM was removed before storage."
-                message_class = "document-viewer"
-        except ValueError as exc:
-            message = str(exc)
-            message_class = "empty-state error"
-        except Exception:
-            message = "The manual upload could not be completed. Check the external library before retrying."
-            message_class = "empty-state error"
-        finally:
-            if temporary_path:
-                temporary_path.unlink(missing_ok=True)
-
-    manuals = []
-    if selected_asset_id and not message.endswith("No manual was uploaded."):
-        try:
-            manuals = propertymanager_manual_library_list_manuals(selected_asset_id)
-        except Exception:
-            if not message:
-                message = "The asset manual status could not be loaded."
-                message_class = "empty-state error"
-
-    asset_options = ['<option value="">Choose an asset</option>']
-    for asset in sorted(assets, key=lambda item: str(item.get("name") or "").lower()):
-        asset_id = str(asset.get("id") or "")
-        selected = " selected" if asset_id == selected_asset_id else ""
-        asset_options.append(
-            f'<option value="{html.escape(asset_id, quote=True)}"{selected}>'
-            f'{html.escape(str(asset.get("name") or "Unnamed asset"))}</option>'
-        )
-
-    manual_rows = []
-    for manual in manuals:
-        extraction = "Uploaded — awaiting local extraction"
-        if manual.get("ingestion_status") == "extracted":
-            extraction = f"Extracted {html.escape(str(manual.get('extracted_at') or ''))}"
-        manual_rows.append(
-            "<tr>"
-            f"<td>{html.escape(str(manual.get('title') or 'Untitled manual'))}</td>"
-            f"<td>{html.escape(str(manual.get('source_display_name') or 'manual.pdf'))}</td>"
-            f"<td>{extraction}</td>"
-            f"<td>{int(manual.get('task_count') or 0)}</td>"
-            "</tr>"
-        )
-    library_table = ""
-    if selected_asset_id:
-        library_table = f"""
-<h2>Linked manuals</h2>
-<table><thead><tr><th>Manual</th><th>PDF</th><th>Extraction</th><th>Accepted tasks</th></tr></thead>
-<tbody>{''.join(manual_rows) or '<tr><td colspan="4">No manuals are linked to this asset.</td></tr>'}</tbody></table>
-"""
-
-    storage_note = (
-        f"PDFs are stored on the IntelMini external drive ({html.escape(INTELMINI_STORAGE_HOST)})."
-        if remote_mode
-        else f"PDFs are stored on the local external drive at {html.escape(str(PDF_DOCUMENT_ROOT))}."
-    )
-    body = f"""
-<p class="breadcrumb"><a href="/documentation">Documentation Center</a> &nbsp;→&nbsp; PropertyManager Manual Library</p>
-<div class="document-viewer">
-<h2>PropertyManager Manual Library <small>DEV</small></h2>
-<p>Store an owner’s or service manual here, linked to its asset. The Mac app later performs local-Ollama extraction and returns only extracted text, task proposals, and lifecycle status to PropertyManager.</p>
-<p class="muted">{storage_note} PropertyManager does not store PDF bytes or filesystem paths.</p>
-<form method="get" action="/pm/manual-library">
-<label>Asset</label><br><select name="asset_id">{"".join(asset_options)}</select>
-<button type="submit">Open Asset Library</button>
-</form>
-{library_table}
-<h2>Upload and link a PDF</h2>
-<form method="post" enctype="multipart/form-data">
-<input type="hidden" name="asset_id" value="{html.escape(selected_asset_id, quote=True)}">
-<p><label>PDF file</label><br><input name="pdf_file" type="file" accept="application/pdf,.pdf" required></p>
-<p><label>Title</label><br><input name="title" maxlength="300" placeholder="Owner's or service manual"></p>
-<p><label>Document type</label><br><select name="document_type"><option value="operator_manual">Owner / operator manual</option><option value="service_manual">Service manual</option><option value="parts_manual">Parts manual</option><option value="safety_manual">Safety manual</option><option value="other">Other</option></select></p>
-<p><label>Manufacturer</label><br><input name="manufacturer" maxlength="200"></p>
-<p><label>Model number</label><br><input name="model_number" maxlength="200"></p>
-<p><button type="submit">Upload and Link Manual</button></p>
-</form>
-<h2>Link an existing Assets-library PDF</h2>
-<form method="post" action="/pm/manual-library/link-existing">
-<input type="hidden" name="asset_id" value="{html.escape(selected_asset_id, quote=True)}">
-<p><label>Stored PDF path</label><br><input name="relative_path" maxlength="1024" placeholder="Assets/manual-<checksum>.pdf" required></p>
-<p><label>Title</label><br><input name="title" maxlength="300" placeholder="Owner's or service manual"></p>
-<p><label>Document type</label><br><select name="document_type"><option value="operator_manual">Owner / operator manual</option><option value="service_manual">Service manual</option><option value="parts_manual">Parts manual</option><option value="safety_manual">Safety manual</option><option value="other">Other</option></select></p>
-<p><label>Manufacturer</label><br><input name="manufacturer" maxlength="200"></p>
-<p><label>Model number</label><br><input name="model_number" maxlength="200"></p>
-<p><button type="submit">Link Existing Manual</button></p>
-</form>
-</div>
-{f'<div class="{message_class}" style="margin-top:18px;padding:20px;">{html.escape(message)}</div>' if message else ''}
-"""
-    return documentation_shell("PropertyManager Manual Library", body)
-
-
-@app.get("/pm/manual-library/content/<asset_id>/<manual_id>/<version_id>")
-def propertymanager_manual_library_content(asset_id, manual_id, version_id):
-    if not propertymanager_manual_library_client_authorized():
-        abort(401)
-    try:
-        relative_path, mime_type = propertymanager_manual_library_source(asset_id, manual_id, version_id)
-        if pdf_document_storage_is_local():
-            resolved = pdf_upload_resolve(relative_path)
-            return send_from_directory(
-                str(resolved["path"].parent),
-                resolved["path"].name,
-                mimetype=mime_type,
-                as_attachment=False,
-                conditional=True,
-            )
-        return pdf_library_stream_remote(relative_path)
-    except FileNotFoundError:
-        abort(404)
-    except (ValueError, RuntimeError):
-        abort(409)
-    except HTTPException:
-        raise
-    except Exception:
-        abort(502)
 
 
 @app.route("/documentation/pdf/<path:doc_path>")
@@ -6261,82 +5307,15 @@ def backup_center_remote_latest(entry, warning_days):
     return result
 
 
-def backup_center_time_machine_latest(output):
-    """Return the newest completed backup time from a read-only probe.
-
-    A backup path is preferred. When that listing is blocked, the Time
-    Machine snapshot record is used instead.
-    """
-    latest_section = ""
-    if "OPENCLAW_LATEST_BACKUP" in output:
-        latest_section = output.split("OPENCLAW_LATEST_BACKUP", 1)[1]
-        if "OPENCLAW_DESTINATION" in latest_section:
-            latest_section = latest_section.split(
-                "OPENCLAW_DESTINATION",
-                1,
-            )[0]
-    latest_section = latest_section.strip()
-    latest_path = ""
-    if latest_section:
-        latest_path = latest_section.splitlines()[-1].strip()
-    path_match = re.search(
-        r"/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.backup",
-        latest_path,
-    )
-    if path_match:
-        return (
-            latest_path,
-            datetime(*[int(value) for value in path_match.groups()]),
-            "",
-        )
-
-    snapshot = ""
-    if "OPENCLAW_SNAPSHOT" in output:
-        snapshot = output.split("OPENCLAW_SNAPSHOT", 1)[1].strip()
-    lines = [line.strip() for line in snapshot.splitlines() if line.strip()]
-    if len(lines) < 2:
-        return "", None, ""
-    snap_match = re.fullmatch(
-        r"(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})",
-        lines[0],
-    )
-    if not snap_match:
-        return "", None, ""
-    if lines[1] != "0":
-        return (
-            "",
-            None,
-            f"Time Machine result {lines[1]}; last snapshot {lines[0]}",
-        )
-    return (
-        lines[0],
-        datetime(*[int(value) for value in snap_match.groups()]),
-        "",
-    )
-
-
 def backup_center_m4_time_machine():
     """Read Time Machine status from the M4 without changing its state."""
-    remote_command = """
-hostname
-tmutil status 2>&1
-printf '\\nOPENCLAW_LATEST_BACKUP\\n'
-tmutil latestbackup 2>&1
-printf '\\nOPENCLAW_DESTINATION\\n'
-tmutil destinationinfo 2>&1
-printf '\\nOPENCLAW_SNAPSHOT\\n'
-defaults export /Library/Preferences/com.apple.TimeMachine - 2>/dev/null \
-  | python3 -c 'import plistlib,sys; from datetime import timezone; raw=sys.stdin.buffer.read()
-if not raw: raise SystemExit(0)
-data=plistlib.loads(raw)
-dest=(data.get("Destinations") or [None])[0] or {}
-snaps=dest.get("SnapshotDates") or []
-if not snaps: raise SystemExit(0)
-snap=snaps[-1]
-if snap.tzinfo is None: snap=snap.replace(tzinfo=timezone.utc)
-print(snap.astimezone().strftime("%Y-%m-%d-%H%M%S"))
-print(dest.get("RESULT"))'
-"""
+    remote_command = (
+        "hostname; tmutil status 2>&1; "
+        "printf '\\nOPENCLAW_LATEST_BACKUP\\n'; "
+        "tmutil latestbackup 2>&1; "
+        "printf '\\nOPENCLAW_DESTINATION\\n'; "
+        "tmutil destinationinfo 2>&1"
+    )
     try:
         result = subprocess.run(
             [
@@ -6365,21 +5344,21 @@ print(dest.get("RESULT"))'
                 or "M4 Time Machine probe failed."
             )
         output = result.stdout
-        latest_path, latest_at, failure = backup_center_time_machine_latest(
-            output
+        latest_section = output.split(
+            "OPENCLAW_LATEST_BACKUP",
+            1,
+        )[1].split("OPENCLAW_DESTINATION", 1)[0].strip()
+        latest_path = latest_section.splitlines()[-1].strip()
+        timestamp_match = re.search(
+            r"/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})"
+            r"\.backup",
+            latest_path,
         )
-        if failure:
-            return {
-                "found": True,
-                "file": "Live read-only M4 Time Machine probe",
-                "content": failure,
-                "values": {},
-                "status": "critical",
-                "status_label": "Failed",
-                "status_color": "#ef4444",
-            }
-        if latest_at is None:
+        if not timestamp_match:
             raise ValueError("M4 latest backup timestamp was unavailable.")
+        latest_at = datetime(
+            *[int(value) for value in timestamp_match.groups()]
+        )
         age_hours = max(
             0,
             int(
@@ -7834,7 +6813,9 @@ def backup_recovery_run(backup_type):
 
 
 def system_connectivity_panel_html(drift, ollama):
-    output = "<div class='panel'><h2>System Connectivity Check</h2>"
+    output = "<div class='panel'>"
+    output += ai_cost_section_html()
+    output += "<h2>System Connectivity Check</h2>"
     warnings = drift.get("warnings", []) if drift else []
     if warnings:
         warning_info = classify_warning(warnings[0])
@@ -7871,60 +6852,223 @@ All monitored OpenClaw services are connected.
     return output + "</div>"
 
 
-def format_dashboard_window_title(environment, version, build):
-    """Browser and page title for this dashboard."""
-    return f"OpenClaw AI Dashboard {environment} Version {version} Build {build}"
+
+# ---------------------------------------------------------------------------
+# AI cost section + /ai-cost page (added by fix-prod-final.py v2).
+# ---------------------------------------------------------------------------
+AI_COST_SNAPSHOT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".ai_cost_daily.json")
+AI_COST_DAILY_ALERT_USD = 5.0
+AI_COST_CACHE_SECONDS = 120
+_ai_cost_cache = {"at": 0.0, "payload": None}
 
 
-def dashboard_window_title():
-    """Name this dashboard DEV and identify the running version and build.
-
-    Version comes from package.json. Build is the short git commit of the
-    checkout that is serving the page.
-    """
-    environment = os.environ.get("OPENCLAW_DASHBOARD_ENVIRONMENT", "DEV").strip() or "DEV"
-    version = "unknown"
+def _ai_cost_live():
+    now = time.time()
+    if _ai_cost_cache["payload"] is not None and now - _ai_cost_cache["at"] < AI_COST_CACHE_SECONDS:
+        return _ai_cost_cache["payload"]
     try:
-        payload = json.loads((OPENCLAW_ROOT / "package.json").read_text(encoding="utf-8"))
-        candidate = payload.get("version")
-        if isinstance(candidate, str) and candidate.strip():
-            version = candidate.strip()
-    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
-        version = "unknown"
+        payload = get_openrouter_cost()
+    except Exception:
+        payload = {"cost": 0.0, "answers": 0, "tokens": 0, "ok": False, "error": "unavailable"}
+    payload["daily_usd"] = _ai_cost_daily(payload.get("cost", 0.0) if payload.get("ok") else None)
+    _ai_cost_cache["at"] = now
+    _ai_cost_cache["payload"] = payload
+    return payload
 
-    build = "unknown"
+
+def _ai_cost_daily(current_total):
     try:
-        completed = subprocess.run(
-            ["git", "-C", str(OPENCLAW_ROOT), "rev-parse", "--short=11", "HEAD"],
-            check=True,
-            capture_output=True,
-            text=True,
-            timeout=3,
-        )
-        candidate = completed.stdout.strip()
-        if re.fullmatch(r"[0-9a-f]{7,40}", candidate):
-            build = candidate
-    except (OSError, subprocess.SubprocessError):
-        build = "unknown"
+        today = datetime.now().strftime("%Y-%m-%d")
+        snap = {}
+        if os.path.exists(AI_COST_SNAPSHOT_FILE):
+            with open(AI_COST_SNAPSHOT_FILE) as fh:
+                snap = json.load(fh) or {}
+        last_date = snap.get("date", "")
+        last_total = float(snap.get("total", 0) or 0)
+        if current_total is None:
+            return max(0.0, float(snap.get("daily", 0) or 0))
+        if last_date != today:
+            daily = 0.0 if not last_date else max(0.0, current_total - last_total)
+            snap = {"date": today, "total": current_total, "daily": daily}
+        else:
+            daily = max(0.0, current_total - last_total)
+            snap["total"] = current_total
+            snap["daily"] = daily
+        tmp = AI_COST_SNAPSHOT_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(snap, fh)
+        os.replace(tmp, AI_COST_SNAPSHOT_FILE)
+        return daily
+    except Exception:
+        return 0.0
 
-    return format_dashboard_window_title(environment, version, build)
 
+def _ai_cost_money(value):
+    try:
+        return "$%.4f" % float(value)
+    except (TypeError, ValueError):
+        return "$--.--"
+
+
+def ai_cost_section_html():
+    try:
+        info = _ai_cost_live()
+    except Exception:
+        info = {"cost": 0.0, "answers": 0, "tokens": 0, "ok": False, "error": "unavailable"}
+    if info.get("ok"):
+        cost_line = _ai_cost_money(info.get("cost"))
+        stats_line = "%s Answers - %s Tokens" % (info.get("answers", 0), info.get("tokens", 0))
+    elif info.get("error") == "missing-key":
+        cost_line = "not configured"
+        stats_line = "Set OPENROUTER_API_KEY to track spend"
+    else:
+        cost_line = "$0.00"
+        stats_line = "0 Answers - 0 Tokens"
+    return """
+    <div class="ai-cost-section" style="margin-bottom:20px;">
+        <h2>AI cost</h2>
+        <p>What OpenClaw recorded for each AI. Answers on this machine have no API bill. OpenRouter shows the amount it reported for each answer.</p>
+        <div style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px;">
+            <div style="flex:1;min-width:200px;background:#2d3748;padding:15px;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;"><strong>On this machine</strong> <span style="background:#22c55e;color:black;padding:2px 8px;border-radius:12px;font-size:12px;">Local</span></div>
+                <div style="margin-top:10px;font-size:14px;">Qwen 3.5 9B (llama.cpp) and the other local models</div>
+                <div style="font-size:28px;font-weight:bold;margin-top:8px;">$0.00</div>
+                <div style="font-size:12px;opacity:0.7;">No API bill. These answers stay on this machine.</div>
+            </div>
+            <div style="flex:1;min-width:200px;background:#2d3748;padding:15px;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;"><strong>OpenRouter</strong> <span style="background:#3b82f6;color:white;padding:2px 8px;border-radius:12px;font-size:12px;">Cloud</span></div>
+                <div style="margin-top:10px;font-size:14px;">Kimi K3, last, after the local models / ChatGPT-3 and other cloud models</div>
+                <div style="font-size:28px;font-weight:bold;margin-top:8px;">%(cost)s</div>
+                <div style="font-size:12px;opacity:0.7;">%(stats)s - Cost reported by OpenRouter. Track to avoid overspend.</div>
+            </div>
+            <div style="flex:1;min-width:200px;background:#2d3748;padding:15px;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;"><strong>Stayed here</strong> <span style="background:#22c55e;color:black;padding:2px 8px;border-radius:12px;font-size:12px;">Local</span></div>
+                <div style="margin-top:10px;font-size:14px;">Finance and Home Assistant</div>
+                <div style="font-size:28px;font-weight:bold;margin-top:8px;">$0.00</div>
+                <div style="font-size:12px;opacity:0.7;">0 Finance 0 Home Assistant</div>
+            </div>
+        </div>
+        <p><a href="/ai-cost" style="color:#93c5fd;font-weight:bold;text-decoration:underline;">Open the full cost page</a></p>
+    </div>
+    """ % {"cost": cost_line, "stats": stats_line}
+
+
+def ai_cost_breakdown_html():
+    try:
+        info = _ai_cost_live()
+    except Exception:
+        info = {"cost": 0.0, "answers": 0, "tokens": 0, "ok": False, "per_model": [], "daily_usd": 0.0}
+    daily = info.get("daily_usd", 0.0) or 0.0
+    today = datetime.now().strftime("%Y-%m-%d")
+    if daily > AI_COST_DAILY_ALERT_USD:
+        alert = ("<div class='panel' style='border-left:6px solid #ef4444;'>"
+                 "<h2>Daily overspend alert</h2>"
+                 "<div>Today's routed spend <b>%s</b> exceeds the $%.2f daily limit.</div>"
+                 "</div>") % (_ai_cost_money(daily), AI_COST_DAILY_ALERT_USD)
+    else:
+        alert = ("<div class='panel'><h2>Daily spend</h2>"
+                 "<div>Today: <b>%s</b> (alerts above $%.2f).</div></div>") % (
+                     _ai_cost_money(daily), AI_COST_DAILY_ALERT_USD)
+    rows = []
+    for row in info.get("per_model", []) or []:
+        rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            html_module.escape(str(row.get("model", "?"))),
+            html_module.escape(str(row.get("answers", 0))),
+            html_module.escape(str(row.get("tokens", 0))),
+            _ai_cost_money(row.get("cost", 0)), today))
+    if not rows:
+        rows.append("<tr><td>Kimi K3 / ChatGPT-3 (OpenRouter)</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            info.get("answers", 0), info.get("tokens", 0),
+            _ai_cost_money(info.get("cost")), today))
+        rows.append("<tr><td>Qwen 3.5 9B (llama.cpp, on-device)</td><td>local</td><td>local</td><td>$0.00</td><td>%s</td></tr>" % today)
+    return (alert + """
+        <div class='panel'>
+            <h2>Per-model breakdown</h2>
+            <div>Daily total: <b>%s</b></div>
+            <div class='table-scroll'><table class='dashboard-table'>
+                <thead><tr><th>Model</th><th>Answers</th><th>Tokens</th><th>Cost</th><th>Date</th></tr></thead>
+                <tbody>%s</tbody>
+            </table></div>
+            <div>OpenRouter credits API reports account totals; per-model rows appear when activity data is available.</div>
+        </div>
+        """) % (_ai_cost_money(daily), "".join(rows))
+
+
+@app.route("/ai-cost")
+def ai_cost():
+    try:
+        body = ai_cost_section_html() + ai_cost_breakdown_html()
+    except Exception as exc:
+        body = ("<div class='panel'><h2>AI Cost</h2>"
+                "<div>Could not load cost data (%s).</div></div>") % html_module.escape(type(exc).__name__)
+    html = """
+<html>
+<head>
+<title>AI Cost - OpenClaw AI Dashboard</title>
+<style>
+body { background-color:#1e293b; color:white; font-family:Arial; padding:20px; }
+.panel { background-color:#273549; padding:20px; margin-bottom:20px; border-radius:10px; }
+a{color:#93c5fd;text-decoration:underline;} a:visited{color:#a5b4fc;} a:hover{color:#bfdbfe;}
+h1, h2 { margin-top:0; }
+table.dashboard-table { border-collapse:collapse; width:100%%; }
+table.dashboard-table th, table.dashboard-table td { border:1px solid #475569; padding:8px; text-align:left; }
+.table-scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<h1>AI Cost</h1>
+__OPENCLAW_SHARED_NAVIGATION__
+""" + body + """
+</body>
+</html>
+"""
+    return html.replace("__OPENCLAW_SHARED_NAVIGATION__", openclaw_shared_navigation(), 1)
+
+
+
+
+
+@app.route("/run-command", methods=["POST"])
+def api_run_command():
+    """Voice/chat callback for Jarvis round-trip (T1). Never 500s."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    command = str(data.get("command") or data.get("transcript") or "").strip()
+    try:
+        app.logger.info("run-command: %s", command[:300])
+    except Exception:
+        pass
+    if command.lower().startswith("chat "):
+        said = command[5:].strip() or "(empty)"
+        output = "Heard: %s. Round-trip OK." % said[:280]
+    elif not command:
+        output = "No command received."
+    else:
+        output = "Command not supported yet: %s" % command[:120]
+    return Response(json.dumps({"status": "ok", "result": output, "output": output}),
+                    mimetype="application/json")
+
+
+
+@app.route("/jarvis")
+def jarvis_3d():
+    return '<!doctype html><html><head><meta charset="utf-8"><title>Jarvis 3D prod</title>\n<style>html,body{margin:0;height:100%;background:#0f172a;color:#7dd3fc;overflow:hidden;font-family:system-ui}\n#top{position:absolute;top:12px;left:12px;z-index:10}\n#top b{color:#22d3ee}\n#ver{font-size:11px;opacity:0.8;margin-top:4px}\ncanvas{display:block}\n#chat{position:absolute;bottom:12px;left:12px;width:300px;background:#1e293bAA;padding:10px;border-radius:10px;backdrop-filter:blur(6px)}\n#log{height:80px;overflow:auto;font-size:12px;margin-bottom:6px}\ninput{width:70%;background:#0f172a;color:#7dd3fc;border:1px solid #334155;padding:6px;border-radius:6px}\nbutton{background:#0ea5e9;color:white;border:0;padding:6px 10px;border-radius:6px;cursor:pointer}\n</style></head><body>\n<div id="top"><b>JARVIS 3D prod</b> <span style="font-size:12px;opacity:0.7">Voice core online · drag to orbit · <a href="/" style="color:#93c5fd">back to Overview</a></span><div id="ver">Version: 2026.10.30-prod · Build: 71f4c266+jarvis · Source: app.py.before-jarvis-20261030-162120 · Host: PROD 100.85.36.72:5051</div></div>\n<div id="chat"><div id="log">Jarvis: Systems online. [PROD BUILD]</div><input id="cmd" placeholder="say something..."><button onclick="send()">Send</button></div>\n<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>\n<script type="module">\nimport * as THREE from \'three\'; import { OrbitControls } from \'three/addons/controls/OrbitControls.js\';\nconst scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,1000); camera.position.set(0,2,6);\nconst renderer=new THREE.WebGLRenderer({antialias:true,alpha:true}); renderer.setSize(innerWidth,innerHeight); document.body.appendChild(renderer.domElement);\nconst controls=new OrbitControls(camera,renderer.domElement); controls.enableDamping=true;\nconst core=new THREE.Mesh(new THREE.SphereGeometry(0.9,32,32), new THREE.MeshPhongMaterial({color:0x7dd3fc,emissive:0x0ea5e9,emissiveIntensity:0.6})); scene.add(core);\nconst wire=new THREE.Mesh(new THREE.IcosahedronGeometry(1.8,2), new THREE.MeshBasicMaterial({color:0x22d3ee,wireframe:true,transparent:true,opacity:0.5})); scene.add(wire);\nconst ring1=new THREE.Mesh(new THREE.TorusGeometry(2.6,0.06,16,100), new THREE.MeshBasicMaterial({color:0x0ea5e9})); ring1.rotation.x=Math.PI/2; scene.add(ring1);\nconst ring2=new THREE.Mesh(new THREE.TorusGeometry(2.8,0.06,16,100), new THREE.MeshBasicMaterial({color:0x38bdf8,transparent:true,opacity:0.6})); ring2.rotation.x=Math.PI/3; scene.add(ring2);\nscene.add(new THREE.AmbientLight(0x7dd3fc,0.8)); const light=new THREE.DirectionalLight(0xffffff,1); light.position.set(5,5,5); scene.add(light);\nconst ptsGeo=new THREE.BufferGeometry(); const c=600; const pos=new Float32Array(c*3); for(let i=0;i<c*3;i++) pos[i]=(Math.random()-0.5)*20; ptsGeo.setAttribute(\'position\',new THREE.BufferAttribute(pos,3)); scene.add(new THREE.Points(ptsGeo,new THREE.PointsMaterial({size:0.05,color:0x7dd3fc})));\nfunction log(t){document.getElementById(\'log\').innerHTML+=`<div>${t}</div>`;}\nwindow.send=async()=>{const v=document.getElementById(\'cmd\').value; if(!v) return; log(`You: ${v}`); try{const r=await fetch(\'/run-command\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({command:\'chat \'+v})}); const j=await r.json(); log(`Jarvis: ${j.result||j.output||JSON.stringify(j)}`);}catch(e){log(\'ERR \'+e);} document.getElementById(\'cmd\').value=\'\';}\n(function anim(){requestAnimationFrame(anim); wire.rotation.y+=0.003; ring1.rotation.z+=0.01; ring2.rotation.z-=0.008; core.rotation.y+=0.005; controls.update(); renderer.render(scene,camera);})();\nlog(\'Jarvis 3D prod v2026.10.30 build 71f4c266 online — \'+location.host);\n</script></body></html>\n'
 
 @app.route("/")
 def home():
     backup_success = request.args.get("backup")
     drift = check_ai_drift()
-    omlx = get_omlx_status()
-    llama_cpp = get_llama_cpp_status()
-    propertymanager_mcp = get_propertymanager_mcp_status()
-    services = build_system_health(omlx, propertymanager_mcp, llama_cpp)
+    services = build_system_health()
     m4 = get_m4_ollama_status()
-    page_title = html_module.escape(dashboard_window_title())
 
     html = """
 <html>
 <head>
-<title>__DASHBOARD_WINDOW_TITLE__</title>
+<title>OpenClaw AI Dashboard</title>
 <style>
 body { background-color:#1e293b; color:white; font-family:Arial; padding:20px; }
 .panel { background-color:#273549; padding:20px; margin-bottom:20px; border-radius:10px; }
@@ -7933,46 +7077,18 @@ button { background-color:#60a5fa; color:black; border:none; padding:10px 15px; 
 .warning-box { padding:15px; border-radius:8px; margin-bottom:15px; color:white; font-weight:bold; }
 .chart { background:white; padding:10px; border-radius:8px; margin-bottom:18px; width:900px; max-width:100%; }
 h1, h2 { margin-top:0; }
-.telemetry-section { padding:22px; }
-.telemetry-section h3 { margin:0; font-size:18px; }
-.telemetry-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; margin-bottom:12px; }
-.telemetry-heading p { margin:6px 0 0; color:#cbd5e1; line-height:1.4; }
-.telemetry-inventory-count { flex:none; border:1px solid #64748b; border-radius:999px; padding:5px 10px; color:#e2e8f0; font-size:13px; font-weight:bold; white-space:nowrap; }
-.telemetry-legend { display:flex; flex-wrap:wrap; gap:9px; margin:0 0 14px; }
-.telemetry-status { display:inline-block; border-radius:999px; padding:4px 9px; font-size:13px; font-weight:bold; line-height:1.25; white-space:nowrap; }
-.telemetry-status--used { color:#bbf7d0; background:#14532d; border:1px solid #22c55e; }
-.telemetry-status--unobserved, .telemetry-status--no-record { color:#fef3c7; background:#78350f; border:1px solid #fbbf24; }
-.telemetry-status--unmapped { color:#ffedd5; background:#7c2d12; border:1px solid #fb923c; }
-.telemetry-section .table-scroll { width:100%; overflow-x:auto; }
-.telemetry-section table.dashboard-table { width:100%; min-width:800px; border-collapse:separate; border-spacing:0 7px; table-layout:fixed; }
-.telemetry-section table.dashboard-table th { padding:0 14px 6px; color:#cbd5e1; font-size:13px; text-align:left; }
-.telemetry-section table.dashboard-table td { padding:12px 14px; background:#334155; line-height:1.35; overflow-wrap:anywhere; }
-.telemetry-section table.dashboard-table td:first-child { border-radius:8px 0 0 8px; }
-.telemetry-section table.dashboard-table td:last-child { border-radius:0 8px 8px 0; }
-.telemetry-section table.dashboard-table code { white-space:normal; overflow-wrap:anywhere; }
-.telemetry-note { margin:14px 0 0; padding:11px 13px; border-left:3px solid #64748b; border-radius:0 6px 6px 0; background:#1e293b; color:#cbd5e1; line-height:1.45; }
-@media (max-width:640px) { .telemetry-heading { flex-direction:column; gap:8px; } }
-</style>
+a{color:#93c5fd;text-decoration:underline;} a:visited{color:#a5b4fc;} a:hover{color:#bfdbfe;} </style>
 </head>
 <body>
-<h1>__DASHBOARD_WINDOW_TITLE__</h1>
+<h1>OpenClaw AI Dashboard</h1>
 
 __OPENCLAW_SHARED_NAVIGATION__
 """
 
-    html = html.replace("__DASHBOARD_WINDOW_TITLE__", page_title)
     html = html.replace(
         "__OPENCLAW_SHARED_NAVIGATION__",
         openclaw_shared_navigation(),
         1,
-    )
-
-    html += (
-        '<p style="margin:0 0 16px;">'
-        '<a href="http://127.0.0.1:8000/jarvis.html" '
-        'style="background:#334155;color:white;text-decoration:none;'
-        'padding:10px 14px;border-radius:7px;font-weight:bold;'
-        'display:inline-block;">Jarvis</a></p>'
     )
 
     html += system_connectivity_panel_html(drift, m4)
@@ -7984,7 +7100,7 @@ __OPENCLAW_SHARED_NAVIGATION__
     if m4["connected"]:
         html += f"""
         <div class='panel'>
-            <h2>🧠 Intel Mini Model Server</h2>
+            <h2>🧠 Intel Mini → M4 Model Server</h2>
             <div class='status-box'>
                 <b>Status:</b> <span style='color:#7CFC00;'>Connected</span><br><br>
                 <b>Endpoint:</b> {m4["endpoint"]}<br><br>
@@ -7997,7 +7113,7 @@ __OPENCLAW_SHARED_NAVIGATION__
     else:
         html += f"""
         <div class='panel'>
-            <h2>🧠 Intel Mini Model Server</h2>
+            <h2>🧠 Intel Mini → M4 Model Server</h2>
             <div class='warning-box'>
                 <b>Status:</b> Offline<br><br>
                 <b>Endpoint:</b> {m4["endpoint"]}<br><br>
@@ -8006,10 +7122,8 @@ __OPENCLAW_SHARED_NAVIGATION__
         </div>
         """
 
-    html += m4_ai_health_panel_html(m4, omlx, llama_cpp)
-    html += ai_routing_telemetry_panel_html(
-        installed_model_names=m4.get("model_names", []),
-    )
+    html += m4_ai_health_panel_html(m4)
+    html += ai_routing_telemetry_panel_html()
 
     html += model_status_panel_html(
         m4,
@@ -8029,7 +7143,6 @@ __OPENCLAW_SHARED_NAVIGATION__
     html += f"""
     <div class='panel'>
         <h2>Trend Charts</h2>
-        <p>The legend names the machine. Intel Mini and M4 share a chart when the units match. Memory is GiB used. Disk is percent full: Intel Mini internal, Intel Mini external, and M4. The DEV virtual machine disk is on the external drive, so it shows on that line and does not jump the internal disk. CPU is the M4 only, because the Intel Mini samples do not include CPU.</p>
         <form method='get' action='/' onsubmit="
 document.getElementById('refreshMsg').innerHTML='Collecting fresh sample and refreshing charts...';
 document.getElementById('refreshBtn').disabled=true;
@@ -8087,23 +7200,10 @@ Trend file checked:
     ram = run_command("free -h | awk '/Mem:/ {print $3 \" / \" $2}'")
     disk = run_command("df -h / | awk 'NR==2 {print $3 \" / \" $2 \" (\" $5 \")\"}'")
     docker = run_command("docker ps -q | wc -l")
-    if Path("/mnt/ai-storage").is_mount():
-        live_monitor_title = "Live Resource Monitor — Intel Mini"
-        live_monitor_note = (
-            "These numbers are the Intel Mini host. "
-            "They are not the DEV virtual machine and not the M4."
-        )
-    else:
-        live_monitor_title = "Live Resource Monitor — DEV virtual machine"
-        live_monitor_note = (
-            "These numbers are the DEV guest running on the Intel Mini. "
-            "They are not the Intel Mini host and not the M4."
-        )
 
     html += f"""
 <div class="panel">
-<h2>{live_monitor_title}</h2>
-<p>{live_monitor_note}</p>
+<h2>Live Resource Monitor</h2>
 <div class="output">CPU Usage:
 {cpu}% used
 

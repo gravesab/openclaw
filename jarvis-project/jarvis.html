@@ -583,8 +583,23 @@
 <script type="text/plain" id="jarvis-app-src">
 const { useState, useEffect, useRef } = React;
 
-// This copy is the DEV Jarvis page. A Production copy sets this to "prod".
-const JARVIS_ENV = "dev";
+// Build default: this copy is the DEV Jarvis page (a Production copy sets BUILD_ENV to "prod").
+// Runtime env honors ?env=dev|prod first, then the serving hostname (intelmini* / 100.85.36.72 = prod),
+// so one file serves both without ever linking across. Server-side canonical env is RANCHBRAIN_ENVIRONMENT.
+const BUILD_ENV = "dev";
+function detectEnv() {
+  try {
+    const override = new URLSearchParams(window.location.search).get("env");
+    if (override === "dev" || override === "prod") return override;
+  } catch (err) {}
+  let host = "";
+  try { host = (window.location.hostname || "").toLowerCase(); } catch (err) {}
+  if (/(^|\.)intelmini(\.|$)|^100\.85\.36\.72$/.test(host)) return "prod";
+  return BUILD_ENV;
+}
+const JARVIS_ENV = detectEnv();
+const ENV_NAME = JARVIS_ENV === "prod" ? "PROD" : "DEV";
+const ENV_CAPTION = JARVIS_ENV === "prod" ? "PROD · live herd" : "DEV fixture · sample herd · read only";
 const DASHBOARD_URL = "/";
 const BUILD_LABEL = JARVIS_ENV === "prod" ? "PROD build" : "DEV build";
 const VERSION_BUILD = JARVIS_ENV === "prod" ? "PROD Version Build" : "DEV Version Build";
@@ -635,9 +650,9 @@ function sceneTasks(scene) {
 }
 
 function sceneSource(scene) {
-  if (!scene.assets.length) return scene.loading ? "Loading DEV data" : "DEV data unavailable";
+  if (!scene.assets.length) return scene.loading ? "Loading " + ENV_NAME + " data" : ENV_NAME + " data unavailable";
   if (scene.generatedAt) return "Snapshot " + new Date(scene.generatedAt).toLocaleString("en-US", { month: "numeric", day: "numeric", hour: "numeric", minute: "2-digit" });
-  return "PropertyManager API (DEV)";
+  return "PropertyManager API (" + ENV_NAME + ")";
 }
 
 function taskLine(item) {
@@ -779,14 +794,16 @@ function answerFromScene(scene, query, today) {
   return { lookup: "none", text: NOT_CONNECTED, selection: null, matched: "", used: [] };
 }
 
-/* ================= Brain: DEV OpenClaw gateway ================= */
-const BRAIN_URL = JARVIS_ENV === "prod" ? "" : "ws://100.85.188.74:18789";
+/* ================= Brain: OpenClaw gateway (env-switched) ================= */
+const BRAIN_URL = JARVIS_ENV === "prod" ? "ws://100.85.36.72:18789" : "ws://100.85.188.74:18789";
 const BRAIN_SESSION = "agent:jarvis:jarvis-web";
 const BRAIN_SCOPES = ["operator.read", "operator.write"];
 const BRAIN_CLIENT = { id: "openclaw-control-ui", mode: "webchat", version: "jarvis-web", displayName: "Jarvis (RanchOS web)" };
 const DEVICE_KEY = "jarvis-device-v1";
 const DEVICE_TOKEN_KEY = "jarvis-device-token-v1";
-const DEVICES_COMMAND = "ssh SSH-Dev docker exec openclawdev-openclaw-gateway-1 node dist/index.js devices ";
+const DEVICES_COMMAND = JARVIS_ENV === "prod"
+  ? "ssh SSH-Prod node /home/gravesab/ai/projects/openclaw/dist/index.js devices "
+  : "ssh SSH-Dev docker exec openclawdev-openclaw-gateway-1 node dist/index.js devices ";
 
 function b64url(bytes) {
   let binary = "";
@@ -955,7 +972,7 @@ function createBrain(onStatus, onChat, onTool) {
         if (sharedKey) retry = setTimeout(open, 5000);
       } else if (code === "AUTH_DEVICE_TOKEN_MISMATCH") {
         localStorage.removeItem(DEVICE_TOKEN_KEY);
-        status({ kind: "needs-key", note: "This browser's Jarvis credential was revoked. Enter the DEV gateway key to pair again." });
+        status({ kind: "needs-key", note: "This browser's Jarvis credential was revoked. Enter the " + ENV_NAME + " gateway key to pair again." });
       } else {
         sharedKey = "";
         status({ kind: "error", note: (error && error.message) || "Connection failed." });
@@ -1053,11 +1070,12 @@ function TopBar({ clock, onClear, source, connected }) {
       <div className={"logo" + (connected ? " on" : "")} title={connected ? "Brain connected" : "Brain not connected"}>J.A.R.V.<span>I</span>.S.</div>
       <span className="badge ranch">OpenClaw Ranch OS</span>
       <span className={"badge build " + JARVIS_ENV}>{BUILD_LABEL}</span>
+      <span className={"badge build " + JARVIS_ENV}>{ENV_CAPTION}</span>
       <a className="badge dash" href={DASHBOARD_URL} title="Ranch OS Dashboard">Ranch OS Dashboard</a>
       <div className="spacer" />
       <button className="clear-btn" onClick={onClear}>Clear</button>
       <span className="clock">{clock}</span>
-      <span className={"badge data" + (source.indexOf("DEV data") === -1 && source.indexOf("Loading") === -1 ? "" : " fixture")}>{source}</span>
+      <span className={"badge data" + (source.indexOf("Loading") === -1 && source.indexOf("unavailable") === -1 ? "" : " fixture")}>{source}</span>
     </header>
   );
 }
@@ -1068,12 +1086,12 @@ function BrainPanel({ brain, onConnect, onForget, onModel, busy }) {
   const models = brain.models || [];
   return (
     <div>
-      <div className="section-title">AI BRAIN · DEV GATEWAY</div>
+      <div className="section-title">AI BRAIN · {ENV_NAME} GATEWAY</div>
       <div className="brain-note glass">
         {brain.kind === "connected" && (
           <React.Fragment>
             <div className="brain-state on">Connected{brain.version ? " · " + brain.version : ""}</div>
-            <div>Questions about loaded records are answered here; everything else goes to the DEV OpenClaw agent.</div>
+            <div>Questions about loaded records are answered here; everything else goes to the {ENV_NAME} OpenClaw agent.</div>
             {models.length > 0 && (
               <label className="brain-model">
                 <span>Model</span>
@@ -1101,8 +1119,8 @@ function BrainPanel({ brain, onConnect, onForget, onModel, busy }) {
         {(brain.kind === "needs-key" || brain.kind === "error") && (
           <form onSubmit={submit}>
             {brain.note && <div className={brain.kind === "error" ? "brain-error" : ""}>{brain.note}</div>}
-            {!brain.note && <div>Not connected. Enter the DEV gateway key once to pair this browser. It is used only for pairing and never saved.</div>}
-            <input className="brain-key" type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder="DEV gateway key" />
+            {!brain.note && <div>Not connected. Enter the {ENV_NAME} gateway key once to pair this browser. It is used only for pairing and never saved.</div>}
+            <input className="brain-key" type="password" autoComplete="off" value={key} onChange={event => setKey(event.target.value)} placeholder={ENV_NAME + " gateway key"} />
             <button type="submit" className="brain-btn" disabled={!key.trim()}>Pair</button>
           </form>
         )}
@@ -1140,10 +1158,10 @@ function RightRail({ scene, trace, selection, onSelect }) {
       <div>
         <div className="section-title">DATA LOADED</div>
         <div className="sources glass">
-          <div className={"src-row" + (sampleAssets ? " off" : "")}><span>Assets · {sampleAssets ? "sample" : (sources.assets || "PropertyManager API (DEV)")}</span><span className="n">{scene.assets.length}</span></div>
+          <div className={"src-row" + (sampleAssets ? " off" : "")}><span>Assets · {sampleAssets ? "sample" : (sources.assets || "PropertyManager API (" + ENV_NAME + ")")}</span><span className="n">{scene.assets.length}</span></div>
           <div className={"src-row" + (sampleAssets ? " off" : "")}><span>Tasks</span><span className="n">{tasks}</span></div>
           <div className={"src-row" + (finance.length ? "" : " off")}><span>Finance · {finance.length ? (sources.finance || "ledger") : "not loaded"}</span><span className="n">{finance.length ? finance.length + " / " + transactions : "—"}</span></div>
-          <div className={"src-row" + (livestock ? "" : " off")}><span>Livestock · {livestock ? (sources.livestock || "DEV Postgres") : "not loaded"}</span><span className="n">{livestock || "—"}</span></div>
+          <div className={"src-row" + (livestock ? "" : " off")}><span>Livestock · {livestock ? (sources.livestock || ENV_NAME + " Postgres") : "not loaded"}</span><span className="n">{livestock || "—"}</span></div>
         </div>
       </div>
       <div>
@@ -1293,8 +1311,9 @@ function wakeCommand(transcript) {
 }
 
 const CAMERA_LOCALHOST = "Open this page from http://127.0.0.1 on this Mac to use the camera.";
-const ASSET_URL = "http://100.85.188.74:5062/v1/assets";
-const TASK_URL = "http://100.85.188.74:5062/tasks";
+const PM_API = JARVIS_ENV === "prod" ? "http://100.85.36.72:5062" : "http://100.85.188.74:5062";
+const ASSET_URL = PM_API + "/v1/assets";
+const TASK_URL = PM_API + "/tasks";
 
 const EMPTY_SCENE = { assets: [], herds: [], animals: [], pets: [], finance: [], loading: true };
 
@@ -4187,7 +4206,7 @@ function runSelfChecks() {
 
 function greeting(hour) {
   const part = hour < 12 ? "morning" : hour < 18 ? "afternoon" : "evening";
-  return "Good " + part + ". I answer from the assets, tasks, and finance totals loaded on this page, and pass anything else to the DEV brain when it's connected.";
+  return "Good " + part + ". I answer from the assets, tasks, and finance totals loaded on this page, and pass anything else to the " + ENV_NAME + " brain when it's connected.";
 }
 
 function VoiceVisualizer({ speaking, listening, connected }) {
@@ -4261,7 +4280,7 @@ function App() {
     const readSnapshot = () => fetch("jarvis-live.json", { cache: "no-store" })
       .then(response => response.ok ? response.json() : Promise.reject(response.status))
       .then(data => (data && Array.isArray(data.assets) && data.assets.length) ? data : Promise.reject("empty"));
-    // DEV rebuilds the snapshot every SNAPSHOT_MS; check just after each one is due, then every
+    // The server rebuilds the snapshot every SNAPSHOT_MS; check just after each one is due, then every
     // SNAPSHOT_RETRY_MS until a newer one lands. Hidden tabs wait and check on return.
     const schedule = () => {
       clearTimeout(timer);
@@ -4562,7 +4581,7 @@ function App() {
       const picked = (brain.models || []).find(m => m.ref === brain.model);
       brainStartRef.current = started;
       setFlow({ ids: [] });
-      setTrace({ lookup: "brain", matched: "", source: "DEV OpenClaw gateway · " + (picked ? picked.name : "default model"), timeMs: Math.max(1, Math.round(performance.now() - started)) });
+      setTrace({ lookup: "brain", matched: "", source: ENV_NAME + " OpenClaw gateway · " + (picked ? picked.name : "default model"), timeMs: Math.max(1, Math.round(performance.now() - started)) });
       brainRef.current.send(query).catch(error => {
         setTyping(false);
         say("The brain didn't take that: " + ((error && error.message) || "request failed") + ".");

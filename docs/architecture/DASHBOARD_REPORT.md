@@ -89,11 +89,6 @@ Browser → Flask (0.0.0.0:5051)
   `OPENCLAW_M4_SSH_USER`, and `OPENCLAW_M4_SSH_KEY`.
 - Remote Python collects: memory (vm_stat), Ollama process/CPU, uptime.
 - An SSH metrics failure does not mark a reachable Ollama API offline.
-- Probes llama.cpp at `OPENCLAW_LLAMA_CPP_BASE_URL` (default
-  `http://127.0.0.1:18088/v1`, the development loopback tunnel to the M4
-  llama-server on port 8088) via `/models`. The Intel Mini AI Server Health
-  card shows online or offline, response time, and loaded model ids. A
-  llama.cpp probe failure does not mark Ollama offline.
 
 ### Model Status
 
@@ -137,19 +132,13 @@ Browser → Flask (0.0.0.0:5051)
 
 ### Storage Health
 
-- The development dashboard labels its local root filesystem as
-  **Development VM Internal Disk** so it cannot be mistaken for production.
-- A separate read-only Intel Mini probe reports the production root
-  filesystem usage, complete physical internal-drive capacity, root
-  allocation, and capacity outside the root allocation.
-- External AI storage remains a separate card with total, used, free, and
-  percentage values.
+- Live `df` for `/` and `/mnt/ai-storage`.
 - When `/mnt/ai-storage` is not local to the development host, the dashboard
   performs a read-only SSH probe of the Intel Mini using
   `OPENCLAW_INTELMINI_STORAGE_HOST`, `OPENCLAW_INTELMINI_STORAGE_USER`, and
   `OPENCLAW_INTELMINI_STORAGE_KEY`.
-- Remote storage commands are limited to `findmnt`, `df`, and `lsblk`; they do
-  not mount, modify, restart, resize, or write to the Intel Mini.
+- The remote command is limited to `findmnt` and `df`; it does not mount,
+  modify, restart, or write to the Intel Mini.
 - Missing or unmounted storage is shown as **Not mounted on this host**, not as
   `0%` usage or a parser failure.
 - Internal and external disk percentages have separate trend columns. Missing
@@ -195,9 +184,8 @@ Browser → Flask (0.0.0.0:5051)
 - Inventory probes are read-only. They inspect archive metadata, mount state,
   and capacity without mounting storage in the development VM.
 - The M4 Time Machine card uses a read-only SSH probe of `tmutil status`,
-  `tmutil latestbackup`, and `tmutil destinationinfo`. When the backup list
-  is unreadable, it uses the newest Time Machine snapshot record instead. It
-  never starts or changes a Time Machine backup.
+  `tmutil latestbackup`, and `tmutil destinationinfo`; it never starts or
+  changes a Time Machine backup.
 - Time Machine is expected to back up daily. The dashboard reports healthy
   through 30 hours, warning from 30–48 hours, and critical after 48 hours.
 - **Run Verification Now** validates the latest remote archives and available

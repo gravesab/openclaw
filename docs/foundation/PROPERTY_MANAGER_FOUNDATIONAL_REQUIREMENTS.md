@@ -10,9 +10,9 @@ source_document: "PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md"
 
 # PropertyManager Foundational Requirements
 
-Version: 1.4
-Status: **Phase 3 deployed on production Intel Mini** — post-deploy verification
-Owner: OpenClaw Operator
+Version: 1.4  
+Status: **Phase 3 deployed on production Intel Mini** — post-deploy verification  
+Owner: OpenClaw Operator  
 Last Updated: 2026-07-30
 
 ---
@@ -117,7 +117,6 @@ All PropertyManager work follows a **two-environment, two-gate** model aligned w
 - **All clients** (Mac, iPhone/iPad, Dashboard QR page, Telegram, RanchBrain CLI) interact **only through the PropertyManager REST API**. No client reads or writes Postgres directly.
 - Mac and iOS may maintain a local JSON cache for offline display; cache is a **derived copy**, not authoritative.
 - CSV export remains legacy/briefing-only and must not be treated as a write path.
-- OpenClaw trusted records are a derived projection. They do not replace PostgreSQL as the Property Manager system of record, and operational mutations continue through the Property Manager REST API. See [Canonical Trusted Records](/foundation/CANONICAL_TRUSTED_RECORDS#property-manager-projection).
 - **Apple Calendar is not a system of record.** The Mac app may push a derived day plan into Calendar.app for planning visibility only. Deleting or editing those events in Calendar.app must not update PropertyManager. Postgres + the REST API (via Mac/iPhone UI) remain the only write path for tasks and schedules.
 
 See the client topology diagram in [PropertyManager Asset Architecture](../architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md#client-topology).
@@ -339,50 +338,6 @@ The PropertyManager REST API must meet these non-functional requirements before 
 | **Validation errors**   | Structured JSON error body: `code`, `message`, `field`, `details[]`                                    |
 
 Endpoint shapes and entity definitions are specified in the architecture document. Phase 1 implements against that contract.
-
----
-
-## iPhone and iPad work-request intake
-
-**Status: proposed DEV capability.** This is a field-intake path for a person to report needed work. It is not a shortcut for creating scheduled maintenance, completing work, adjusting inventory, or recording an approved expense.
-
-### Submitter experience
-
-The iPhone and iPad PropertyManager apps must provide a clearly labeled **Submit Work Request** action. The form must support:
-
-- a required, large multiline **Describe the work** field, with enough room for a person to explain the symptom, location, observed damage, access considerations, and desired outcome in their own words;
-- one or more optional photos, captured in the app or selected from the photo library;
-- an optional asset selection when the affected equipment or property asset is known;
-- a required area or location when no asset is selected; and
-- optional draft parts or materials, each with a name, quantity, unit, and free-text note. A requester may leave those fields blank.
-
-The app must preserve entered text and selected photos while it reports a validation or upload failure. A submitted request receives a visible request number and intake status. A request must not be submitted with neither a meaningful description nor a location/asset reference.
-
-### Authority and workflow
-
-- The request is created through an authenticated, server-authoritative API mutation with an idempotency key. The server records the authenticated submitter and timestamps; the client must not supply an authoritative submitter identity.
-- A new request begins in a distinct intake state such as `submitted`. It is not due work and must not participate in preventive-maintenance due, overdue, completion, meter, Calendar, or recurrence calculations.
-- An authorized maintainer later triages it: clarifies the location or asset, assigns category/priority, and either converts it into a normal maintenance task or closes it with an auditable reason. The conversion is an explicit server-side operation, not a client-side change of a `kind` string.
-- Parts and materials on a request are **unapproved planning lines**. They must not decrement stock, create a purchase, charge a cost, change a budget, or become a Finance record at submission. A later authorized workflow may approve or replace them, retaining the original request history.
-
-### Photo and text protection
-
-- The client uploads image bytes only to a server-issued attachment operation. It never supplies a server storage path, and responses must not expose internal storage paths, host paths, or long-lived public URLs.
-- The service validates content type and size, assigns an opaque attachment ID, removes or ignores location-bearing image metadata before durable storage or display, and limits read/download to authorized PropertyManager users.
-- The API stores the descriptive text and attachment metadata with the request. It must not treat text, a filename, or image metadata as executable instructions or as authority for a follow-on mutation.
-- AI may summarize or help route a request only through an authorized PropertyManager read model. Any AI-generated category, priority, or parts suggestion remains a proposal requiring an authorized human's explicit approval.
-
-### Required DEV proof before enablement
-
-| Scenario                                                                 | Expected result                                                                                               |
-| ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| Submit from iPhone and iPad with description, photo, and draft materials | One idempotent `submitted` request; photo and draft lines linked to it                                        |
-| Retry after a network interruption                                       | Original request is returned; no duplicate request, attachment, or material line                              |
-| Missing authentication or forged submitter                               | Denied; no request or attachment persisted                                                                    |
-| Photo with location metadata                                             | Stored/displayed copy contains no location metadata; response exposes only an authorized attachment reference |
-| Untriaged request                                                        | Excluded from due/overdue, Calendar, completion, meter, inventory, and Finance paths                          |
-| Triage and conversion                                                    | Authorized server operation preserves original report, submitter, photos, and draft-line provenance           |
-| Unauthorized request/photo read                                          | Denied without disclosing request text, filenames, or attachment storage information                          |
 
 ---
 

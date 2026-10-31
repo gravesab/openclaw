@@ -10,9 +10,9 @@ source_document: "PROPERTY_MANAGER_ASSET_ARCHITECTURE.md"
 
 # PropertyManager Asset Architecture
 
-Version: 1.4
-Status: **Phase 3 deployed on production Intel Mini**
-Authority: Requirements in [PropertyManager Foundational Requirements](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md)
+Version: 1.4  
+Status: **Phase 3 deployed on production Intel Mini**  
+Authority: Requirements in [PropertyManager Foundational Requirements](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md)  
 Last Updated: 2026-07-30
 
 ---
@@ -34,7 +34,6 @@ Track operating meters (runtime hours, mileage, cycles) for ranch equipment and 
 - **Five-minute learning.** Asset pages show current reading and remaining until next service.
 - **Manufacturer manual is PM source of truth for intervals.** Repeat intervals (`meter_interval_*`) are stored at manual import and keep origin/source provenance. The **run hours trigger** (`next_due_meter_value`) is an absolute operator scheduling decision (no new authorship column).
 - **Audit-first meter history.** Every reading is reconstructable; corrections append new rows.
-- **One-way trusted-record projection.** OpenClaw may retain idempotent canonical projections for cross-domain use, but Property Manager remains authoritative and all operational writes return through this REST API. See [Canonical Trusted Records](/foundation/CANONICAL_TRUSTED_RECORDS#property-manager-projection).
 
 ---
 
@@ -68,7 +67,7 @@ flowchart LR
 | Client                           | Role                                                                                                                                            |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Mac                              | Asset admin, manual import with meter intervals, meter entry, completion meter capture, mapping approval, optional Apple Calendar day-plan push |
-| iPhone / iPad                    | Field meter entry, voice, QR deep link, and authenticated work-request submission                                                               |
+| iPhone / iPad                    | Field meter entry, voice, QR deep link                                                                                                          |
 | Dashboard `/pm/asset/<qr_token>` | QR landing, meter display, authenticated update                                                                                                 |
 | Telegram                         | Natural-language meter updates (via API)                                                                                                        |
 | RanchBrain CLI                   | Display current meter and PM remaining from API                                                                                                 |
@@ -190,23 +189,6 @@ Append-only history. Corrections and rejections are new rows; accepted rows are 
 - One-time historical backfill: `tools/property_manager/db/normalize_task_titles.py` (`--dry-run` / `--apply`); do not mass-rewrite without operator approval.
 
 **Hybrid (`both`):** Use only when the manual (or operator) intentionally keeps calendar dates with a meter trigger ("whichever comes first"). Engine evaluates calendar due and meter due independently; task is due when **either** threshold is met. Do not silently upgrade `calendar` → `both` when only a meter trigger is added.
-
-### Mobile work requests (proposed)
-
-`maintenance_tasks.kind = 'Work Request'` is an intake record, not a scheduled-maintenance variant. It has a separate, server-enforced intake state (`submitted`, `triaged`, `converted`, or `closed`) and never enters due, overdue, recurrence, completion, meter, or Calendar calculations while it remains an intake record.
-
-| Field / relation          | Contract                                                                                                                                                                                                                            |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `task_description`        | Required large multiline report. Preserve the submitter's words; later triage notes are separate rather than overwriting the report.                                                                                                |
-| `asset_id` / `area`       | `asset_id` is optional at intake; require an area/location when no asset is known. Triage resolves the relationship before conversion to maintenance work.                                                                          |
-| intake audit              | Server-derived submitter identity, submitted/updated timestamps, idempotency key, and state-transition actor/reason.                                                                                                                |
-| `maintenance_task_photos` | One or more optional request attachments. Store an opaque attachment ID and controlled metadata; do not return `storage_path` or host filesystem details to clients.                                                                |
-| `maintenance_task_parts`  | Optional requested parts/materials planning lines: name, quantity, unit, note, and optional vendor/part reference. They carry no inventory or financial posting authority.                                                          |
-| conversion                | An authorized, atomic server operation creates or activates the normal maintenance task after category, priority, scheduling, and asset rules have been satisfied. It retains a link to the original request and its audit history. |
-
-The mobile flow is: **Describe work → optional photos → optional draft parts/materials → review → submit → triage**. It must use an authenticated `POST` endpoint with an idempotency key. Attachment bytes upload through a server-issued operation; the final submit payload uses opaque attachment IDs, never client filesystem paths or storage paths.
-
-The first implementation may use the existing task, photo, and parts tables only if a migration adds the explicit intake state, request audit fields, safe attachment metadata, and a non-destructive conversion link. It must not repurpose calendar dates, frequency, owner origin, or a category string to infer request workflow state.
 
 ### Completion extensions (`maintenance_completions`)
 
@@ -422,22 +404,7 @@ Lists: cursor pagination `?cursor=<opaque>&limit=50`.
 
 ### Health
 
-- `GET /health` — includes `api_version`, `schema_version` (`006` as of Phase 1), `api_process`, `postgres_reachable`, and `schema_available` (required tables present). Returns HTTP 503 when Postgres or schema checks fail; client body stays sanitized (diagnostics in logs).
-
-### WSGI runtime (development VM)
-
-Flask remains the app framework. Normal service operation uses **Gunicorn** (not Flask `app.run` / debug / reloader):
-
-| Piece            | Path                                                                                                 |
-| ---------------- | ---------------------------------------------------------------------------------------------------- |
-| WSGI entry       | `tools/property_manager/api/wsgi.py` → `application`                                                 |
-| Gunicorn target  | `wsgi:application` (WorkingDirectory = `tools/property_manager/api`)                                 |
-| Config           | `tools/property_manager/api/gunicorn.conf.py` (2 sync workers, bind `:5062`, timeout 120s)           |
-| Launcher         | `tools/property_manager/api/run_api.sh`                                                              |
-| Dev systemd unit | `tools/property_manager/deploy/propertymanager-api.service`                                          |
-| Runbook          | [PropertyManager API Development Runbook](../foundation/PROPERTY_MANAGER_API_DEVELOPMENT_RUNBOOK.md) |
-
-DB default is docker-exec-per-query (process-safe across workers). Migrations stay explicit operator actions — never on worker import. Production Intel Mini units are unchanged until operator approval.
+- `GET /health` — includes `api_version`, `schema_version` (`006` as of Phase 1)
 
 ### Phase 1 implementation notes (dev VM)
 
@@ -504,7 +471,6 @@ Task→asset linking uses the mapping proposal workflow; see [RanchBrain Archite
 ## Related documents
 
 - [PropertyManager Foundational Requirements](../foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md)
-- [PropertyManager API Development Runbook](../foundation/PROPERTY_MANAGER_API_DEVELOPMENT_RUNBOOK.md)
 - [RanchBrain Architecture](../RanchBrain-Architecture.md)
 - [OpenClaw Development Directive](../foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md)
 - Deprecated alias: [PROPERTYMANAGER_ASSETS_AND_METERS.md](PROPERTYMANAGER_ASSETS_AND_METERS.md) (pointer only)

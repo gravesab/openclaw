@@ -1,8 +1,5 @@
 ---
 title: "OpenClaw Foundational Documentation"
-summary: "Index of governing product, architecture, and development documents."
-read_when:
-  - Finding the Apple-first product direction and governing contracts
 version: "1.0"
 status: "Foundational"
 owner: "OpenClaw Architecture"
@@ -32,8 +29,6 @@ This document serves as the starting point for developers, operators, and AI age
 
 # Guiding Principles
 
-- Native Apple applications and Apple Intelligence first for the RanchOS product experience.
-- OpenClaw orchestrates supporting AI behind that experience.
 - Local-first whenever practical.
 - Safety before automation.
 - Verify before trusting.
@@ -53,87 +48,11 @@ Defines the mission, scope, and long-term direction of OpenClaw.
 
 ---
 
-## Human-Centered Personal Intelligence System
-
-HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md
-
-Defines the unified capture model, plain-language system status, trustworthy
-data states, Ranch Brain knowledge lifecycle, domain requirements, dashboard
-rules, privacy controls, and phased implementation direction for ChatGPT and
-OpenClaw.
-
----
-
 ## Architecture
 
 RANCHBOT_ARCHITECTURE.md
 
 Defines system architecture, service relationships, routing, and component responsibilities.
-
-SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md
-
-Defines the server-enforced boundary for proposals, authoritative mutations,
-confirmation, concurrency, idempotency, and atomic audit evidence.
-
-CANONICAL_CONFIRMATION_POLICY_V1.md
-
-Defines confirmation classifications, the canonical operation matrix,
-server-generated challenges, and single-use confirmation records.
-
-ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md
-
-Defines the atomic transaction boundary for authoritative mutation, audit,
-confirmation consumption, idempotency, concurrency, and post-commit delivery.
-
-AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md
-
-Defines mutation-specific threats, protected assets, trust boundaries,
-fail-closed security requirements, and implementation-independent tests.
-
-AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md
-
-Defines human and service identity, capabilities, delegation, revocation,
-environment separation, and accountable authority for mutations.
-
-AUTHORITATIVE_MUTATION_PROTOCOL_V1.md
-
-Defines the complete server-enforced proposal, authorization, confirmation,
-validation, concurrency, idempotency, transaction, result, and recovery lifecycle.
-
-EXTERNAL_AUTHORITY_ANCHOR_AND_TRUST_ROOT_SPECIFICATION_V1.md
-
-Defines the external authority anchor, signed trust-root artifacts, verification,
-lifecycle, rotation, revocation, anti-rollback, audit, and recovery requirements.
-
-AUTHORITY_ANCHOR_CEREMONY_CUSTODY_ROTATION_AND_RECOVERY_PROFILE_V1.md
-
-Defines authority-anchor ceremony planning, custody, rotation, revocation,
-recovery, evidence, environment separation, and fail-closed abort requirements.
-
-AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md
-
-Defines authority-anchor algorithms, canonical serialization, signatures,
-digests, encodings, domain separation, compatibility, and downgrade prevention.
-
-AUTHORITY_ANCHOR_IMMUTABLE_NON_SECRET_COMPATIBILITY_VECTOR_SPECIFICATION_V1.md
-
-Defines immutable non-secret vectors, provenance, canonical expected results,
-failure decisions, cross-platform conformance, and vector-set change control.
-
-AUTHORITY_ANCHOR_IMPLEMENTATION_ASSURANCE_AND_APPROVED_CRYPTOGRAPHIC_LIBRARY_PROFILE_V1.md
-
-Defines implementation assurance, evidence, approval units, supply-chain and
-platform controls, validation, lifecycle, and fail-closed library governance.
-
-CANDIDATE_LIBRARY_EVIDENCE_AND_COMPARATIVE_ASSESSMENT_SPECIFICATION_V1.md
-
-Defines candidate evidence identity, provenance, comparison, uncertainty,
-decision separation, reassessment, and fail-closed assessment requirements.
-
-CANDIDATE_ASSESSMENT_EVIDENCE_RECORD_CANONICALIZATION_AND_INTEGRITY_PROFILE_V1.md
-
-Defines evidence-record schemas, canonical bytes, content identities, provenance,
-manifests, verification, redaction, and fail-closed integrity requirements.
 
 ---
 
@@ -156,10 +75,9 @@ Defines the long-term philosophy, values, and operating principles of OpenClaw.
 
 ## Development Governance
 
-[OpenClaw Development Directive](/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE#apple-first-application-and-intelligence-direction)
+OPENCLAW_DEVELOPMENT_DIRECTIVE.md
 
 Defines the mandatory development-only workflow, operator acceptance gate,
-Apple-first product and intelligence direction, feature-design evidence,
 product reliability requirements, mobile asset-management vision, evidence
 standards, and production authorization boundary.
 
@@ -173,16 +91,6 @@ Defines PropertyManager asset and meter policy, Phase 0 implementation gate,
 dev-vs-production deployment phases, audit requirements, API reliability
 contract, QR security, RanchBrain matching rules, and the pre-production test
 matrix. Pairs with PROPERTY_MANAGER_ASSET_ARCHITECTURE.md under architecture/.
-
----
-
-## Canonical Trusted Records
-
-CANONICAL_TRUSTED_RECORDS.md
-
-Defines the durable cross-domain record schema, authority boundary, immutable
-revision model, access-policy creation contract, external projection identity,
-and the one-way Property Manager projection rules.
 
 ---
 
@@ -296,7 +204,6 @@ The maintained documentation library is located under `docs/`.
 
 - `docs/foundation/FOUNDATIONAL_DOCUMENTS.md`
 - `docs/foundation/PROJECT_OVERVIEW.md`
-- `docs/foundation/HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md`
 - `docs/foundation/SOUL.md`
 - `docs/foundation/AI_GOVERNANCE_MANIFEST.md`
 - `docs/foundation/OPENCLAW_DEVELOPMENT_DIRECTIVE.md`
@@ -306,18 +213,8 @@ The maintained documentation library is located under `docs/`.
 
 ## Architecture Documents
 
-- `docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md`
-- `docs/architecture/AUTHORITATIVE_IDENTITY_SERVICE_IDENTITY_AND_DELEGATION_POLICY_V1.md`
-- `docs/architecture/AUTHORITATIVE_MUTATION_PROTOCOL_V1.md`
-- `docs/architecture/AUTHORITATIVE_MUTATION_THREAT_MODEL_V1.md`
-- `docs/architecture/AUTHORITY_ANCHOR_CEREMONY_CUSTODY_ROTATION_AND_RECOVERY_PROFILE_V1.md`
-- `docs/architecture/AUTHORITY_ANCHOR_CRYPTOGRAPHIC_AND_CANONICALIZATION_PARAMETER_PROFILE_V1.md`
-- `docs/architecture/AUTHORITY_ANCHOR_IMMUTABLE_NON_SECRET_COMPATIBILITY_VECTOR_SPECIFICATION_V1.md`
-- `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
-- `docs/architecture/EXTERNAL_AUTHORITY_ANCHOR_AND_TRUST_ROOT_SPECIFICATION_V1.md`
 - `docs/architecture/PROPERTY_MANAGER_ASSET_ARCHITECTURE.md`
 - `docs/architecture/RANCHBOT_ARCHITECTURE.md`
-- `docs/architecture/SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md`
 - `docs/architecture/DASHBOARD_REPORT.md`
 - `docs/architecture/PYTHON_WEB_RUNTIME_INVENTORY.md`
 - `docs/architecture/PROJECT_CONTEXT.md`

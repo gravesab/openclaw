@@ -28,6 +28,10 @@ from tools.ai_intelligence.routing_models import (
     RoutingDecision,
     RoutingRequest,
 )
+from tools.ai_intelligence.layer_signal import (
+    LayerSignalBus,
+    build_layer_signal,
+)
 from tools.ai_intelligence.telemetry import (
     ExecutionTelemetryRecorder,
     build_observed_usage_record,
@@ -95,6 +99,7 @@ class ExecutionEngine:
         router: ExecutionRouter,
         provider_registry: ExecutionProviderRegistry,
         telemetry_recorder: ExecutionTelemetryRecorder | None = None,
+        signal_bus: LayerSignalBus | None = None,
     ) -> None:
         if (
             not isinstance(router, ExecutionRouter)
@@ -125,9 +130,17 @@ class ExecutionEngine:
                 "record(decision, result)"
             )
 
+        if signal_bus is not None and not isinstance(
+            signal_bus, LayerSignalBus
+        ):
+            raise ExecutionEngineConfigurationError(
+                "signal_bus must be a LayerSignalBus"
+            )
+
         self._router = router
         self._provider_registry = provider_registry
         self._telemetry_recorder = telemetry_recorder
+        self._signal_bus = signal_bus
 
     @property
     def router(self) -> ExecutionRouter:
@@ -161,6 +174,7 @@ class ExecutionEngine:
             or str(uuid4())
         )
         attempts: list[ExecutionAttempt] = []
+        raw_responses: dict[str, dict[str, Any]] = {}
 
         for assignment in decision.chain.ordered_candidates:
             started_at = utc_now()
@@ -212,6 +226,9 @@ class ExecutionEngine:
                 finished_at=finished_at,
             )
             attempts.append(attempt)
+            raw_responses[response.model_id] = dict(
+                response.raw_response
+            )
 
             result = ExecutionResult(
                 request_id=request_id,
@@ -222,6 +239,7 @@ class ExecutionEngine:
                 selected_model_id=response.model_id,
             )
             self._record_telemetry(decision, result)
+            self._emit_layer_signal(decision, result, raw_responses)
             return result
 
         result = ExecutionResult(
@@ -231,7 +249,24 @@ class ExecutionEngine:
             attempts=tuple(attempts),
         )
         self._record_telemetry(decision, result)
+        self._emit_layer_signal(decision, result, raw_responses)
         return result
+
+    def _emit_layer_signal(
+        self,
+        decision: RoutingDecision,
+        result: ExecutionResult,
+        raw_responses: Mapping[str, dict[str, Any]],
+    ) -> None:
+        if self._signal_bus is None:
+            return
+
+        try:
+            self._signal_bus.emit(
+                build_layer_signal(decision, result, raw_responses)
+            )
+        except Exception as exc:  # noqa: BLE001 - signal must not fail requests
+            warn_telemetry_failure(exc)
 
     def _record_telemetry(
         self,
@@ -300,6 +335,13 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
         AIIntelligenceDatabase,
         DatabaseConfig,
     )
+    from tools.ai_intelligence.layer_signal import LayerSignalBus
+    from tools.ai_intelligence.llamacpp_config import (
+        is_llamacpp_configured,
+    )
+    from tools.ai_intelligence.llamacpp_provider import (
+        build_llamacpp_provider,
+    )
     from tools.ai_intelligence.ollama_provider import (
         build_ollama_provider,
     )
@@ -308,6 +350,12 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
     )
     from tools.ai_intelligence.omlx_config import (
         is_omlx_configured,
+    )
+    from tools.ai_intelligence.openrouter_config import (
+        is_openrouter_configured,
+    )
+    from tools.ai_intelligence.openrouter_provider import (
+        build_openrouter_provider,
     )
     from tools.ai_intelligence.foundation_models_config import (
         is_foundation_models_configured,
@@ -321,6 +369,9 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
     from tools.ai_intelligence.router import (
         build_router_from_environment,
     )
+    from tools.ai_intelligence.runtime_selection import (
+        select_runtime_assignments,
+    )
 
     database = AIIntelligenceDatabase(DatabaseConfig.from_env())
     providers: list[AIProvider] = []
@@ -329,6 +380,10 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
     if is_omlx_configured():
         providers.append(build_omlx_provider())
     providers.append(build_ollama_provider())
+    if is_llamacpp_configured():
+        providers.append(build_llamacpp_provider())
+    if is_openrouter_configured():
+        providers.append(build_openrouter_provider())
 
     return ExecutionEngine(
         router=build_router_from_environment(),
@@ -336,4 +391,5 @@ def build_execution_engine_from_environment() -> ExecutionEngine:
         telemetry_recorder=DatabaseExecutionTelemetryRecorder(
             database
         ),
+        signal_bus=LayerSignalBus(),
     )

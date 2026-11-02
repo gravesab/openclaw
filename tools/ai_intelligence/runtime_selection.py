@@ -8,7 +8,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 from enum import Enum
-from typing import Sequence
+from typing import TYPE_CHECKING, Sequence
+
+if TYPE_CHECKING:
+    from tools.ai_intelligence.apple_layer import AppleLayerHook
 
 from tools.ai_intelligence.routing_models import (
     AssignmentType,
@@ -123,6 +126,7 @@ def select_runtime_assignments(
     *,
     privacy_tier: PrivacyTier,
     task_type: str,
+    apple_hook: "AppleLayerHook | None" = None,
 ) -> tuple[ModelAssignment, ...]:
     """Return approved assignments ordered for this privacy tier and task.
 
@@ -130,6 +134,8 @@ def select_runtime_assignments(
     is the preferred open-source runtime, then MLX, then Ollama. A cloud
     assignment can remain only on a large problem whose privacy tier already
     permits external processing. Local privacy never keeps a cloud candidate.
+    When apple_hook is provided, Apple candidates additionally require live
+    hook approval (policy plus helper availability).
     """
 
     workload = workload_for_task(task_type)
@@ -137,6 +143,15 @@ def select_runtime_assignments(
     eligible: list[ModelAssignment] = []
     for assignment in assignments:
         family = runtime_family(assignment)
+        if (
+            apple_hook is not None
+            and family is RuntimeFamily.APPLE_INTELLIGENCE
+            and not apple_hook.eligible(
+                task_type=task_type,
+                privacy_tier=privacy_tier,
+            )
+        ):
+            continue
         if privacy_tier is PrivacyTier.LOCAL and (
             family is RuntimeFamily.CLOUD or not assignment.is_local
         ):

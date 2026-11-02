@@ -1,0 +1,233 @@
+"""Live active-layer signal for the AI routing core.
+
+After each execution the engine emits one signal naming the layer that
+served the request, with latency, tokens/sec, and model name. Glow and
+dashboard consumers read the latest signal; they never infer the layer
+from configuration.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import threading
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import Any, Mapping
+
+from tools.ai_intelligence.execution_models import (
+    AttemptStatus,
+    ExecutionResult,
+)
+from tools.ai_intelligence.routing_models import RoutingDecision
+from tools.ai_intelligence.runtime_selection import (
+    RuntimeFamily,
+    runtime_family,
+)
+
+
+@dataclass(frozen=True)
+class ActiveLayerSignal:
+    """One observed layer outcome, ready to render or persist."""
+
+    layer: str
+    model_id: str
+    provider_name: str
+    latency_ms: int
+    tokens_per_sec: float | None
+    ok: bool
+    request_id: str
+    observed_at: str
+
+    def as_dict(self) -> dict[str, Any]:
+        """Return a JSON-serializable view of the signal."""
+
+        return {
+            "layer": self.layer,
+            "model_id": self.model_id,
+            "provider_name": self.provider_name,
+            "latency_ms": self.latency_ms,
+            "tokens_per_sec": self.tokens_per_sec,
+            "ok": self.ok,
+            "request_id": self.request_id,
+            "observed_at": self.observed_at,
+        }
+
+
+def tokens_per_second(
+    provider_name: str,
+    raw_response: Mapping[str, Any] | None,
+    duration_ms: int,
+) -> float | None:
+    """Derive tokens/sec from provider timing metadata, if present.
+
+    Returns None when the provider reports no usable token timing;
+    callers must render that as unknown, never as zero throughput.
+    """
+
+    if not isinstance(raw_response, Mapping):
+        return None
+    provider = provider_name.strip().lower()
+    try:
+        if provider == "ollama":
+            count = raw_response.get("eval_count")
+            nanos = raw_response.get("eval_duration")
+            if _is_positive_number(count) and _is_positive_number(nanos):
+                return float(count) / (float(nanos) / 1_000_000_000)
+            return None
+        if provider == "llama.cpp":
+            timings = raw_response.get("timings")
+            if isinstance(timings, Mapping):
+                predicted = timings.get("predicted_n")
+                predicted_ms = timings.get("predicted_ms")
+                if _is_positive_number(predicted) and _is_positive_number(
+                    predicted_ms
+                ):
+                    return float(predicted) / (
+                        float(predicted_ms) / 1000
+                    )
+            usage = raw_response.get("usage")
+            if isinstance(usage, Mapping):
+                completed = usage.get("completion_tokens")
+                if _is_positive_number(completed) and duration_ms > 0:
+                    return float(completed) / (duration_ms / 1000)
+            return None
+        if provider == "openrouter":
+            usage = raw_response.get("usage")
+            if isinstance(usage, Mapping):
+                completed = usage.get("completion_tokens")
+                if _is_positive_number(completed) and duration_ms > 0:
+                    return float(completed) / (duration_ms / 1000)
+            return None
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+    return None
+
+
+def _is_positive_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and value > 0
+    )
+
+
+def _layer_for_model(
+    decision: RoutingDecision,
+    model_id: str,
+    provider_name: str,
+) -> str:
+    for assignment in decision.chain.ordered_candidates:
+        if assignment.model_id == model_id:
+            return runtime_family(assignment).value
+    provider = provider_name.strip().lower()
+    if "foundation" in provider or provider.startswith("apple"):
+        return RuntimeFamily.APPLE_INTELLIGENCE.value
+    if "llama" in provider:
+        return RuntimeFamily.LLAMA_CPP.value
+    if "mlx" in provider or "omlx" in provider:
+        return RuntimeFamily.MLX.value
+    if "ollama" in provider:
+        return RuntimeFamily.OLLAMA.value
+    return RuntimeFamily.CLOUD.value
+
+
+def build_layer_signal(
+    decision: RoutingDecision,
+    result: ExecutionResult,
+    raw_responses: Mapping[str, Mapping[str, Any] | None] | None = None,
+) -> ActiveLayerSignal:
+    """Build the active-layer signal for one execution result.
+
+    The winning attempt names the layer; a failed result signals the
+    last attempted layer with ok=False so the glow can go dark honestly.
+    `raw_responses` maps model_id to that attempt's raw provider payload
+    for tokens/sec derivation; attempts without one report unknown.
+    """
+
+    raws = raw_responses or {}
+    successful = tuple(
+        attempt
+        for attempt in result.attempts
+        if attempt.status is AttemptStatus.SUCCESS
+    )
+    if successful:
+        winner = successful[0]
+        ok = True
+    else:
+        winner = result.attempts[-1]
+        ok = False
+    return ActiveLayerSignal(
+        layer=_layer_for_model(
+            decision,
+            winner.model_id,
+            winner.provider_name,
+        ),
+        model_id=winner.model_id,
+        provider_name=winner.provider_name,
+        latency_ms=winner.duration_ms,
+        tokens_per_sec=tokens_per_second(
+            winner.provider_name,
+            raws.get(winner.model_id),
+            winner.duration_ms,
+        ),
+        ok=ok,
+        request_id=result.request_id,
+        observed_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+class LayerSignalBus:
+    """In-memory active-layer signal bus (engine-scoped)."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._latest: ActiveLayerSignal | None = None
+        self._emitted = 0
+
+    def emit(self, signal: ActiveLayerSignal) -> None:
+        """Publish a signal as the latest observed layer outcome."""
+
+        with self._lock:
+            self._latest = signal
+            self._emitted += 1
+
+    def latest(self) -> ActiveLayerSignal | None:
+        """Return the latest signal, or None before any execution."""
+
+        with self._lock:
+            return self._latest
+
+    @property
+    def emitted_count(self) -> int:
+        """Return how many signals have been emitted."""
+
+        with self._lock:
+            return self._emitted
+
+
+def write_layer_signal(signal: ActiveLayerSignal, path: str) -> None:
+    """Atomically write the latest signal JSON for glow consumers."""
+
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    payload = json.dumps(
+        signal.as_dict(), indent=2, sort_keys=True
+    ) + "\n"
+    fd, tmp_path = tempfile.mkstemp(
+        dir=directory or None,
+        prefix=".layer-signal-",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(payload)
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise

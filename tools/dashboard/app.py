@@ -1156,24 +1156,95 @@ def service_scope_panel_html(services):
 
 
 def collect_trend_sample():
-    script = Path.home() / "ai/projects/openclaw/tools/home_manager/collect_trends.sh"
+    """Record one local trend sample. No shell script and no SSH."""
+    header = (
+        "timestamp,ollama_latency_ms,mem_used_gib,mem_total_gib,disk_used_pct,"
+        "external_disk_used_pct,m4_mem_used_gib,m4_mem_total_gib,m4_cpu_used_pct,"
+        "m4_disk_used_pct,m4_ollama_response_ms,homeassistant_uptime,redis_uptime,"
+        "portainer_uptime,postgres_uptime,scrypted_uptime"
+    )
+    containers = (
+        "homeassistant",
+        "redis",
+        "portainer",
+        "postgres",
+        "scrypted",
+    )
     try:
-        result = subprocess.run(
-            ["/usr/bin/bash", str(script)],
-            cwd=str(Path.home() / "ai/projects/openclaw"),
-            capture_output=True,
-            text=True,
-            timeout=90,
-        )
-        return {
-            "success": result.returncode == 0,
-            "message": (result.stdout + result.stderr).strip()[-1200:],
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": str(e),
-        }
+        REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        if not TREND_FILE.exists():
+            TREND_FILE.write_text(header + "\n")
+        elif TREND_FILE.read_text().splitlines()[:1] != [header]:
+            return {"success": False, "message": "trend header differs; sample not written"}
+        meminfo = Path("/proc/meminfo")
+        if meminfo.is_file():
+            info = {}
+            for line in meminfo.read_text().splitlines():
+                key, rest = line.split(":", 1)
+                info[key] = int(rest.split()[0])
+            total_kb = info["MemTotal"]
+            used_kb = total_kb - info.get("MemAvailable", info.get("MemFree", 0))
+            mem_used = f"{used_kb / 1048576:.1f}"
+            mem_total = f"{total_kb / 1048576:.1f}"
+        else:
+            vm = subprocess.check_output(["vm_stat"], text=True, timeout=5)
+            memsize = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, timeout=5).strip())
+            page_size = int(re.search(r"page size of (\d+) bytes", vm).group(1))
+            values = {}
+            for line in vm.splitlines():
+                if ":" not in line:
+                    continue
+                key, val = line.split(":", 1)
+                match = re.search(r"(\d+)", val.replace(".", ""))
+                if match:
+                    values[key.strip()] = int(match.group(1))
+            free_pages = values.get("Pages free", 0) + values.get("Pages speculative", 0)
+            mem_used = f"{(memsize - (free_pages * page_size)) / 1024**3:.1f}"
+            mem_total = f"{memsize / 1024**3:.1f}"
+        usage = shutil.disk_usage("/")
+        disk_pct = f"{(100 * usage.used / usage.total):.0f}" if usage.total else ""
+        latency = ""
+        started = time.perf_counter()
+        try:
+            response = requests.get("http://127.0.0.1:11434/api/tags", timeout=2)
+            if response.ok:
+                latency = f"{(time.perf_counter() - started) * 1000:.0f}"
+        except Exception:
+            latency = ""
+        uptimes = {name: "" for name in containers}
+        try:
+            listing = subprocess.check_output(
+                ["docker", "ps", "--format", "{{.Names}}|{{.Status}}"],
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=10,
+            )
+            for row in listing.splitlines():
+                name, _, status = row.partition("|")
+                if name in uptimes:
+                    uptimes[name] = status.removeprefix("Up ")
+        except Exception:
+            pass
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fields = [
+            f'"{stamp}"',
+            latency,
+            mem_used,
+            mem_total,
+            disk_pct,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            *(f'"{uptimes[name]}"' for name in containers),
+        ]
+        with TREND_FILE.open("a") as handle:
+            handle.write(",".join(fields) + "\n")
+        return {"success": True, "message": "local sample"}
+    except Exception as exc:
+        return {"success": False, "message": str(exc)}
 
 
 

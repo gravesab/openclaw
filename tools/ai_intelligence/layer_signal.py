@@ -207,15 +207,13 @@ class LayerSignalBus:
             return self._emitted
 
 
-def write_layer_signal(signal: ActiveLayerSignal, path: str) -> None:
-    """Atomically write the latest signal JSON for glow consumers."""
+def _atomic_write_json(path: str, payload: dict[str, Any]) -> None:
+    """Atomically write a JSON payload (tmp file plus rename)."""
 
     directory = os.path.dirname(path)
     if directory:
         os.makedirs(directory, exist_ok=True)
-    payload = json.dumps(
-        signal.as_dict(), indent=2, sort_keys=True
-    ) + "\n"
+    text = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     fd, tmp_path = tempfile.mkstemp(
         dir=directory or None,
         prefix=".layer-signal-",
@@ -223,7 +221,7 @@ def write_layer_signal(signal: ActiveLayerSignal, path: str) -> None:
     )
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(payload)
+            handle.write(text)
         os.replace(tmp_path, path)
     except BaseException:
         try:
@@ -231,3 +229,70 @@ def write_layer_signal(signal: ActiveLayerSignal, path: str) -> None:
         except OSError:
             pass
         raise
+
+
+def write_layer_signal(signal: ActiveLayerSignal, path: str) -> None:
+    """Atomically write the latest signal JSON for glow consumers."""
+
+    _atomic_write_json(path, signal.as_dict())
+
+
+MCP_LAYER_ID = "mcp"
+MCP_MODEL_DEFAULT = "mcp boundary / finance.categorize"
+MCP_NOTE_DEFAULT = "Apple FM on-device finance classifier local only"
+ISOLATION_LABEL = "DEV→DEV / PROD→PROD"
+
+
+def server_env_short() -> str:
+    """Return this box's stack as the short env label (dev or prod)."""
+
+    raw = os.environ.get(
+        "OPENCLAW_AI_INTELLIGENCE_ENVIRONMENT", "development"
+    )
+    normalized = raw.strip().lower()
+    if normalized in {"production", "prod"}:
+        return "prod"
+    return "dev"
+
+
+def build_mcp_layer_signal(
+    *,
+    model: str = MCP_MODEL_DEFAULT,
+    note: str = MCP_NOTE_DEFAULT,
+    ok: bool = True,
+    latency_ms: int = 0,
+    request_id: str = "-",
+    server_env: str | None = None,
+    observed_at: str | None = None,
+) -> dict[str, Any]:
+    """Build the MCP boundary layer record for the signal file.
+
+    The boundary is its own viz layer: requests served through MCP are
+    recorded as mcp with the boundary operation as the model, so the
+    visualizer glow can move there when finance.categorize runs.
+    """
+
+    return {
+        "layer": MCP_LAYER_ID,
+        "model": model,
+        "tps": "-",
+        "note": note,
+        "server_env": server_env or server_env_short(),
+        "isolation": ISOLATION_LABEL,
+        "ok": ok,
+        "latency_ms": latency_ms,
+        "request_id": request_id,
+        "observed_at": observed_at
+        or datetime.now(timezone.utc).isoformat(),
+    }
+
+
+def write_mcp_layer_signal(
+    path: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Build and atomically write the MCP boundary layer record."""
+
+    payload = build_mcp_layer_signal(**kwargs)
+    _atomic_write_json(path, payload)
+    return payload

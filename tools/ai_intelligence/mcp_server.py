@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any, Callable
 
 from mcp.server import MCPServer
 
 from tools.ai_intelligence.execution_engine import build_execution_engine_from_environment
+from tools.ai_intelligence.layer_signal import write_mcp_layer_signal
 from tools.ai_intelligence.mcp_boundary import (
     parse_mcp_execution_request,
     require_dev_mcp_environment,
 )
 from tools.ai_intelligence.routing_models import RoutingRequest
+from tools.ai_intelligence.telemetry import warn_telemetry_failure
 
 
 def serialize_mcp_result(result: Any) -> dict[str, Any]:
@@ -62,7 +65,30 @@ def execute_mcp_request(
         system_prompt=request.system_prompt,
         timeout_seconds=request.timeout_seconds,
     )
+    record_mcp_layer_signal(request.component_id, result)
     return serialize_mcp_result(result)
+
+
+def record_mcp_layer_signal(component_id: str, result: Any) -> None:
+    """Record the MCP boundary layer so the visualizer glow can move.
+
+    The signal must never fail the request it observes.
+    """
+
+    try:
+        write_mcp_layer_signal(
+            os.environ.get(
+                "OPENCLAW_LAYER_SIGNAL_PATH", "/tmp/layer-signal.json"
+            ),
+            model=f"mcp boundary / {component_id}",
+            ok=bool(result.succeeded),
+            latency_ms=sum(
+                attempt.duration_ms for attempt in result.attempts
+            ),
+            request_id=result.request_id,
+        )
+    except Exception as exc:  # noqa: BLE001 - signal must not fail requests
+        warn_telemetry_failure(exc)
 
 
 def create_mcp_server(

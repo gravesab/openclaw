@@ -7,6 +7,7 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest.mock import patch
 
 from tools.ai_intelligence.execution_models import (
     AttemptStatus,
@@ -18,8 +19,11 @@ from tools.ai_intelligence.layer_signal import (
     ActiveLayerSignal,
     LayerSignalBus,
     build_layer_signal,
+    build_mcp_layer_signal,
+    server_env_short,
     tokens_per_second,
     write_layer_signal,
+    write_mcp_layer_signal,
 )
 from tools.ai_intelligence.routing_models import (
     AssignmentType,
@@ -300,6 +304,51 @@ class WriteLayerSignalTests(unittest.TestCase):
         self.assertEqual(loaded["layer"], "llama.cpp")
         self.assertEqual(loaded["tokens_per_sec"], 40.0)
         self.assertEqual(leftovers, [])
+
+
+class McpLayerSignalTests(unittest.TestCase):
+    def test_default_record_matches_viz_shape(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"OPENCLAW_AI_INTELLIGENCE_ENVIRONMENT": "development"},
+        ):
+            payload = build_mcp_layer_signal()
+        self.assertEqual(payload["layer"], "mcp")
+        self.assertEqual(
+            payload["model"], "mcp boundary / finance.categorize"
+        )
+        self.assertEqual(payload["tps"], "-")
+        self.assertEqual(
+            payload["note"],
+            "Apple FM on-device finance classifier local only",
+        )
+        self.assertEqual(payload["server_env"], "dev")
+        self.assertEqual(payload["isolation"], "DEV→DEV / PROD→PROD")
+
+    def test_server_env_short_mapping(self) -> None:
+        with patch.dict(
+            "os.environ",
+            {"OPENCLAW_AI_INTELLIGENCE_ENVIRONMENT": "production"},
+        ):
+            self.assertEqual(server_env_short(), "prod")
+        with patch.dict(
+            "os.environ",
+            {"OPENCLAW_AI_INTELLIGENCE_ENVIRONMENT": "development"},
+        ):
+            self.assertEqual(server_env_short(), "dev")
+
+    def test_write_roundtrip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "layer-signal.json")
+            returned = write_mcp_layer_signal(
+                path, model="mcp boundary / ranchbrain", ok=True
+            )
+            loaded = json.loads(Path(path).read_text("utf-8"))
+        self.assertEqual(returned, loaded)
+        self.assertEqual(loaded["layer"], "mcp")
+        self.assertEqual(
+            loaded["model"], "mcp boundary / ranchbrain"
+        )
 
 
 if __name__ == "__main__":

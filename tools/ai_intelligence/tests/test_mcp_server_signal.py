@@ -81,6 +81,32 @@ class RecordMcpLayerSignalTests(unittest.TestCase):
         self.assertEqual(loaded["model"], "mcp boundary / ranchbrain")
         self.assertFalse(loaded["ok"])
 
+    def test_tool_names_known_operations(self) -> None:
+        for component_id in ("finance.categorize", "livestock.get"):
+            with tempfile.TemporaryDirectory() as tmp:
+                path = str(Path(tmp) / "layer-signal.json")
+                with patch.dict(
+                    "os.environ",
+                    {"OPENCLAW_LAYER_SIGNAL_PATH": path},
+                ):
+                    record_mcp_layer_signal(
+                        component_id, stub_result()
+                    )
+                loaded = json.loads(Path(path).read_text("utf-8"))
+
+            self.assertEqual(loaded["tool"], component_id)
+
+    def test_tool_omitted_for_other_components(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            path = str(Path(tmp) / "layer-signal.json")
+            with patch.dict(
+                "os.environ", {"OPENCLAW_LAYER_SIGNAL_PATH": path}
+            ):
+                record_mcp_layer_signal("ranchbrain", stub_result())
+            loaded = json.loads(Path(path).read_text("utf-8"))
+
+        self.assertNotIn("tool", loaded)
+
     def test_write_failure_never_raises(self) -> None:
         with patch(
             "tools.ai_intelligence.mcp_server.write_mcp_layer_signal",

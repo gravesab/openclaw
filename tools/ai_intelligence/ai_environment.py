@@ -83,6 +83,33 @@ def blocked_hosts(env: AIStackEnv) -> frozenset[str]:
     raise AIEnvironmentError(f"Unsupported stack environment: {env}")
 
 
+def is_host_allowed(hostname: str, env: AIStackEnv) -> bool:
+    """Return whether the stack may reach a host (no scheme needed).
+
+    Shared by URL endpoints and host:port stores (vector Postgres,
+    tasks API) so one blocklist decides everywhere.
+    """
+
+    host = (hostname or "").lower()
+    if not host:
+        return False
+    if host in blocked_hosts(env):
+        return False
+    if host in CLOUD_HOSTS:
+        return True
+    if host in _LOOPBACK_HOSTS:
+        return True
+    if host.endswith(".local"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return (
+        ip.is_loopback or ip.is_private or ip in _TAILSCALE_NETWORK
+    )
+
+
 def is_endpoint_allowed(url: str, env: AIStackEnv) -> bool:
     """Return whether the stack may open an AI endpoint URL."""
 
@@ -90,26 +117,13 @@ def is_endpoint_allowed(url: str, env: AIStackEnv) -> bool:
         parsed = urlparse(url)
     except ValueError:
         return False
+    if parsed.scheme == "file":
+        # Handbook file paths: local disk only (empty or localhost
+        # host) can never cross stacks; remote file hosts stay out.
+        return (parsed.hostname or "").lower() in {"", "localhost"}
     if parsed.scheme not in {"http", "https"}:
         return False
-    hostname = (parsed.hostname or "").lower()
-    if not hostname:
-        return False
-    if hostname in blocked_hosts(env):
-        return False
-    if hostname in CLOUD_HOSTS:
-        return True
-    if hostname in _LOOPBACK_HOSTS:
-        return True
-    if hostname.endswith(".local"):
-        return True
-    try:
-        ip = ipaddress.ip_address(hostname)
-    except ValueError:
-        return False
-    return (
-        ip.is_loopback or ip.is_private or ip in _TAILSCALE_NETWORK
-    )
+    return is_host_allowed(parsed.hostname or "", env)
 
 
 def assert_endpoint_allowed(url: str, env: AIStackEnv) -> None:

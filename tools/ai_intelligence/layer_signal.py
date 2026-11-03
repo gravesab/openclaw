@@ -242,6 +242,18 @@ MCP_MODEL_DEFAULT = "mcp boundary / finance.categorize"
 MCP_NOTE_DEFAULT = "Apple FM on-device finance classifier local only"
 ISOLATION_LABEL = "DEV→DEV / PROD→PROD"
 
+# Ranch OS operations observable in the 3D trace. A boundary record
+# names its operation only when the served component is one of these.
+MCP_TOOLS = frozenset(
+    {
+        "file.parse",
+        "vector.ingest",
+        "tasks.create",
+        "finance.categorize",
+        "livestock.get",
+    }
+)
+
 
 def server_env_short() -> str:
     """Return this box's stack as the short env label (dev or prod)."""
@@ -264,20 +276,28 @@ def build_mcp_layer_signal(
     request_id: str = "-",
     server_env: str | None = None,
     observed_at: str | None = None,
+    tool: str | None = None,
+    chunks: int | None = None,
+    tasks_created: int | None = None,
+    app: str | None = None,
 ) -> dict[str, Any]:
     """Build the MCP boundary layer record for the signal file.
 
     The boundary is its own viz layer: requests served through MCP are
     recorded as mcp with the boundary operation as the model, so the
-    visualizer glow can move there when finance.categorize runs.
+    visualizer glow can move there when finance.categorize runs. Chain
+    fields (tool, chunks, tasks_created, app) ride along only when the
+    caller observed them; absent beats invented.
     """
 
-    return {
+    env_label = server_env or server_env_short()
+    payload: dict[str, Any] = {
         "layer": MCP_LAYER_ID,
         "model": model,
         "tps": "-",
         "note": note,
-        "server_env": server_env or server_env_short(),
+        "env": env_label,
+        "server_env": env_label,
         "isolation": ISOLATION_LABEL,
         "ok": ok,
         "latency_ms": latency_ms,
@@ -285,6 +305,15 @@ def build_mcp_layer_signal(
         "observed_at": observed_at
         or datetime.now(timezone.utc).isoformat(),
     }
+    if tool is not None:
+        payload["tool"] = tool
+    if chunks is not None:
+        payload["chunks"] = chunks
+    if tasks_created is not None:
+        payload["tasks_created"] = tasks_created
+    if app is not None:
+        payload["app"] = app
+    return payload
 
 
 def write_mcp_layer_signal(

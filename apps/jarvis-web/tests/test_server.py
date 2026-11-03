@@ -62,7 +62,7 @@ class LiveServerCase(unittest.TestCase):
 
 
 class SignalApiTests(LiveServerCase):
-    def test_missing_file_serves_fixture(self) -> None:
+    def test_missing_file_serves_handbook_fixture(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             missing = str(Path(tmp) / "nope.json")
             with patch.object(server, "SIGNAL_FILE", Path(missing)):
@@ -72,10 +72,36 @@ class SignalApiTests(LiveServerCase):
         payload = json.loads(body)
         self.assertEqual(status, 200)
         self.assertTrue(payload["fixture"])
-        self.assertIn("layer", payload)
-        self.assertIn("model", payload)
-        self.assertIn("tps", payload)
+        self.assertEqual(payload["layer"], "mcp")
+        self.assertEqual(
+            payload["model"], "mcp boundary / property.handbook.ingest"
+        )
+        self.assertEqual(payload["tool"], "tasks.create")
+        self.assertEqual(payload["chunks"], 127)
+        self.assertEqual(payload["tasks_created"], 12)
+        self.assertEqual(payload["app"], "property.handbook.ingest")
+        self.assertEqual(payload["tps"], "-")
+        self.assertIn("note", payload)
         self.assertEqual(payload["server_env"], OWN)
+
+    def test_adapter_adds_env_alias(self) -> None:
+        canonical = {
+            "layer": "ollama",
+            "model_id": "ollama-hermes3-8b",
+            "tokens_per_sec": None,
+            "latency_ms": 100,
+            "ok": True,
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "layer-signal.json"
+            path.write_text(json.dumps(canonical))
+            with patch.object(server, "SIGNAL_FILE", path):
+                _, _, body = self.get(f"/api/signal?env={OWN}")
+        payload = json.loads(body)
+        self.assertEqual(payload["env"], OWN)
+        self.assertEqual(payload["layer"], "llama")
+        self.assertEqual(payload["model"], "ollama-hermes3-8b")
+        self.assertIsNone(payload["tps"])
 
     def test_cross_env_refused(self) -> None:
         try:
@@ -252,6 +278,31 @@ class RootTests(LiveServerCase):
         self.assertEqual(status, 200)
         self.assertIn("text/html", ctype["content-type"])
         self.assertTrue(len(body) > 1000)
+
+
+class ArtifactTests(LiveServerCase):
+    def test_rotatable_alias_serves_live_page(self) -> None:
+        status, headers, body = self.get("/Jarvis-MCP-3D-Rotatable")
+        ctype = {k.lower(): v for k, v in headers.items()}
+        self.assertEqual(status, 200)
+        self.assertIn("text/html", ctype["content-type"])
+        self.assertIn("access-control-allow-origin", ctype)
+        expected = (
+            Path(server.WEBROOT) / "index-connected.html"
+        ).read_bytes()
+        self.assertEqual(body, expected)
+
+    def test_rotatable_missing_is_404(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(
+                server, "WEBROOT", Path(tmp)
+            ):
+                try:
+                    self.get("/Jarvis-MCP-3D-Rotatable")
+                except HTTPError as exc:
+                    self.assertEqual(exc.code, 404)
+                else:
+                    self.fail("missing artifact was served")
 
 
 if __name__ == "__main__":

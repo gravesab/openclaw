@@ -8,7 +8,10 @@ from typing import Any, Callable
 from mcp.server import MCPServer
 
 from tools.ai_intelligence.execution_engine import build_execution_engine_from_environment
-from tools.ai_intelligence.layer_signal import write_mcp_layer_signal
+from tools.ai_intelligence.layer_signal import (
+    MCP_TOOLS,
+    write_mcp_layer_signal,
+)
 from tools.ai_intelligence.mcp_boundary import (
     parse_mcp_execution_request,
     require_dev_mcp_environment,
@@ -81,6 +84,9 @@ def record_mcp_layer_signal(component_id: str, result: Any) -> None:
                 "OPENCLAW_LAYER_SIGNAL_PATH", "/tmp/layer-signal.json"
             ),
             model=f"mcp boundary / {component_id}",
+            tool=(
+                component_id if component_id in MCP_TOOLS else None
+            ),
             ok=bool(result.succeeded),
             latency_ms=sum(
                 attempt.duration_ms for attempt in result.attempts

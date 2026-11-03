@@ -11,6 +11,7 @@ from tools.ai_intelligence.ai_environment import (
     assert_endpoint_allowed,
     blocked_hosts,
     is_endpoint_allowed,
+    is_host_allowed,
     stack_env_from_env,
 )
 
@@ -132,6 +133,84 @@ class EndpointMatrixTests(unittest.TestCase):
             )
             self.assertFalse(
                 is_endpoint_allowed("notaurl", env)
+            )
+
+
+class ChainEndpointTests(unittest.TestCase):
+    """Ranch OS chain stores stay reachable on their own stack."""
+
+    def test_tasks_api_per_stack(self) -> None:
+        self.assertTrue(
+            is_endpoint_allowed(
+                "http://100.85.188.74:5062/tasks",
+                AIStackEnv.DEVELOPMENT,
+            )
+        )
+        self.assertTrue(
+            is_endpoint_allowed(
+                "http://100.85.36.72:5062/tasks",
+                AIStackEnv.PRODUCTION,
+            )
+        )
+        self.assertFalse(
+            is_endpoint_allowed(
+                "http://100.85.36.72:5062/tasks",
+                AIStackEnv.DEVELOPMENT,
+            )
+        )
+
+    def test_viz_signal_per_stack(self) -> None:
+        self.assertTrue(
+            is_endpoint_allowed(
+                "http://100.85.188.74:8080/api/signal",
+                AIStackEnv.DEVELOPMENT,
+            )
+        )
+        self.assertTrue(
+            is_endpoint_allowed(
+                "http://100.85.36.72:8080/api/signal",
+                AIStackEnv.PRODUCTION,
+            )
+        )
+        self.assertFalse(
+            is_endpoint_allowed(
+                "http://100.85.188.74:8080/api/signal",
+                AIStackEnv.PRODUCTION,
+            )
+        )
+
+    def test_vector_stores_share_host_policy(self) -> None:
+        for env in AIStackEnv:
+            self.assertTrue(is_host_allowed("127.0.0.1", env))
+            self.assertTrue(
+                is_endpoint_allowed(
+                    "http://192.168.50.117:11434/api/embeddings",
+                    env,
+                )
+            )
+        self.assertTrue(
+            is_host_allowed("100.85.188.74", AIStackEnv.DEVELOPMENT)
+        )
+        self.assertFalse(
+            is_host_allowed("100.85.36.72", AIStackEnv.DEVELOPMENT)
+        )
+
+    def test_handbook_file_paths_stay_local(self) -> None:
+        for env in AIStackEnv:
+            self.assertTrue(
+                is_endpoint_allowed(
+                    "file:///ranchbrain/manuals/handbook.pdf", env
+                )
+            )
+            self.assertTrue(
+                is_endpoint_allowed(
+                    "file://localhost/manuals/handbook.pdf", env
+                )
+            )
+            self.assertFalse(
+                is_endpoint_allowed(
+                    "file://otherhost/manuals/handbook.pdf", env
+                )
             )
 
 

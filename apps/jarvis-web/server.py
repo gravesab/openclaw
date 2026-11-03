@@ -181,29 +181,29 @@ def adapt_signal(data: dict) -> dict:
     layer = out.get("layer")
     if isinstance(layer, str):
         out["layer"] = LAYER_IDS.get(layer, layer)
+    out["env"] = OWN_ENV
     out["server_env"] = OWN_ENV
     out["isolation"] = ISOLATION_LABEL
     return out
 
 
 def fixture_signal() -> dict:
-    """Return the demo payload served when no live signal file exists."""
+    """Return the handbook-ingest example served with no live file."""
 
     return {
         "env": OWN_ENV,
-        "layer": "llama",
-        "latency_ms": 51,
-        "tps": 24,
-        "model": "llama-3.1-8b-instruct",
-        "runtime": "llama.cpp",
-        "vram": "5.6 GB",
-        "bus": "openclaw bus",
-        "timestamp": "dev-fixture",
-        "fixture": True,
+        "layer": "mcp",
+        "model": "mcp boundary / property.handbook.ingest",
+        "tool": "tasks.create",
+        "chunks": 127,
+        "tasks_created": 12,
+        "app": "property.handbook.ingest",
+        "tps": "-",
         "note": (
-            "No live signal file yet — run the engine or MCP path to "
-            "get live data. Showing fixture."
+            "No live signal file yet — showing the handbook ingest "
+            "example. Run the engine or MCP path for live data."
         ),
+        "fixture": True,
         "server_env": OWN_ENV,
         "isolation": ISOLATION_LABEL,
     }
@@ -348,6 +348,22 @@ class Handler(SimpleHTTPRequestHandler):
             self.send_header("Content-Type", ctype)
             self.end_headers()
             self.wfile.write(target.read_bytes())
+            return
+
+        if parsed.path == "/Jarvis-MCP-3D-Rotatable":
+            # Stable URL for the 3D rotatable artifact (live page).
+            target = WEBROOT / "index-connected.html"
+            if not target.is_file():
+                self._send_json(
+                    404, {"error": "3D artifact not deployed yet"}
+                )
+                return
+            body = target.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
             return
 
         if parsed.path == "/":

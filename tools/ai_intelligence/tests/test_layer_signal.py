@@ -350,6 +350,25 @@ class McpLayerSignalTests(unittest.TestCase):
             loaded["model"], "mcp boundary / ranchbrain"
         )
 
+    def test_chain_fields_ride_along(self) -> None:
+        payload = build_mcp_layer_signal(
+            model="mcp boundary / property.handbook.ingest",
+            tool="tasks.create",
+            chunks=127,
+            tasks_created=12,
+            app="property.handbook.ingest",
+        )
+        self.assertEqual(payload["tool"], "tasks.create")
+        self.assertEqual(payload["chunks"], 127)
+        self.assertEqual(payload["tasks_created"], 12)
+        self.assertEqual(payload["app"], "property.handbook.ingest")
+        self.assertEqual(payload["env"], payload["server_env"])
+
+    def test_chain_fields_omitted_when_unknown(self) -> None:
+        payload = build_mcp_layer_signal()
+        for key in ("tool", "chunks", "tasks_created", "app"):
+            self.assertNotIn(key, payload)
+
 
 if __name__ == "__main__":
     unittest.main()

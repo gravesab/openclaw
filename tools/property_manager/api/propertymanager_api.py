@@ -21,8 +21,14 @@ from mapping_proposals import register_mapping_routes
 from maintenance_proposals import register_maintenance_proposal_routes
 from work_requests import register_work_request_routes
 from handbook_api import register_handbook_routes
+from breachsense import quarantine_response
 
 app = Flask(__name__)
+
+
+@app.before_request
+def reject_when_quarantined():
+    return quarantine_response("propertymanager")
 register_maintenance_proposal_routes(app)
 register_work_request_routes(app)
 register_handbook_routes(app)
@@ -1256,4 +1262,4 @@ if __name__ == "__main__":
     }:
         sys.exit(2)
     port = int(os.environ.get("PROPERTYMANAGER_API_PORT", "5062"))
-    app.run(host="0.0.0.0", port=port, debug=False, use_reloader=False)
+    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)

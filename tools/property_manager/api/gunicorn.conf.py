@@ -24,7 +24,7 @@ _PID_DIR = Path(os.environ.get("PROPERTYMANAGER_PID_DIR", "/tmp/pm-dev"))
 _PID_DIR.mkdir(parents=True, exist_ok=True)
 
 _port = os.environ.get("PROPERTYMANAGER_API_PORT", "5062").strip() or "5062"
-bind = os.environ.get("PROPERTYMANAGER_API_BIND", f"0.0.0.0:{_port}")
+bind = os.environ.get("PROPERTYMANAGER_API_BIND", f"127.0.0.1:{_port}")
 
 workers = int(os.environ.get("PROPERTYMANAGER_API_WORKERS", "2"))
 worker_class = "sync"

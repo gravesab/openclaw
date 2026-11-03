@@ -1,0 +1,22 @@
+# DEV-only isolation rules. Sentinel loads this file. It does not apply code patches.
+- type: tg.secret_fail
+  count: 5
+  window_seconds: 60
+  action: isolate
+- type: chat.injection
+  score_gte: 0.8
+  action: isolate
+- type: router.egress_blocked
+  action: isolate
+- type: mcp.dev_bypass_attempt
+  action: isolate
+- type: prop.auth_disabled_prod
+  action: isolate
+- type: prop.pin_fail
+  count: 3
+  window_seconds: 300
+  action: isolate
+- type: prop.pin_bruteforce
+  count: 3
+  window_seconds: 300
+  action: isolate

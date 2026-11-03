@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 from time import perf_counter
 from typing import Any
 from urllib.error import HTTPError, URLError
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from tools.ai_intelligence.execution_models import (
@@ -27,6 +29,26 @@ from tools.ai_intelligence.provider import (
 )
 
 
+def _notify_sentinel(event: dict) -> None:
+    if os.environ.get("RANCH_SENTINEL_ENABLED", "0") != "1":
+        return
+    url = os.environ.get("RANCH_SENTINEL_URL", "http://127.0.0.1:8001/sense")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return
+    outgoing = Request(
+        url,
+        data=json.dumps(event).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urlopen(outgoing, timeout=0.5):
+            return
+    except (OSError, URLError, TimeoutError):
+        return
+
+
 class OllamaProvider:
     """Execute model requests through Ollama's HTTP API."""
 
@@ -34,7 +56,18 @@ class OllamaProvider:
         self,
         config: OllamaConfig | None = None,
     ) -> None:
-        self._config = config or OllamaConfig.from_env()
+        try:
+            self._config = config or OllamaConfig.from_env()
+        except OllamaConfigurationError as exc:
+            message = str(exc)
+            if "not allowed" in message or "egress" in message.lower():
+                _notify_sentinel({
+                    "type": "router.egress_blocked",
+                    "service": "ollama",
+                    "score": 1.0,
+                    "payload": {"reason": message[:200]},
+                })
+            raise
 
     @property
     def name(self) -> str:

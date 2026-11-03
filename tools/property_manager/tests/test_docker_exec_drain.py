@@ -118,6 +118,7 @@ class DockerExecDrainTests(unittest.TestCase):
     def test_slow_db_route_disabled_without_env(self) -> None:
         env = {
             "PROPERTYMANAGER_AUTH_DISABLED": "1",
+            "ENVIRONMENT": "development",
             "PROPERTYMANAGER_DB_VIA_DOCKER": "1",
         }
         with mock.patch.dict(os.environ, env, clear=False):

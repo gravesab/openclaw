@@ -1759,7 +1759,11 @@ class IntegrationSafetyTests(unittest.TestCase):
             sys.path.insert(0, str(API_DIR))
             with tempfile.TemporaryDirectory(prefix="pm-import-") as temp, mock.patch.dict(
                 os.environ,
-                {"PROPERTYMANAGER_DB_ENV_FILE": str(Path(temp) / "missing.env"), "PROPERTYMANAGER_AUTH_DISABLED": "1"},
+                {
+                    "PROPERTYMANAGER_DB_ENV_FILE": str(Path(temp) / "missing.env"),
+                    "PROPERTYMANAGER_AUTH_DISABLED": "1",
+                    "ENVIRONMENT": "development",
+                },
                 clear=False,
             ), mock.patch.object(authority, "main", dangerous), mock.patch.object(
                 authority, "audit_canonical_migration_files", dangerous

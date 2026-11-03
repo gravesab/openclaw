@@ -101,7 +101,7 @@ import html as html_module
 import matplotlib
 import html
 import markdown
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from werkzeug.utils import secure_filename
 from pypdf import PdfReader
 
@@ -189,17 +189,79 @@ AI_INTELLIGENCE_PYTHON = (
 
 
 
-def run_command(cmd, timeout=20):
+def run_command(cmd, timeout=20, env=None):
+    if not isinstance(cmd, list) or not all(isinstance(part, str) and part for part in cmd):
+        return "command refused"
+    run_env = env
+    if cmd[:2] == ["systemctl", "--user"]:
+        run_env = os.environ.copy()
+        run_env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
     try:
         return subprocess.check_output(
             cmd,
-            shell=True,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            env=run_env,
         ).strip()
     except Exception as e:
         return str(e)
+
+
+def _container_health(name):
+    names = run_command(["docker", "ps", "--format", "{{.Names}}"])
+    return "healthy" if any(name in line for line in names.splitlines()) else "absent"
+
+
+def _ollama_health():
+    parsed = urlparse(str(OLLAMA_HOST or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return "offline"
+    try:
+        response = requests.get(f"{parsed.scheme}://{parsed.netloc}/api/tags", timeout=5)
+        return "ok" if response.ok else "offline"
+    except Exception:
+        return "offline"
+
+
+def _resource_lines():
+    cpu = "unknown"
+    try:
+        values = [int(part) for part in Path("/proc/stat").read_text().split()[1:8]]
+        total = sum(values)
+        idle = values[3] + values[4]
+        cpu = f"{(100 * (total - idle) / total):.1f}" if total else "0"
+    except Exception as exc:
+        cpu = str(exc)
+    ram = "unknown"
+    try:
+        info = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, rest = line.split(":", 1)
+            info[key] = int(rest.split()[0])
+        total_kb = info["MemTotal"]
+        used_kb = total_kb - info.get("MemAvailable", info.get("MemFree", 0))
+        ram = f"{used_kb / 1048576:.1f}Gi / {total_kb / 1048576:.1f}Gi"
+    except Exception as exc:
+        ram = str(exc)
+    disk = "unknown"
+    try:
+        usage = shutil.disk_usage("/")
+        pct = (100 * usage.used / usage.total) if usage.total else 0
+        disk = f"{usage.used / 1024**3:.1f}G / {usage.total / 1024**3:.1f}G ({pct:.0f}%)"
+    except Exception as exc:
+        disk = str(exc)
+    try:
+        out = subprocess.check_output(
+            ["docker", "ps", "-q"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        docker = str(sum(1 for line in out.splitlines() if line.strip()))
+    except Exception as exc:
+        docker = str(exc)
+    return cpu, ram, disk, docker
 
 
 def get_disk_info(path, label):
@@ -272,9 +334,38 @@ def get_disk_info(path, label):
 
 
 def get_remote_external_storage_info():
+    remote_program = """
+import json, subprocess
+result = {"ok": False}
+try:
+    mount = subprocess.check_output(
+        ["findmnt", "-n", "-T", "/mnt/ai-storage", "-o", "TARGET,SOURCE,FSTYPE"],
+        text=True,
+    ).strip().split()
+    disk = subprocess.check_output(
+        ["df", "-P", "-h", "--", "/mnt/ai-storage"],
+        text=True,
+    ).strip().splitlines()[-1].split()
+    if len(mount) >= 3 and mount[0] == "/mnt/ai-storage" and len(disk) >= 6:
+        result = {
+            "ok": True,
+            "target": mount[0],
+            "source": mount[1],
+            "filesystem": mount[2],
+            "total": disk[1],
+            "used": disk[2],
+            "free": disk[3],
+            "pct": disk[4],
+        }
+except Exception:
+    result = {"ok": False}
+print(json.dumps(result))
+"""
+    encoded_program = base64.b64encode(remote_program.encode("utf-8")).decode("ascii")
     remote_command = (
-        "findmnt -n -T /mnt/ai-storage -o TARGET,SOURCE,FSTYPE && "
-        "df -P -h -- /mnt/ai-storage"
+        "python3 -c 'import base64;"
+        f'exec(base64.b64decode("{encoded_program}"))'
+        "'"
     )
     try:
         out = subprocess.check_output(
@@ -297,21 +388,15 @@ def get_remote_external_storage_info():
             timeout=10,
             stderr=subprocess.STDOUT,
         ).strip()
-        lines = out.splitlines()
-        if len(lines) < 3:
-            raise ValueError("remote storage probe returned incomplete data")
-
-        mount_fields = lines[0].split()
-        disk_fields = lines[-1].split()
-        if (
-            len(mount_fields) < 3
-            or mount_fields[0] != "/mnt/ai-storage"
-            or len(disk_fields) < 6
-        ):
+        payload = json.loads(out.splitlines()[-1])
+        if not payload.get("ok") or payload.get("target") != "/mnt/ai-storage":
             raise ValueError("remote storage is not mounted at the expected path")
 
-        total, used, free, pct = disk_fields[1:5]
-        pct_num = int(pct.replace("%", ""))
+        total = payload["total"]
+        used = payload["used"]
+        free = payload["free"]
+        pct = payload["pct"]
+        pct_num = int(str(pct).replace("%", ""))
         if pct_num >= 90:
             color, status = "#ef4444", "Critical"
         elif pct_num >= 80:
@@ -330,8 +415,8 @@ def get_remote_external_storage_info():
             "color": color,
             "status": status,
             "available": True,
-            "source": mount_fields[1],
-            "filesystem": mount_fields[2],
+            "source": payload["source"],
+            "filesystem": payload["filesystem"],
             "remote_host": INTELMINI_STORAGE_HOST,
         }
     except Exception:
@@ -354,7 +439,7 @@ def get_remote_external_storage_info():
 
 def get_external_storage_info():
     local_mount = run_command(
-        "findmnt -n -T /mnt/ai-storage -o TARGET",
+        ["findmnt", "-n", "-T", "/mnt/ai-storage", "-o", "TARGET"],
         timeout=5,
     )
     if local_mount == "/mnt/ai-storage":
@@ -367,13 +452,16 @@ def get_external_storage_info():
 
 def get_disk_used_percent(path):
     try:
+        target = Path(path)
+        if not target.is_absolute():
+            return None
         out = subprocess.check_output(
-            f"df -P {path} | awk 'NR==2 {{print $5}}'",
-            shell=True,
+            ["df", "-P", os.fspath(target)],
             text=True,
-            timeout=10
-        ).strip()
-        return float(out.replace("%", ""))
+            timeout=10,
+        )
+        capacity = out.splitlines()[1].split()[4]
+        return float(capacity.rstrip("%"))
     except Exception:
         return None
 
@@ -964,7 +1052,10 @@ def make_chart(title, rows, column_names, filename, ylabel):
 
 
 def check_service(name, command, scope):
-    result = run_command(command).strip().lower()
+    if isinstance(command, list):
+        result = run_command(command).strip().lower()
+    else:
+        result = str(command).strip().lower()
 
     if result in {"active", "running", "healthy", "pong", "ok"}:
         return (name, scope, "Connected", "#16a34a")
@@ -978,8 +1069,7 @@ def build_system_health():
     checks.append(
         check_service(
             "OpenClaw Gateway",
-            "XDG_RUNTIME_DIR=/run/user/$(id -u) "
-            "systemctl --user is-active openclaw-gateway.service",
+            ["systemctl", "--user", "is-active", "openclaw-gateway.service"],
             "User service",
         )
     )
@@ -987,7 +1077,7 @@ def build_system_health():
     checks.append(
         check_service(
             "OpenClaw Listener",
-            "systemctl is-active openclaw-listener.service",
+            ["systemctl", "is-active", "openclaw-listener.service"],
             "System service",
         )
     )
@@ -995,7 +1085,7 @@ def build_system_health():
     checks.append(
         check_service(
             "Docker",
-            "systemctl is-active docker",
+            ["systemctl", "is-active", "docker"],
             "System service",
         )
     )
@@ -1003,7 +1093,7 @@ def build_system_health():
     checks.append(
         check_service(
             "Redis",
-            "docker ps --format '{{.Names}}' | grep -q redis && echo healthy",
+            _container_health("redis"),
             "Container",
         )
     )
@@ -1011,7 +1101,7 @@ def build_system_health():
     checks.append(
         check_service(
             "PostgreSQL",
-            "docker ps --format '{{.Names}}' | grep -q postgres && echo healthy",
+            _container_health("postgres"),
             "Container",
         )
     )
@@ -1019,7 +1109,7 @@ def build_system_health():
     checks.append(
         check_service(
             "Home Assistant",
-            "docker ps --format '{{.Names}}' | grep -q homeassistant && echo healthy",
+            _container_health("homeassistant"),
             "Container",
         )
     )
@@ -1027,7 +1117,7 @@ def build_system_health():
     checks.append(
         check_service(
             "Scrypted",
-            "docker ps --format '{{.Names}}' | grep -q scrypted && echo healthy",
+            _container_health("scrypted"),
             "Container",
         )
     )
@@ -1035,7 +1125,7 @@ def build_system_health():
     checks.append(
         check_service(
             "Ollama API",
-            f"curl -fsS {OLLAMA_HOST}/api/tags >/dev/null && echo ok",
+            _ollama_health(),
             "HTTP endpoint",
         )
     )
@@ -1554,13 +1644,16 @@ except Exception as e:
     result["memory_error"] = str(e)
 
 try:
-    pids = subprocess.check_output("pgrep -f '[o]llama' || true", shell=True, text=True).strip().splitlines()
+    try:
+        pids = subprocess.check_output(["pgrep", "-f", "[o]llama"], text=True).strip().splitlines()
+    except subprocess.CalledProcessError:
+        pids = []
+    pids = [pid for pid in pids if pid.isdigit()]
     result["ollama_process"] = "Running" if pids else "Not running"
 
     if pids:
-        pid = pids[0]
-        cpu = subprocess.check_output(f"ps -p {pid} -o %cpu= | awk '{{print $1}}'", shell=True, text=True).strip()
-        result["ollama_cpu"] = cpu + "%"
+        cpu = subprocess.check_output(["ps", "-p", pids[0], "-o", "%cpu="], text=True).strip()
+        result["ollama_cpu"] = (cpu or "0") + "%"
     else:
         result["ollama_cpu"] = "0%"
 except Exception as e:
@@ -1569,7 +1662,7 @@ except Exception as e:
     result["process_error"] = str(e)
 
 try:
-    result["uptime"] = subprocess.check_output("uptime | sed 's/^ *//'", shell=True, text=True).strip()
+    result["uptime"] = subprocess.check_output(["uptime"], text=True).strip()
 except Exception:
     result["uptime"] = "unknown"
 
@@ -3139,7 +3232,7 @@ RANCHBRAIN_VAULT_TEXT_SUFFIXES = {".md", ".txt"}
 
 def ai_storage_is_local():
     local_mount = run_command(
-        "findmnt -n -T /mnt/ai-storage -o TARGET",
+        ["findmnt", "-n", "-T", "/mnt/ai-storage", "-o", "TARGET"],
         timeout=5,
     )
     return local_mount == "/mnt/ai-storage" and AI_STORAGE_ROOT.is_dir()
@@ -3523,8 +3616,15 @@ def pdf_upload_copy_remote(local_path, relative_path, expected_sha256):
     relative = pdf_library_validate_relative_path(relative_path)
     upload_token = uuid.uuid4().hex
     staging_path = PDF_REMOTE_STAGING_ROOT / f"{upload_token}.part"
+    staging_program = """
+import os
+os.makedirs("/mnt/ai-storage/.openclaw-upload-staging", exist_ok=True)
+"""
+    encoded_staging = base64.b64encode(staging_program.encode("utf-8")).decode("ascii")
     ai_storage_ssh(
-        "mkdir -p -- /mnt/ai-storage/.openclaw-upload-staging",
+        "python3 -c 'import base64;"
+        f'exec(base64.b64decode("{encoded_staging}"))'
+        "'",
         timeout=20,
     )
     remote_target = (
@@ -5309,12 +5409,27 @@ def backup_center_remote_latest(entry, warning_days):
 
 def backup_center_m4_time_machine():
     """Read Time Machine status from the M4 without changing its state."""
+    remote_program = """
+import json, subprocess
+
+def run(args):
+    completed = subprocess.run(args, capture_output=True, text=True)
+    text = ((completed.stdout or "") + (completed.stderr or "")).strip()
+    return {"code": completed.returncode, "text": text}
+
+hostname = subprocess.check_output(["hostname"], text=True).strip()
+print(json.dumps({
+    "hostname": hostname,
+    "status": run(["tmutil", "status"]),
+    "latest": run(["tmutil", "latestbackup"]),
+    "destination": run(["tmutil", "destinationinfo"]),
+}))
+"""
+    encoded_program = base64.b64encode(remote_program.encode("utf-8")).decode("ascii")
     remote_command = (
-        "hostname; tmutil status 2>&1; "
-        "printf '\\nOPENCLAW_LATEST_BACKUP\\n'; "
-        "tmutil latestbackup 2>&1; "
-        "printf '\\nOPENCLAW_DESTINATION\\n'; "
-        "tmutil destinationinfo 2>&1"
+        "python3 -c 'import base64;"
+        f'exec(base64.b64decode("{encoded_program}"))'
+        "'"
     )
     try:
         result = subprocess.run(
@@ -5343,12 +5458,14 @@ def backup_center_m4_time_machine():
                 (result.stderr or result.stdout).strip()
                 or "M4 Time Machine probe failed."
             )
-        output = result.stdout
-        latest_section = output.split(
-            "OPENCLAW_LATEST_BACKUP",
-            1,
-        )[1].split("OPENCLAW_DESTINATION", 1)[0].strip()
-        latest_path = latest_section.splitlines()[-1].strip()
+        payload = json.loads(result.stdout.strip().splitlines()[-1])
+        status_text = str((payload.get("status") or {}).get("text") or "")
+        latest_text = str((payload.get("latest") or {}).get("text") or "")
+        destination_text = str((payload.get("destination") or {}).get("text") or "")
+        hostname = str(payload.get("hostname") or "").strip()
+        output = "\n".join([hostname, status_text, latest_text, destination_text])
+        latest_lines = [line.strip() for line in latest_text.splitlines() if line.strip()]
+        latest_path = latest_lines[-1] if latest_lines else ""
         timestamp_match = re.search(
             r"/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})"
             r"\.backup",
@@ -5386,7 +5503,7 @@ def backup_center_m4_time_machine():
             status, label, color = "critical", "Stale", "#ef4444"
         content = "\n".join([
             f"Status: {label}",
-            f"Computer: {output.splitlines()[0].strip()}",
+            f"Computer: {hostname or output.splitlines()[0].strip()}",
             f"Destination: {destination}",
             f"Backup Running: {'yes' if running else 'no'}",
             f"Latest Backup: {latest_at.strftime('%Y-%m-%d %I:%M:%S %p')}",
@@ -7196,10 +7313,7 @@ Trend file checked:
 </div>
 """
 
-    cpu = run_command("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'")
-    ram = run_command("free -h | awk '/Mem:/ {print $3 \" / \" $2}'")
-    disk = run_command("df -h / | awk 'NR==2 {print $3 \" / \" $2 \" (\" $5 \")\"}'")
-    docker = run_command("docker ps -q | wc -l")
+    cpu, ram, disk, docker = _resource_lines()
 
     html += f"""
 <div class="panel">

@@ -321,6 +321,18 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
 ### P1-10. SimpleFIN has no design and no code
 - **Evidence:** No reference to SimpleFIN, Plaid, or FinanceKit anywhere in code or docs. The Master Spec §3.2 defers bank aggregation. The foundational design §Supported source plan wants per-institution read-only connectors. A SimpleFIN Access URL is a bearer credential.
 - **Done when:** A design doc covers SimpleFIN scope (read-only), credential storage (OS secret store, never repo or app preferences), sync cadence, dedup against CSV imports, a disconnect/repair UX, and threat-model tests (Spec §11). It goes through the same approval as P0-5 and stays sequenced after CSV import.
+- **Status (2026-11-05):** `docs/ranch-os/Ranch_OS_SimpleFIN_Connector_Design_v1.md` is drafted. Status: **Proposed, not approved**.
+  - Protocol and Bridge facts are verified from the SimpleFIN spec (`2.0.0-draft`) and the Bridge developer guide (sources cited):
+    - read-only;
+    - the Access URL embeds Basic credentials;
+    - at most 90 days per request;
+    - about 24 requests a day expected, and overuse disables the token;
+    - positive amounts are inflows;
+    - transaction IDs are unique within an account.
+  - The design is contract-neutral pending P0-5. It requires a Master Spec revision for §3.2, the new `simplefin` source type, and an exception to the §2.4 no-cloud-provider principle.
+  - It covers: the opt-in cloud exception, the server-only secret store with canary redaction tests, a claim-host allowlist with SSRF tests, a sync worker capped at 12 requests a day, staging into the Checkpoint 3 pipeline with no auto-commit, pending never totaled, America/Chicago dates, exact decimals, error and repair states, and the S0–S5 gated checkpoints.
+  - **UNKNOWN:** the upstream aggregator and data retention, pending support on the Bridge, and the revocation mechanism. The owner must review these before opt-in.
+  - 7 open decisions await the owner, §14.
 
 ### P1-11. App credentials stored in plain app preferences
 - **Evidence:** The PropertyManager iOS app keeps `apiKey` and `operatorPIN` in `@AppStorage`, which is UserDefaults (`apps/propertymanager-ios/Sources/PropertyStore.swift:36-39`). There is no Keychain use in `apps/propertymanager-ios/Sources`. Finance Spec §7.3 says secrets must never go in app preferences. The macOS app already does this correctly: `SecureCredentialStore.swift` stores credentials in the Keychain, and `PropertyManagerApp.swift:665-666` moves old values out of UserDefaults and deletes them. The tvOS app also reads its key from the Keychain.

@@ -175,11 +175,71 @@ class MutatingRouteAuthTests(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload.get("error"), "Category not found")
 
-    def test_reads_remain_unauthenticated(self) -> None:
-        with mock.patch.object(self.api.pm_db, "execute_json", return_value=[]):
-            response = self.client.get("/categories")
+
+
+ASSET_ID = "00000000-0000-0000-0000-000000000001"
+# Every PropertyManager read (GAP_ANALYSIS.md P0-3). This replaces the July 2026
+# "reads remain unauthenticated" contract: reads now need the API key or PIN.
+READ_ROUTES = (
+    ("GET", "/categories"),
+    ("GET", "/tasks"),
+    ("GET", f"/tasks/{ASSET_ID}"),
+    ("GET", "/v1/assets"),
+    ("GET", f"/v1/assets/{ASSET_ID}"),
+    ("GET", "/v1/assets/by-external-id/EXT-1"),
+    ("GET", "/v1/assets/by-qr/opaque-token"),
+    ("GET", f"/v1/assets/{ASSET_ID}/meter-readings"),
+    ("GET", "/v1/mapping-proposals"),
+    ("POST", "/v1/meter-readings/parse"),
+)
+
+
+class ReadAuthTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.api = _load_app()
+        cls.client = cls.api.app.test_client()
+        cls.auth = sys.modules["auth"]
+
+    def _request(self, method: str, path: str, headers: dict[str, str]):
+        db = self.api.pm_db
+        with mock.patch.object(db, "execute_json", return_value=[]) as many, \
+             mock.patch.object(db, "execute_one_json", return_value=None) as one:
+            if method == "POST":
+                response = self.client.post(path, json={"text": "hours 12"}, headers=headers)
+            else:
+                response = self.client.get(path, headers=headers)
+        return response, many.call_count + one.call_count
+
+    def test_reads_without_credentials_are_denied_before_any_query(self) -> None:
+        with mock.patch.object(self.auth, "OPERATOR_PIN", "configured-pin"):
+            for method, path in READ_ROUTES:
+                with self.subTest(route=f"{method} {path}"):
+                    response, queries = self._request(method, path, {})
+                    self.assertEqual(response.status_code, 401)
+                    self.assertEqual(queries, 0)
+
+    def test_reads_accept_api_key(self) -> None:
+        headers = {"Authorization": f"Bearer {TEST_API_KEY}"}
+        for method, path in READ_ROUTES:
+            with self.subTest(route=f"{method} {path}"):
+                response, _ = self._request(method, path, headers)
+                self.assertNotEqual(response.status_code, 401)
+
+    def test_reads_accept_operator_pin_and_reject_wrong_pin(self) -> None:
+        with mock.patch.object(self.auth, "OPERATOR_PIN", "configured-pin"):
+            for method, path in READ_ROUTES:
+                with self.subTest(route=f"{method} {path}"):
+                    good, _ = self._request(method, path, {"X-Operator-PIN": "configured-pin"})
+                    bad, bad_queries = self._request(method, path, {"X-Operator-PIN": "wrong-pin"})
+                    self.assertNotEqual(good.status_code, 401)
+                    self.assertEqual(bad.status_code, 401)
+                    self.assertEqual(bad_queries, 0)
+
+    def test_health_stays_unauthenticated(self) -> None:
+        with mock.patch.object(self.api, "_probe_postgres_and_schema", return_value=(True, True, True)):
+            response = self.client.get("/health")
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.get_json(), [])
 
 
 class OperatorPinAuthTests(unittest.TestCase):

@@ -51,5 +51,47 @@ class PmAssetPagePinTests(unittest.TestCase):
         self.assertIn("Authenticated", self._unlock(client, "configured-pin"))
 
 
+class PmAssetPageApiReadAuthTests(unittest.TestCase):
+    """PropertyManager reads require auth (P0-3); the QR page must send credentials."""
+
+    def _captured_get_headers(self):
+        captured = {}
+
+        class _Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *exc):
+                return False
+
+            def read(self):
+                return b"{}"
+
+        def fake_urlopen(req, timeout=None):
+            captured["method"] = req.get_method()
+            captured["headers"] = {k.lower(): v for k, v in req.header_items()}
+            return _Resp()
+
+        app = Flask(__name__)
+        app.secret_key = "test"
+        with app.test_request_context("/pm/asset/qr-1"), \
+             mock.patch.object(pm_asset_page.urllib.request, "urlopen", side_effect=fake_urlopen):
+            self.assertEqual(pm_asset_page._api_get("/v1/assets/by-qr/qr-1"), {})
+        return captured
+
+    def test_read_sends_api_key(self):
+        with mock.patch.object(pm_asset_page, "API_KEY", "dash-key"):
+            captured = self._captured_get_headers()
+        self.assertEqual(captured["method"], "GET")
+        self.assertEqual(captured["headers"].get("authorization"), "Bearer dash-key")
+
+    def test_read_without_key_or_unlock_sends_no_credentials(self):
+        with mock.patch.object(pm_asset_page, "API_KEY", ""), \
+             mock.patch.object(pm_asset_page, "OPERATOR_PIN", "configured-pin"):
+            captured = self._captured_get_headers()
+        self.assertNotIn("authorization", captured["headers"])
+        self.assertNotIn("x-operator-pin", captured["headers"])
+
+
 if __name__ == "__main__":
     unittest.main()

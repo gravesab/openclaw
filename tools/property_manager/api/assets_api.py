@@ -460,6 +460,7 @@ def _host_maps_for_rows(rows: list[dict]) -> tuple[dict[str, dict], dict[str, li
     return host_by_id, attachments_by_host
 
 
+@auth_required(allow_pin=True)
 def list_assets():
     rows = pm_db.execute_json(
         f"""
@@ -490,6 +491,7 @@ def list_assets():
     )
 
 
+@auth_required(allow_pin=True)
 def asset_detail(asset_id: str):
     row = fetch_asset_or_404(asset_id)
     if row is None:
@@ -497,6 +499,7 @@ def asset_detail(asset_id: str):
     return jsonify(row)
 
 
+@auth_required(allow_pin=True)
 def asset_by_external_id(external_id: str):
     row = pm_db.execute_one_json(
         f"""
@@ -512,6 +515,10 @@ def asset_by_external_id(external_id: str):
     return jsonify(enrich_asset(row))
 
 
+# QR tokens route, they do not authorize. Anonymous QR reads are allowed only if
+# the operator enables public read per asset class (PROPERTY_MANAGER_FOUNDATIONAL_
+# REQUIREMENTS "QR code security"); no such setting exists yet, so deny by default.
+@auth_required(allow_pin=True)
 def asset_by_qr(qr_token: str):
     row = pm_db.execute_one_json(
         f"""
@@ -753,6 +760,7 @@ def activate_meter(asset_id: str):
     return jsonify({"meter": updated, "asset": asset})
 
 
+@auth_required(allow_pin=True)
 def list_meter_readings(asset_id: str):
     if fetch_asset_or_404(asset_id) is None:
         return error_response("NOT_FOUND", "Asset not found", status=404)
@@ -1001,6 +1009,7 @@ def _select_meter_asset(text: str, assets: list[dict[str, Any]]) -> tuple[dict[s
     return best, best_score
 
 
+@auth_required(allow_pin=True)
 def parse_meter_reading():
     payload = request.get_json(silent=True) or {}
     text = str(payload.get("text") or "").strip()

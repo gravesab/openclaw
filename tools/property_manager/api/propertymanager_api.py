@@ -612,6 +612,7 @@ def handle_unexpected(exc):
 
 
 @app.get("/categories")
+@auth_required(allow_pin=True)
 def categories():
     rows = pm_db.execute_json(
         """
@@ -792,6 +793,7 @@ def delete_category(category_id: str):
 
 
 @app.get("/tasks")
+@auth_required(allow_pin=True)
 def tasks():
     rows = pm_db.execute_json(
         f"""
@@ -806,6 +808,7 @@ def tasks():
 
 
 @app.get("/tasks/<task_id>")
+@auth_required(allow_pin=True)
 def task_detail(task_id: str):
     row = pm_db.execute_one_json(
         f"""

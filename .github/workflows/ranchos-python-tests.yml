@@ -96,6 +96,11 @@ jobs:
         # Module-level test functions that unittest does not collect.
         run: python -m pytest -q -p no:cacheprovider tools/property_manager/tests/test_task_title.py
 
+      - name: Dashboard QR page (unittest)
+        if: success() || failure()
+        # The QR landing must send credentials now that PropertyManager reads require auth.
+        run: python -m unittest tools/dashboard/test_pm_asset_page.py
+
   postgres-proofs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30

@@ -90,6 +90,36 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
   - The test route is removed or compiled out.
   - The LAN relay is either replaced, for example with a tailnet-capable path or TLS plus per-device credentials, or recorded as an accepted finding with the owner's sign-off.
 
+#### P0-3 status: read auth (2026-11-05, uncommitted)
+
+- **Done:** all 10 PropertyManager reads now require the API key or the operator PIN (`@auth_required(allow_pin=True)`), and they return 401 before any query:
+  - `GET /categories`, `/tasks`, `/tasks/<id>`
+  - `/v1/assets`, `/v1/assets/<id>`, `/v1/assets/by-external-id/<id>`, `/v1/assets/by-qr/<token>`, `/v1/assets/<id>/meter-readings`
+  - `/v1/mapping-proposals`
+  - `POST /v1/meter-readings/parse`, which reads asset names
+
+  `/health` stays open. This reverses the July 2026 contract `test_reads_remain_unauthenticated` (`e5f6afdb966`), in line with `PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md` "QR code security": anonymous QR reads are allowed only if the operator enables public read per asset class, and no such setting exists.
+- **Tests:** `ReadAuthTests` in `tools/property_manager/tests/test_mutating_route_auth.py`. They fail on HEAD, where all 10 routes answered without credentials, and pass now. `PmAssetPageApiReadAuthTests` checks that the dashboard QR landing sends its key (`tools/dashboard/pm_asset_page.py:_api_get`). CI runs both.
+- **Client check, from source:**
+  - The iOS, macOS, and tvOS clients attach the key or PIN on every request.
+  - PIN-only iPhone setups keep working, because reads accept the PIN.
+  - The dashboard's PropertyManager calls already sent the key, except the QR landing (fixed).
+  - `list_equipment_tasks_missing_hour_trigger.py` and `propertymanager-mapping-proposals.py` send the key.
+  - `refresh_mac_cache_from_api.sh` now needs `PROPERTYMANAGER_API_TOKEN`.
+  - `daily-executive-briefing.sh` only reads `/health`.
+- **Already broken before this change:** `ranchbrain/src/ranchbrain/show_asset.py`, `tools/property_manager/propertymanager-meter.py`, and `tools/property_manager/generate_asset_qr.py` call unprefixed `/assets…` routes. Those routes exist only under `/v1`, so the calls return 404. `propertymanager-meter.py` also posts readings without credentials. Repair or retire these.
+- **Deploy notes:**
+  - The dashboard needs `PROPERTYMANAGER_API_KEY` set, or the QR landing shows nothing.
+  - The live script `test_phase2_meters.py::test_qr_read_anonymous` now fails by design.
+  - Not deployed; no running service was changed.
+- **Still open, owner decisions:**
+  - the default bind `0.0.0.0` (PROD may rely on it)
+  - the client-asserted `X-Operator-Identity` on writes
+  - the tvOS LAN relay (plain HTTP, static key)
+  - the env-gated `/v1/test/slow-db` route
+  - the auth details `/health` reveals
+  - a per-asset-class public QR read setting, if anonymous QR is wanted
+
 #### API-Exposure Audit Phase 0: DEV VM inventory (2026-11-05)
 
 - **Method:** read-only, as `openclaw-agent` without root. I could not map another user's sockets to processes, so I identified `gravesab` processes from filtered argv tokens: script, module, and `-L` forward specs only. I read one environment variable, an IP address. No probing, no changes, no PROD contact.

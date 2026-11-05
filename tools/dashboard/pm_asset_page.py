@@ -39,8 +39,10 @@ def _auth_headers(*, pin: str | None = None) -> dict[str, str]:
 
 def _api_get(path: str) -> dict | list | None:
     url = PROPERTYMANAGER_API.rstrip("/") + path
+    # PropertyManager reads require auth (P0-3); send the dashboard's credentials.
+    req = urllib.request.Request(url, headers=_auth_headers(), method="GET")
     try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return None

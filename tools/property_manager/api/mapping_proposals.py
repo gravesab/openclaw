@@ -50,6 +50,7 @@ def _proposal_row(proposal_id: str) -> dict | None:
     )
 
 
+@auth_required(allow_pin=True)
 def list_mapping_proposals():
     status = str(request.args.get("status") or "pending").strip().lower()
     if status not in {"pending", "approved", "rejected", "all"}:

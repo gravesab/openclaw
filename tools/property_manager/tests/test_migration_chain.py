@@ -33,6 +33,8 @@ MIGRATIONS = (
     "014_asset_placed_in_service_date.sql",
     "015_task_schedule_bypass.sql",
     "016_asset_host.sql",
+    "017_task_require_parent_asset.sql",
+    "018_asset_is_pseudo.sql",
 )
 PRE_012_MIGRATIONS = MIGRATIONS[: MIGRATIONS.index("012_dev_schema_forward_repair.sql")]
 REAPPLICABLE_MIGRATIONS = (
@@ -40,7 +42,7 @@ REAPPLICABLE_MIGRATIONS = (
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "016"
+EXPECTED_VERSION = MIGRATIONS[-1][:3]
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -277,12 +279,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                             (id, area, item, warning_days, critical_days, last_done, next_due, kind)
                            VALUES ('00000000-0000-0000-0000-000000000098', 'New', 'Work request', 0, 0, now(), now(), 'Work Request')"""
                     )
-        self.assertEqual(
-            applied,
-            ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015", "016"],
-        )
+        # MIGRATIONS is the pinned chain; discovered files must match it exactly (setUpClass).
+        self.assertEqual(applied, [filename[:3] for filename in MIGRATIONS])
         self.assertEqual(applied[-1], EXPECTED_VERSION)
-        self.assertEqual(self._extract_contract(), manifest.snapshots["016"].schema_contract)
+        self.assertEqual(self._extract_contract(), manifest.snapshots[EXPECTED_VERSION].schema_contract)
 
         # The 005/006/009 rollout contract explicitly describes these migrations as
         # idempotent for future hosts. Reapply only that promised subset.

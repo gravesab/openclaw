@@ -9,6 +9,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from flask import Flask
+
 API_DIR = Path(__file__).resolve().parents[1] / "api"
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
@@ -33,13 +35,18 @@ class ParseIsPseudoTests(unittest.TestCase):
 
 class RejectPseudoAssetTests(unittest.TestCase):
     def test_rejects_when_row_is_pseudo(self) -> None:
-        with mock.patch.object(
+        # validation_error() builds a Flask JSON response, so it needs an app context.
+        app = Flask(__name__)
+        with app.app_context(), mock.patch.object(
             assets_api.pm_db,
             "execute_one_json",
             return_value={"is_pseudo": True},
         ):
             response = assets_api.reject_if_pseudo_asset("asset-1")
-        self.assertIsNotNone(response)
+            self.assertIsNotNone(response)
+            body, status = response if isinstance(response, tuple) else (response, response.status_code)
+            self.assertEqual(status, 400)
+            self.assertEqual(body.get_json()["field"], "asset_id")
 
     def test_allows_real_assets(self) -> None:
         with mock.patch.object(

@@ -566,8 +566,9 @@ class ManifestFingerprintTests(AuthorityFixture):
         self.assertEqual(hashlib.sha256(encoded).hexdigest(), APPROVED_CONTRACT_HASH)
         tables = current["tables"]
         self.assertEqual(tuple(tables), APPROVED_TABLES)
-        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 260)
-        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 106)
+        # 018 adds assets.is_pseudo and assets_pseudo_root_check (017: 260 / 106).
+        self.assertEqual(sum(len(table["columns"]) for table in tables.values()), 261)
+        self.assertEqual(sum(len(table["constraints"]) for table in tables.values()), 107)
         self.assertEqual(sum(len(table["indexes"]) for table in tables.values()), 56)
         self.assertEqual(
             len(EXPECTED_SCHEMA_ORACLE["canonical_data"]["maintenance_categories"]["rows"]),
@@ -618,8 +619,9 @@ class ManifestFingerprintTests(AuthorityFixture):
         )
         contract = current["schema_contract"]
         self.assertEqual(tuple(contract["tables"]), APPROVED_TABLES)
-        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 260)
-        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 106)
+        # 018 adds assets.is_pseudo and assets_pseudo_root_check (017: 260 / 106).
+        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 261)
+        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 107)
         self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 56)
         migration_created_indexes = {
             "maintenance_task_parts_task_id_idx", "maintenance_task_photos_task_id_idx",
@@ -636,7 +638,10 @@ class ManifestFingerprintTests(AuthorityFixture):
             for index in table["indexes"]
         }
         self.assertTrue(migration_created_indexes <= all_indexes)
-        self.assertEqual(len(contract["canonical_data"]["maintenance_categories"]["rows"]), 8)
+        # Snapshot 016 (regenerated in #62) holds 5 canonical categories: Equipment,
+        # Grounds, Home, House, Property. 015 had 8 (incl. Hot Tub, Pool, Safety,
+        # Tractor). The contract hash above pins this content.
+        self.assertEqual(len(contract["canonical_data"]["maintenance_categories"]["rows"]), 5)
 
     def test_every_fingerprinted_property_is_required(self):
         base = self.metadata()

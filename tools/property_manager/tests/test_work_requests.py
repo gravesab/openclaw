@@ -28,9 +28,13 @@ def _load_app():
     }, clear=False):
         if str(API_DIR) not in sys.path:
             sys.path.insert(0, str(API_DIR))
-        for name in ("auth", "db", "errors", "decimal_utils", "meter_schedule", "assets_api",
-                     "mapping_proposals", "maintenance_proposals", "work_requests", "propertymanager_api"):
-            sys.modules.pop(name, None)
+        # Drop every module loaded from the API directory, not a fixed list: a
+        # stale module (task_schedule was missed once) keeps an old db binding
+        # that mocks do not patch, and its queries reach real docker exec.
+        for name, module in list(sys.modules.items()):
+            module_file = getattr(module, "__file__", None)
+            if module_file and Path(module_file).resolve().parent == API_DIR.resolve():
+                sys.modules.pop(name, None)
         import auth
         import propertymanager_api as api
         auth.AUTH_DISABLED = False
@@ -54,6 +58,17 @@ class WorkRequestTests(unittest.TestCase):
     def setUpClass(cls):
         cls.api = _load_app()
         cls.client = cls.api.app.test_client()
+        cls.work_requests = sys.modules["work_requests"]
+        cls.real_reject_if_pseudo_asset = staticmethod(cls.work_requests.reject_if_pseudo_asset)
+
+    def setUp(self):
+        # The pseudo-asset guard (migration 018) runs its own pm_db lookup. These
+        # contracts script every pm_db call, so stub the guard to "not pseudo"
+        # here; the pseudo-asset tests below exercise the real guard.
+        for module in (self.work_requests, self.api):
+            patcher = mock.patch.object(module, "reject_if_pseudo_asset", return_value=None)
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     @staticmethod
     def headers(*, review=False, idem="retry-1", forged="caller-controlled-display-name"):
@@ -77,8 +92,8 @@ class WorkRequestTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertEqual(body["schema_version"], "017")
-        self.assertEqual(body["schema_contract_status"], "migration_017_applied")
+        self.assertEqual(body["schema_version"], self.api.EXPECTED_SCHEMA_VERSION)
+        self.assertEqual(body["schema_contract_status"], f"migration_{self.api.EXPECTED_SCHEMA_VERSION}_applied")
         self.assertNotIn("attachments_root", body)
         self.assertNotIn("storage_path", body)
 
@@ -107,7 +122,7 @@ class WorkRequestTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         body = response.get_json()
         self.assertIsNone(body["schema_version"])
-        self.assertEqual(body["schema_contract_status"], "migration_017_not_verified")
+        self.assertEqual(body["schema_contract_status"], f"migration_{self.api.EXPECTED_SCHEMA_VERSION}_not_verified")
 
     def test_health_marker_is_read_only_and_parameterized(self):
         complete_objects = {
@@ -130,7 +145,28 @@ class WorkRequestTests(unittest.TestCase):
         marker_sql, marker_params = query.call_args_list[1].args
         self.assertIn("SELECT EXISTS", marker_sql)
         self.assertNotIn("INSERT", marker_sql)
-        self.assertEqual(marker_params, ("017",))
+        self.assertEqual(marker_params, (self.api.EXPECTED_SCHEMA_VERSION,))
+
+    def test_submission_rejects_pseudo_asset_before_any_write(self):
+        with mock.patch.object(self.work_requests, "reject_if_pseudo_asset", self.real_reject_if_pseudo_asset), \
+             mock.patch.object(self.api.pm_db, "execute_one_json", side_effect=[None, {"is_pseudo": True}]) as query, \
+             mock.patch.object(self.api.pm_db, "execute_top_level_one_json") as mutation, \
+             mock.patch.object(self.api.pm_db, "execute") as execute:
+            response = self.client.post("/v1/work-requests", json=self.payload(), headers=self.headers())
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.get_json()["field"], "asset_id")
+        self.assertEqual(query.call_count, 2)
+        mutation.assert_not_called()
+        execute.assert_not_called()
+
+    def test_submission_allows_real_asset_through_the_guard(self):
+        with mock.patch.object(self.work_requests, "reject_if_pseudo_asset", self.real_reject_if_pseudo_asset), \
+             mock.patch.object(self.api.pm_db, "execute_one_json",
+                               side_effect=[None, {"is_pseudo": False}, stored_request()]), \
+             mock.patch.object(self.api.pm_db, "execute_top_level_one_json", return_value={"id": "created"}) as mutation:
+            response = self.client.post("/v1/work-requests", json=self.payload(), headers=self.headers())
+        self.assertEqual(response.status_code, 201)
+        mutation.assert_called_once()
 
     def test_submission_requires_authentication_before_validation(self):
         response = self.client.post("/v1/work-requests", json=self.payload(), headers={"Idempotency-Key": "x"})
@@ -417,7 +453,8 @@ class WorkRequestTests(unittest.TestCase):
                 "id": "asset", "current_value": "0", "latest_reading_at": None, "meter_type": "none",
                 "unit": "", "meter_epoch": 1, "row_version": 1, "meter_activated_at": None,
             })
-        self.assertIn("kind <> 'Work Request' AND intake_state IS NULL", query.call_args.args[0])
+        # Compare with whitespace collapsed: the filter is a shared multi-line SQL fragment.
+        self.assertIn("kind <> 'Work Request' AND intake_state IS NULL", " ".join(query.call_args.args[0].split()))
 
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
@@ -483,11 +520,17 @@ class WorkRequestTests(unittest.TestCase):
         with mock.patch.object(
             self.api.pm_db,
             "execute_one_json",
-            side_effect=[{"last_done": "2026-01-01T00:00:00+00:00", "next_due": "2026-02-01T00:00:00+00:00"}, None],
+            # Active parent-asset lookup (migration 017), existing dates, then the
+            # post-upsert re-fetch that finds no row because the claim was refused.
+            side_effect=[{"name": "North fence"},
+                         {"last_done": "2026-01-01T00:00:00+00:00", "next_due": "2026-02-01T00:00:00+00:00"}, None],
         ), mock.patch.object(self.api.pm_db, "execute", return_value=0) as execute:
             response = self.client.post(
                 "/tasks",
-                json={"id": task_id, "kind": "Scheduled", "area": "North barn", "item": "Inspect fence"},
+                # asset_id is required since migration 017; without it the request
+                # stops at validation before reaching the work-request claim guard.
+                json={"id": task_id, "kind": "Scheduled", "area": "North barn", "item": "Inspect fence",
+                      "asset_id": "00000000-0000-0000-0000-000000000030"},
                 headers=self.headers(),
             )
         self.assertEqual(response.status_code, 409)

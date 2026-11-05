@@ -27,19 +27,13 @@ def _load_app():
     ):
         if str(API_DIR) not in sys.path:
             sys.path.insert(0, str(API_DIR))
-        for name in (
-            "auth",
-            "db",
-            "errors",
-            "decimal_utils",
-            "meter_schedule",
-            "assets_api",
-            "mapping_proposals",
-            "maintenance_proposals",
-            "work_requests",
-            "propertymanager_api",
-        ):
-            sys.modules.pop(name, None)
+        # Drop every module loaded from the API directory, not a fixed list: a
+        # stale module (task_schedule was missed once) keeps an old db binding
+        # that mocks do not patch, and its queries reach real docker exec.
+        for name, module in list(sys.modules.items()):
+            module_file = getattr(module, "__file__", None)
+            if module_file and Path(module_file).resolve().parent == API_DIR.resolve():
+                sys.modules.pop(name, None)
         import auth
         import propertymanager_api as api
 
@@ -355,11 +349,12 @@ class TaskCompletionTests(unittest.TestCase):
         with mock.patch.object(
             self.api.pm_db,
             "execute_json",
-            side_effect=[[], [], [{"asset_id": "asset-a", "current_value": "12"}]],
+            # parts, photos, meters (one query), then bypass events (#53).
+            side_effect=[[], [], [{"asset_id": "asset-a", "current_value": "12"}], []],
         ) as execute_json, mock.patch.object(self.api.ms, "fetch_meter_row") as per_asset:
             enriched = self.api.enrich_tasks(tasks)
 
-        self.assertEqual(execute_json.call_count, 3)
+        self.assertEqual(execute_json.call_count, 4)
         self.assertEqual(execute_json.call_args_list[2].args[1], ["asset-a", "asset-b"])
         per_asset.assert_not_called()
         self.assertEqual(len(enriched), 4)

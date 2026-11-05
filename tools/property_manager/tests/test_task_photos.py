@@ -31,12 +31,13 @@ def _load_app():
     ):
         if str(API_DIR) not in sys.path:
             sys.path.insert(0, str(API_DIR))
-        for name in (
-            "auth", "db", "errors", "decimal_utils", "meter_schedule", "assets_api",
-            "mapping_proposals", "maintenance_proposals", "work_requests", "handbook_api",
-            "propertymanager_api",
-        ):
-            sys.modules.pop(name, None)
+        # Drop every module loaded from the API directory, not a fixed list: a
+        # stale module (task_schedule was missed once) keeps an old db binding
+        # that mocks do not patch, and its queries reach real docker exec.
+        for name, module in list(sys.modules.items()):
+            module_file = getattr(module, "__file__", None)
+            if module_file and Path(module_file).resolve().parent == API_DIR.resolve():
+                sys.modules.pop(name, None)
         import auth
         import propertymanager_api as api
 
@@ -189,7 +190,8 @@ class TaskPhotoRouteTests(unittest.TestCase):
         with mock.patch.object(
             self.api.pm_db,
             "execute_json",
-            side_effect=[[], [{"id": "photo", "task_id": TASK_ID, "file_name": PHOTO_NAME, "created_at": "now"}]],
+            # parts, photos, then bypass events (#53); no asset, so no meter query.
+            side_effect=[[], [{"id": "photo", "task_id": TASK_ID, "file_name": PHOTO_NAME, "created_at": "now"}], []],
         ) as execute_json:
             enriched = self.api.enrich_tasks([task])
 

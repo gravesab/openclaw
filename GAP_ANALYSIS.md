@@ -187,6 +187,22 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
       - `test_task_completion` and `test_task_photos` make a real `docker exec` call, so they are not hermetic.
       - `test_asset_pseudo` raises "Working outside of application context".
   - The PropertyManager step will be **red** until these are fixed. I did not add an expected-failure list, because repo policy forbids silencing failures without approval.
+  - **Fixed (2026-11-05, uncommitted). The local unit job is now green: AI 165/165, RanchBrain 315/315, PropertyManager 255/255 under `unittest` plus 4/4 under pytest. Reverse order and per-module runs also pass, with 0 blocked infrastructure calls.**
+    - `test_work_requests`: the health tests compare against `EXPECTED_SCHEMA_VERSION` instead of a hardcoded `"017"`.
+      - `setUp` stubs the #62 pseudo-asset guard, which runs its own `pm_db` lookup. Two new tests exercise the real guard: a pseudo asset is rejected with 400 and no write, and a real asset passes through.
+      - The generic-upsert test sends the `asset_id` that 017 requires and scripts 017's active-asset lookup.
+      - The untriaged-request test compares SQL with whitespace collapsed.
+    - `test_migration_authority`: the 018 pins changed from 260 columns / 106 constraints to 261 / 107. I verified that 018 adds `assets.is_pseudo` and `assets_pseudo_root_check`. The canonical category count is 5 (was 8), matching the hash-pinned contract.
+      - **Owner review:** the 016 snapshot regenerated in #62 dropped the Hot Tub, Pool, Safety, and Tractor seed categories and added Home.
+    - `test_migration_chain`: the chain is extended to 017/018, with the version list and snapshot key derived from `MIGRATIONS`. The 5 mocked tests pass. The container run is CI-only and not yet proven.
+    - `test_task_completion` and `test_task_photos`: they now script the #53 bypass-events query.
+    - `test_work_requests`, `test_handbook_api`, `test_maintenance_proposals`, `test_task_bypass`, `test_task_completion`, `test_task_photos`: the hardcoded module-reload lists are replaced by "drop every module loaded from `api/`". The old lists missed `task_schedule`, which kept a stale `db` binding, so queries reached a real `docker exec`.
+    - `test_asset_pseudo`: it now runs inside a Flask app context and asserts 400 with `field: asset_id`.
+    - **Live scripts:** new `tools/property_manager/tests/conftest.py` makes pytest skip `test_meter_delta`, `test_phase1_meters`, `test_phase2_meters`, `test_restart_drain`, and `test_run_hours_trigger` unless `PROPERTYMANAGER_LIVE_INTEGRATION=1`. `test_meter_delta` is a fifth live script: it imports the live helpers. `test_task_title` (pytest-style, pure) had never run under `unittest`. CI now runs it with pytest.
+    - **Guard self-scan bug:** once committed, the guard's own allowlist and tests were tracked and matched its patterns, so the guard workflow would have failed. `tools/ranchos_guard/` is now excluded from its own scan, with a test.
+    - **Non-hermetic dashboard test:** `test_backup_center_uses_remote_inventory_and_safe_controls` did not patch `backup_center_m4_time_machine()`, so rendering ran a real read-only `ssh andrewgraves@192.168.50.117` (`tmutil status`). It is now patched.
+      - **Disclosure:** my earlier unstubbed runs of this file in this session attempted that SSH connection. This account has no M4 key (`openclaw_m4_metrics_ed25519` absent; `BatchMode` and `IdentitiesOnly` set), so it could not authenticate. The target was the M4 workstation, not PROD.
+    - **Still open:** the Livestock disposable-PG proofs raise `LiveProofBlocked` as an error, not a skip, when no Postgres is available. That is noise only; CI has the binaries.
   - **Hazard:** `test_phase1_meters.py`, `test_phase2_meters.py`, and `test_run_hours_trigger.py` are pytest-style module functions that call the live API at `127.0.0.1:5062`. `unittest` ignores them, but `pytest tools/property_manager` would run them against the live DEV API. They should move out of `tests/` or be gated behind an env var like `test_restart_drain.py`.
 
 ### P1-4. The model-router designs conflict, and the hybrid design's trust controls are missing

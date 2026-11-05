@@ -912,15 +912,32 @@ Kind          : Network
                 "percent_number": 10,
             },
         }
+        # Also stub the M4 Time Machine probe: unpatched, rendering ran a real
+        # ssh to the M4 workstation during tests.
+        m4_unavailable = {
+            "found": False,
+            "file": "M4 Time Machine live probe unavailable",
+            "content": "Could not read M4 Time Machine status: stubbed in test",
+            "values": {},
+            "status": "warning",
+            "status_label": "Remote Status Unavailable",
+            "status_color": "#facc15",
+        }
         with (
             mock.patch.object(
                 dashboard,
                 "backup_center_remote_probe",
                 return_value=snapshot,
             ),
+            mock.patch.object(
+                dashboard,
+                "backup_center_m4_time_machine",
+                return_value=m4_unavailable,
+            ) as m4_probe,
             mock.patch.object(dashboard.time, "time", return_value=now),
         ):
             rendered = dashboard.backup_recovery_center()
+        m4_probe.assert_called_once_with()
 
         self.assertIn("openclaw-checkpoint-current.tar.gz", rendered)
         self.assertIn("Mounted on Intel Mini", rendered)

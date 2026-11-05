@@ -100,6 +100,7 @@ class ScanTests(unittest.TestCase):
             self.write("CHANGELOG.txt", "intelmini\n"),
             self.write("bin/blob.dat", b"\0intelmini"),
             self.write("tools/ok.py", "path = 'log_from_intelmini.csv'\nhost = '100.85.36.720'\n"),
+            self.write("tools/ranchos_guard/fixtures.py", "HOST = 'intelmini'\n"),
         ]
         self.assertEqual(guard.scan(self.root, files, self.patterns), {})
 

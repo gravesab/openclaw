@@ -7,12 +7,14 @@ name: Ranch OS Python tests
 # - postgres-proofs: throwaway PostgreSQL clusters/containers only.
 #
 # Never run here (they target a live API/DB or restart services):
+#   tools/property_manager/tests/test_meter_delta.py
 #   tools/property_manager/tests/test_phase1_meters.py
 #   tools/property_manager/tests/test_phase2_meters.py
 #   tools/property_manager/tests/test_run_hours_trigger.py
 #   tools/property_manager/tests/test_restart_drain.py
 # They are pytest-style module functions; unittest does not collect them,
-# but pytest would, so PropertyManager tests must stay on unittest.
+# but pytest would; tools/property_manager/tests/conftest.py makes pytest skip
+# them unless PROPERTYMANAGER_LIVE_INTEGRATION=1.
 
 on:
   pull_request:
@@ -85,9 +87,14 @@ jobs:
         if: success() || failure()
         run: |
           modules=$(ls tools/property_manager/tests/test_*.py \
-            | grep -vE '/test_(phase1_meters|phase2_meters|run_hours_trigger|restart_drain|migration_chain|manual_package)\.py$' \
+            | grep -vE '/test_(meter_delta|phase1_meters|phase2_meters|run_hours_trigger|restart_drain|migration_chain|manual_package)\.py$' \
             | sed 's#/#.#g; s#\.py$##')
           python -m unittest $modules
+
+      - name: PropertyManager pytest-style unit tests
+        if: success() || failure()
+        # Module-level test functions that unittest does not collect.
+        run: python -m pytest -q -p no:cacheprovider tools/property_manager/tests/test_task_title.py
 
   postgres-proofs:
     runs-on: ubuntu-24.04

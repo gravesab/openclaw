@@ -24,7 +24,9 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ALLOWLIST_PATH = Path(__file__).resolve().with_name("prod_targets_allowlist.json")
-EXCLUDED_PREFIXES = ("docs/", "reports/", "changelog/")
+# The guard's own files define the PROD patterns and their test fixtures; scanning
+# them would make the guard fail on itself once they are tracked.
+EXCLUDED_PREFIXES = ("docs/", "reports/", "changelog/", "tools/ranchos_guard/")
 EXCLUDED_SUFFIXES = (".md",)
 VALID_STATUSES = frozenset({"intended", "review"})
 

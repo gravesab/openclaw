@@ -219,8 +219,17 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
     - D2 accepted: tenancy and FORCE RLS on every table.
     - D3 accepted: the Personal domain is blocked until a privacy policy is approved.
     - D5 accepted: Finance is a RanchOS module.
-    - D4 is open: the read-only check of 005's applied state needs approval.
-    - D6 is open.
+    - D4 approved: replace 005 in place. A read-only catalog check of the DEV Postgres container found no `ranchos.finance*` tables in any database. That also resolves the C7 numbering dependency.
+    - D6 approved: remove the superseded code and its tests in the same change that replaces 005.
+  - **Checkpoint 1 in progress (2026-11-05):**
+    - `migrations/005_finance_v1_foundation.sql` replaces the old 005 with the Spec tables, tenancy, FORCE RLS, append-only audit, and transfer pairing.
+    - New `ranchbrain/finance/` package: model, reporting, read contract, and pg read session.
+    - 77 new tests pass locally.
+    - The superseded double-entry code (15 files) is removed.
+    - **Not yet done:**
+      - the disposable-Postgres proof and the two-tenant RLS SQL. The migration SQL has never run against a real Postgres; its first CI run is the proof.
+      - redefining the double-entry write capabilities left in `tenancy.py`.
+    - **Owner review:** a refund in an expense category counts as income in §6.1 and also nets down its category in §6.2.
 
 ---
 

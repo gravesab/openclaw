@@ -1,6 +1,14 @@
 # Ranch Finance foundational design
 
-Status: DEV-only in-memory foundation complete; unapplied disposable persistence
+Status: **Superseded (owner ruling 2026-11-05).** `docs/ranch-os/Ranch_Finance_Master_Specification_v1.1.md`
+is the canonical Ranch Finance contract: single-entry signed amounts and the
+Personal / Ranch / Zero-G LLC domains. This double-entry design is retired as an
+implementation contract. Its tenancy, RLS, idempotency, and audit patterns
+remain useful reference for the Master Spec Checkpoint 1 migration. Its code and
+`005` SQL were never applied and stay in place until a separately approved
+cleanup. See `GAP_ANALYSIS.md` P0-5.
+
+Previous status: DEV-only in-memory foundation complete; unapplied disposable persistence
 SQL is `005_finance_persistence_foundation.sql`. This document authorizes no
 Production migration, account connection, credential storage, deployment, or
 money movement. A future livestock confirmation-challenges migration must use

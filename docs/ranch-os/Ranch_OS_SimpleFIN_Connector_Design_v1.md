@@ -17,7 +17,7 @@ The connector is a source of evidence, not an authority. PostgreSQL stays the on
 2. **Opt-in exception to local-first.** Master Spec §2.4 says "No cloud financial-data provider is required." SimpleFIN Bridge is a cloud intermediary, so this connector is **optional and off by default**. Each account is opted in separately by an administrator, and CSV import remains the complete fallback.
 3. **Human-confirmed commit.** Each sync produces a staged batch. Commit follows the Master Spec §7.2 mutation rules: authenticated actor, idempotency key, revision check, preview, explicit confirmation, and an atomic write with an audit record. Auto-staging is allowed; auto-commit is not.
 4. **The Access URL is a secret.** It embeds HTTP Basic credentials (protocol §Access URL). It never reaches logs, AI models, RanchBrain, client apps, app preferences, source control, or crash reports.
-5. **Contract-neutral until P0-5 is decided.** The repository holds two conflicting Finance contracts (GAP_ANALYSIS.md P0-5): the Master Spec v1.1, which is single-entry with signed amounts, and `ranchbrain_app/docs/RANCH_FINANCE_FOUNDATIONAL_DESIGN.md`, which is double-entry. §8 maps SimpleFIN data to a staged source row that either model can consume. This document does not choose between them.
+5. **Master Spec v1.1 is the contract.** The owner ruled on 2026-11-05 (GAP_ANALYSIS.md P0-5) that the single-entry, signed-amount Master Spec v1.1 is canonical. `ranchbrain_app/docs/RANCH_FINANCE_FOUNDATIONAL_DESIGN.md` is superseded. §8 maps SimpleFIN data to Master Spec staged import rows and `transactions`.
 6. **Recoverable and visible.** Quota warnings, authentication failures, and upstream connection errors stop polling and appear to the administrator as a repair-needed state. Polling never retries in a loop.
 
 ## 3. Verified protocol and Bridge facts
@@ -214,7 +214,7 @@ Each checkpoint is separately approved. Completing one authorizes nothing furthe
 4. **Pending display.** Hide pending entirely, or show it as informational rows that are never totaled.
 5. **Schedule.** Runs per day (default 4; cap 12).
 6. **Secret store.** Use the file under `~/.openclaw/credentials/finance/` or the OS keychain on the Finance host.
-7. **Contract.** This depends on the P0-5 ruling, which decides how a confirmed staged row becomes a signed transaction or a balanced posting.
+7. ~~**Contract.**~~ Resolved 2026-11-05: Master Spec v1.1. A confirmed staged row becomes a signed `transactions` row (§8).
 
 ## 15. Sources
 

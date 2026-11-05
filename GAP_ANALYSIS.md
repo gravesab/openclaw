@@ -201,6 +201,26 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
   - No Swift Finance client exists.
 - **Rule:** Master Spec §1 says that on a conflict, the agent must "document the conflict and stop for review". §15 says that changing amount semantics or domain separation is an architectural change.
 - **Done when:** The owner rules which ledger model and domain model are canonical. The other document is revised or retired through the §15 change control. A file-level checkpoint plan (Spec §12, Checkpoint 0) exists for the chosen contract.
+- **Ruling (owner, 2026-11-05): Master Spec v1.1 is canonical.**
+  - `RANCH_FINANCE_FOUNDATIONAL_DESIGN.md` is marked Superseded.
+  - Its double-entry model and domains are retired as an implementation contract.
+  - Its tenancy, RLS, idempotency, and audit patterns are reused in the Spec's Checkpoint 1 migration.
+  - `005_finance_persistence_foundation.sql` and the `finance_*` modules were never applied. They stay in place until a separately approved cleanup.
+  - **Checkpoint 0 plan drafted (Proposed):** `docs/ranch-os/Ranch_Finance_Checkpoint_0_Plan_v1.md`. It covers repo conventions verified from source and 13 conflicts with proposed resolutions. Key ones:
+    - tenancy and FORCE RLS added to every Spec table (the Spec is silent on tenancy);
+    - the Personal domain blocked until a per-user privacy policy is approved;
+    - unapplied 005 to be replaced only after a read-only check of its applied state;
+    - Finance built as a RanchOS module, not a standalone app;
+    - new code in `ranchbrain/finance/`.
+
+    It also has a file-level Checkpoint 1 plan with tests mapped onto the existing CI lanes, an outline for CP2–5, the Apple-first statement, and 6 owner decisions (D1–D6). It is blocked by P1-1 for any runtime endpoint and by the Livestock source for migration numbering.
+  - **Owner rulings, 2026-11-05:**
+    - D1 accepted: the onboarding doc now names the Spec.
+    - D2 accepted: tenancy and FORCE RLS on every table.
+    - D3 accepted: the Personal domain is blocked until a privacy policy is approved.
+    - D5 accepted: Finance is a RanchOS module.
+    - D4 is open: the read-only check of 005's applied state needs approval.
+    - D6 is open.
 
 ---
 
@@ -246,7 +266,7 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
       - The generic-upsert test sends the `asset_id` that 017 requires and scripts 017's active-asset lookup.
       - The untriaged-request test compares SQL with whitespace collapsed.
     - `test_migration_authority`: the 018 pins changed from 260 columns / 106 constraints to 261 / 107. I verified that 018 adds `assets.is_pseudo` and `assets_pseudo_root_check`. The canonical category count is 5 (was 8), matching the hash-pinned contract.
-      - **Owner review:** the 016 snapshot regenerated in #62 dropped the Hot Tub, Pool, Safety, and Tractor seed categories and added Home.
+      - **Owner-confirmed 2026-11-05 as intended:** the 016 snapshot regenerated in #62 dropped the Hot Tub, Pool, Safety, and Tractor seed categories and added Home.
     - `test_migration_chain`: the chain is extended to 017/018, with the version list and snapshot key derived from `MIGRATIONS`. The 5 mocked tests pass. The container run is CI-only and not yet proven.
     - `test_task_completion` and `test_task_photos`: they now script the #53 bypass-events query.
     - `test_work_requests`, `test_handbook_api`, `test_maintenance_proposals`, `test_task_bypass`, `test_task_completion`, `test_task_photos`: the hardcoded module-reload lists are replaced by "drop every module loaded from `api/`". The old lists missed `task_schedule`, which kept a stale `db` binding, so queries reached a real `docker exec`.
@@ -329,7 +349,7 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
     - about 24 requests a day expected, and overuse disables the token;
     - positive amounts are inflows;
     - transaction IDs are unique within an account.
-  - The design is contract-neutral pending P0-5. It requires a Master Spec revision for §3.2, the new `simplefin` source type, and an exception to the §2.4 no-cloud-provider principle.
+  - It follows Master Spec v1.1, per the P0-5 ruling of 2026-11-05. It requires a Master Spec revision for §3.2, the new `simplefin` source type, and an exception to the §2.4 no-cloud-provider principle.
   - It covers: the opt-in cloud exception, the server-only secret store with canary redaction tests, a claim-host allowlist with SSRF tests, a sync worker capped at 12 requests a day, staging into the Checkpoint 3 pipeline with no auto-commit, pending never totaled, America/Chicago dates, exact decimals, error and repair states, and the S0–S5 gated checkpoints.
   - **UNKNOWN:** the upstream aggregator and data retention, pending support on the Bridge, and the revocation mechanism. The owner must review these before opt-in.
   - 7 open decisions await the owner, §14.

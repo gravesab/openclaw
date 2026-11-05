@@ -75,6 +75,11 @@ scope. The more restrictive applicable contract wins.
    - `docs/foundation/FOUNDATIONAL_DOCUMENTS.md`
    - `docs/foundation/OPERATIONS_RUNBOOK.md`
    - `docs/foundation/PROPERTY_MANAGER_FOUNDATIONAL_REQUIREMENTS.md`
+   - `docs/ranch-os/Ranch_Finance_Master_Specification_v1.1.md`: the Ranch
+     Finance contract (owner ruling 2026-11-05). It supersedes
+     `ranchbrain_app/docs/RANCH_FINANCE_FOUNDATIONAL_DESIGN.md`. Read it with
+     `docs/ranch-os/Ranch_Finance_Checkpoint_0_Plan_v1.md`, which adds tenancy
+     and the Personal-domain privacy block.
 
 3. Named normative mutation contracts only:
    - `docs/architecture/AUTHORITATIVE_MUTATION_PROTOCOL_V1.md`

@@ -13,18 +13,31 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import urllib.request
 from pathlib import Path
 
 
+def auth_headers() -> dict[str, str]:
+    """PropertyManager reads require the API key or operator PIN."""
+    api_key = os.environ.get("PROPERTYMANAGER_API_KEY", "").strip()
+    pin = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "").strip()
+    if api_key:
+        return {"Authorization": f"Bearer {api_key}"}
+    if pin:
+        return {"X-Operator-PIN": pin}
+    raise SystemExit("Set PROPERTYMANAGER_API_KEY or PROPERTYMANAGER_OPERATOR_PIN to read assets.")
+
+
 def fetch_assets(api_base: str) -> list[dict]:
-    url = api_base.rstrip("/") + "/assets"
-    with urllib.request.urlopen(url, timeout=30) as resp:
+    url = api_base.rstrip("/") + "/v1/assets"
+    request = urllib.request.Request(url, headers=auth_headers(), method="GET")
+    with urllib.request.urlopen(request, timeout=30) as resp:
         payload = json.loads(resp.read().decode())
     if not isinstance(payload, list):
-        raise RuntimeError("Expected list from /assets")
+        raise RuntimeError("Expected list from /v1/assets")
     return payload
 
 

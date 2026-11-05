@@ -122,7 +122,15 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
   - `list_equipment_tasks_missing_hour_trigger.py` and `propertymanager-mapping-proposals.py` send the key.
   - `refresh_mac_cache_from_api.sh` now needs `PROPERTYMANAGER_API_TOKEN`.
   - `daily-executive-briefing.sh` only reads `/health`.
-- **Already broken before this change:** `ranchbrain/src/ranchbrain/show_asset.py`, `tools/property_manager/propertymanager-meter.py`, and `tools/property_manager/generate_asset_qr.py` call unprefixed `/assets…` routes. Those routes exist only under `/v1`, so the calls return 404. `propertymanager-meter.py` also posts readings without credentials. Repair or retire these.
+- **Already broken before this change, now repaired (2026-11-05):** `ranchbrain/src/ranchbrain/show_asset.py`, `tools/property_manager/propertymanager-meter.py` (the Telegram meter command), and `tools/property_manager/generate_asset_qr.py` called unprefixed `/assets…` routes. Those routes exist only under `/v1`, so the calls returned 404, and the meter script posted readings without credentials.
+  - All three now use `/v1` paths and send `PROPERTYMANAGER_API_KEY` as a Bearer token, or `PROPERTYMANAGER_OPERATOR_PIN`.
+  - Without credentials:
+    - the meter script exits 2 with a clear message before any request;
+    - the QR generator stops before any request;
+    - `show_asset.py` omits the meter section.
+  - The meter post also sends an `Idempotency-Key` and prints the API's `message`.
+  - **Tests:** `tools/property_manager/tests/test_api_client_scripts.py` (7 tests, `urlopen` stubbed). All 7 fail on the HEAD versions of the scripts.
+  - **Deploy note:** the Telegram poller's environment needs `PROPERTYMANAGER_API_KEY` or the PIN for the meter command to work.
 - **Deploy notes:**
   - The dashboard needs `PROPERTYMANAGER_API_KEY` set, or the QR landing shows nothing.
   - The live script `test_phase2_meters.py::test_qr_read_anonymous` now fails by design.

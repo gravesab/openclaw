@@ -9,9 +9,28 @@ import re
 import sys
 import urllib.error
 import urllib.request
+import uuid
 from difflib import SequenceMatcher
 
 API_BASE = os.environ.get("PROPERTYMANAGER_API_BASE", "http://127.0.0.1:5062")
+API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "").strip()
+OPERATOR_PIN = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "").strip()
+
+
+class MissingCredentials(RuntimeError):
+    pass
+
+
+def auth_headers() -> dict[str, str]:
+    """PropertyManager reads and writes require the API key or operator PIN."""
+    headers = {"X-Operator-Identity": "telegram-meter"}
+    if API_KEY:
+        headers["Authorization"] = f"Bearer {API_KEY}"
+    elif OPERATOR_PIN:
+        headers["X-Operator-PIN"] = OPERATOR_PIN
+    else:
+        raise MissingCredentials("Set PROPERTYMANAGER_API_KEY or PROPERTYMANAGER_OPERATOR_PIN.")
+    return headers
 
 METER_PATTERN = re.compile(
     r"(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|miles?|mi|cycles?)?",
@@ -20,7 +39,8 @@ METER_PATTERN = re.compile(
 
 
 def api_get(path: str) -> dict | list:
-    with urllib.request.urlopen(API_BASE.rstrip("/") + path, timeout=20) as resp:
+    req = urllib.request.Request(API_BASE.rstrip("/") + path, headers=auth_headers(), method="GET")
+    with urllib.request.urlopen(req, timeout=20) as resp:
         return json.loads(resp.read().decode())
 
 
@@ -29,7 +49,7 @@ def api_post(path: str, body: dict) -> tuple[int, dict]:
     req = urllib.request.Request(
         API_BASE.rstrip("/") + path,
         data=data,
-        headers={"Content-Type": "application/json"},
+        headers={**auth_headers(), "Content-Type": "application/json", "Idempotency-Key": str(uuid.uuid4())},
         method="POST",
     )
     try:
@@ -54,7 +74,7 @@ def parse_meter_command(text: str) -> tuple[str, float] | None:
 
 
 def find_asset(hint: str) -> dict | None:
-    assets = api_get("/assets")
+    assets = api_get("/v1/assets")
     if not isinstance(assets, list):
         return None
     hint_lower = hint.lower()
@@ -78,7 +98,7 @@ def find_asset(hint: str) -> dict | None:
 
 def submit_reading(asset_id: str, value: float, *, note: str | None = None) -> tuple[int, dict]:
     return api_post(
-        f"/assets/{asset_id}/meter-readings",
+        f"/v1/assets/{asset_id}/meter-readings",
         {"value": value, "entry_method": "telegram", "note": note},
     )
 
@@ -114,11 +134,21 @@ def main() -> int:
         print("Could not parse meter command. Example: dr mower 127.4 hours")
         return 1
     hint, value = parsed
-    asset = find_asset(hint)
-    if asset is None:
-        print(f"No asset matched: {hint}")
+    try:
+        asset = find_asset(hint)
+        if asset is None:
+            print(f"No asset matched: {hint}")
+            return 1
+        status, result = submit_reading(str(asset["id"]), value)
+    except MissingCredentials as exc:
+        print(f"PropertyManager credentials are not configured. {exc}")
+        return 2
+    except urllib.error.HTTPError as exc:
+        print(f"PropertyManager API returned {exc.code}.")
         return 1
-    status, result = submit_reading(str(asset["id"]), value)
+    except (urllib.error.URLError, TimeoutError) as exc:
+        print(f"PropertyManager API is unreachable: {exc}")
+        return 1
     if status == 409:
         print(
             f"Reading {value} is lower than current {result.get('current_value')}. "
@@ -126,7 +156,7 @@ def main() -> int:
         )
         return 1
     if status >= 400:
-        print(result.get("error", result))
+        print(result.get("message") or result.get("error") or result)
         return 1
     print(f"Updated {asset.get('name')} to {value} {(asset.get('meter') or {}).get('unit', '')}")
     return 0

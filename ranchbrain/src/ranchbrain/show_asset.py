@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -12,10 +13,27 @@ ASSETS = DATA / "assets"
 API_BASE = os.environ.get("PROPERTYMANAGER_API_BASE", "http://127.0.0.1:5062")
 
 
+def _pm_auth_headers() -> dict[str, str]:
+    """PropertyManager reads require the API key or operator PIN."""
+    api_key = os.environ.get("PROPERTYMANAGER_API_KEY", "").strip()
+    pin = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "").strip()
+    if api_key:
+        return {"Authorization": f"Bearer {api_key}"}
+    if pin:
+        return {"X-Operator-PIN": pin}
+    return {}
+
+
 def fetch_pm_asset(external_id: str) -> dict | None:
-    url = f"{API_BASE.rstrip('/')}/assets/by-external-id/{external_id}"
+    """Return the PropertyManager asset, or None (the meter section is then omitted)."""
+    headers = _pm_auth_headers()
+    if not headers:
+        return None
+    quoted = urllib.parse.quote(external_id, safe="")
+    url = f"{API_BASE.rstrip('/')}/v1/assets/by-external-id/{quoted}"
+    request = urllib.request.Request(url, headers=headers, method="GET")
     try:
-        with urllib.request.urlopen(url, timeout=15) as resp:
+        with urllib.request.urlopen(request, timeout=15) as resp:
             return json.loads(resp.read().decode())
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
         return None

@@ -71,6 +71,21 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
   - SQL uses bound parameters.
   - Docstrings and client comments describe what the code actually does.
   - The Production Livestock backend target is documented. Today it is UNKNOWN: the only database runner hardcodes `SSH-Dev`.
+- **Update (2026-11-05):**
+  - **The Production app writes to the DEV database.** `apps/ranchos-livestock-macos/Sources/LivestockModels.swift:25` says "PROD drops the DEV prefix; the live ticket and server stay the same." The Production-labeled Livestock app (#60) therefore writes through the same loopback server to `ranchos_livestock_dev` in `openclaw-ai-postgres-dev` on the DEV VM. Real operational livestock records very likely live in the DEV database. That breaks DEV/PROD separation (IDP-077–078), and any DEV migration or test against that database touches real data.
+  - **Measured gap:**
+    - The DEV server accepts 13 write operations: animal create; herd create, assign/clear, and retire; identifier assign and retire; animal retire/sale; classification; care; feed consumption; cost; lifecycle record and correct.
+    - None of them write an idempotency key or an audit row.
+    - The contract-following `livestock_mutation_coordinator.py` covers 5 of the 13: animal create, identifier assign/retire, and lifecycle record/correct.
+    - The coordinator requires CF-2 confirmations whose issuance (CONF-021) is still design-only. It also depends on P1-1 identity.
+  - **The running server's source is not in the repo.** The Livestock Swift client (#56/#60) calls server features that `livestock_dev_read_server.py` and `livestock_dev_postgres.py` on this branch do not implement:
+    - the `correctCare`, `correctConsumption`, and `correctCost` routes (`apps/ranchos-livestock-macos/Sources/LivestockRepository.swift:2239,2269,2297`);
+    - the `weight_pounds`, `item_name`, and `item_kind` fields;
+    - cost links via `lifecycle_event_id`, `care_event_id`, and `consumption_id`.
+
+    The server the app uses runs on the owner's Mac (loopback, ticket in `~/Library/Application Support/RanchOSLivestock/`) from code outside this repository, possibly with schema past migration `022`.
+  - **Owner decision 2026-11-05:** harden in place. Leave the Production-to-DEV database question for later, and treat `ranchos_livestock_dev` as real data until then.
+  - **Hardening is paused:** it must target the real server source. Changing the stale in-repo copy would protect nothing, and running it would break the app.
 
 ### P0-3. The PropertyManager API exposes data without auth and binds to all interfaces
 - **Evidence:**

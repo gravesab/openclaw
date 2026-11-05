@@ -1,0 +1,93 @@
+{
+  "description": "Ranch OS PROD-host references permitted in tracked code. Counts are exact per-file line counts. status=intended: deliberate PROD client or label. status=review: allowed for now, but a DEV instance may reach PROD by default; see GAP_ANALYSIS.md P0-1.",
+  "patterns": [
+    "(?<![0-9.])100\\.85\\.36\\.72(?![0-9])",
+    "\\bintelmini\\b"
+  ],
+  "entries": [
+    {
+      "path": "apps/propertymanager-ios/Info.plist",
+      "count": 1,
+      "status": "intended",
+      "reason": "App Transport Security exception for the PROD API host used by Release builds."
+    },
+    {
+      "path": "apps/propertymanager-ios/project.yml",
+      "count": 1,
+      "status": "intended",
+      "reason": "XcodeGen source of the same ATS exception."
+    },
+    {
+      "path": "apps/propertymanager-ios/Sources/PropertyStore.swift",
+      "count": 2,
+      "status": "intended",
+      "reason": "Release-only (#else of #if DEBUG) PROD API and manual-library endpoints; Debug uses the DEV VM."
+    },
+    {
+      "path": "apps/propertymanager-macos/Sources/PropertyManagerApp/PropertyManagerApp.swift",
+      "count": 2,
+      "status": "intended",
+      "reason": "Release branch of the isDevelopment endpoint switch; DEV builds use the DEV VM."
+    },
+    {
+      "path": "scripts/systemd/openclaw-dashboard-trends.service",
+      "count": 1,
+      "status": "intended",
+      "reason": "Explicit PROD storage host set in the PROD unit's environment."
+    },
+    {
+      "path": "tools/briefing/daily-executive-briefing.sh",
+      "count": 1,
+      "status": "intended",
+      "reason": "Counts tailnet peers by name for the briefing; no connection is made."
+    },
+    {
+      "path": "tools/dashboard/install_documentation_center.py",
+      "count": 1,
+      "status": "intended",
+      "reason": "Installer prints the PROD dashboard URL as a message; no connection is made."
+    },
+    {
+      "path": "tools/dashboard/install_pdf_library.py",
+      "count": 1,
+      "status": "intended",
+      "reason": "Installer prints the PROD dashboard URL as a message; no connection is made."
+    },
+    {
+      "path": "tools/dashboard/install_pdf_upload.py",
+      "count": 1,
+      "status": "intended",
+      "reason": "Installer prints the PROD dashboard URL as a message; no connection is made."
+    },
+    {
+      "path": "tools/dashboard/install_shared_navigation.py",
+      "count": 1,
+      "status": "intended",
+      "reason": "Installer prints the PROD dashboard URL as a message; no connection is made."
+    },
+    {
+      "path": "tools/dashboard/test_scorecard_approval.py",
+      "count": 9,
+      "status": "intended",
+      "reason": "Test fixture host names; no connection is made."
+    },
+    {
+      "path": "tools/property_manager/api/handbook_api.py",
+      "count": 1,
+      "status": "intended",
+      "reason": "Provenance label 'dashboard-intelmini' for library storage; not a network target."
+    },
+    {
+      "path": "tools/system_manager/openclaw-dev-backup.sh",
+      "count": 2,
+      "status": "intended",
+      "reason": "Backup destination is PROD storage by design; host-guarded on both ends. Agents must never run it. Open concerns in GAP_ANALYSIS.md P0-1."
+    },
+    {
+      "path": "tools/telegram/reboot-status.sh",
+      "count": 2,
+      "status": "intended",
+      "reason": "Reboot notice prints PROD dashboard and Home Assistant links; no connection is made."
+    }
+  ]
+}

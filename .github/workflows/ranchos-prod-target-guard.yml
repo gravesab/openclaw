@@ -1,0 +1,53 @@
+name: Ranch OS PROD-target guard
+
+# Fails when tracked code gains a default or reference to a Ranch OS PROD host
+# that is not in tools/ranchos_guard/prod_targets_allowlist.json.
+# See GAP_ANALYSIS.md P0-1.
+
+on:
+  pull_request:
+  push:
+    branches: [development]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  guard:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Guard tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest discover -s tools/ranchos_guard -p "test_*.py" -v
+
+      - name: PropertyManager tools refuse a missing target
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest tools.property_manager.tests.test_no_default_api_target -v
+
+      - name: Dashboard remote storage needs an explicit host
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 -m unittest tools/dashboard/test_scorecard_approval.py -v
+
+      - name: Trends collector remote storage needs an explicit host
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tools/home_manager/test_collect_trends_storage_host.py -v
+
+      - name: Check PROD-host references
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python3 tools/ranchos_guard/check_prod_targets.py

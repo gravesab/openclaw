@@ -3,7 +3,10 @@
 
 Usage:
   python3 tools/property_manager/generate_asset_qr.py --api http://127.0.0.1:5062 --out /tmp/asset-qr
-  python3 tools/property_manager/generate_asset_qr.py --dashboard-base http://100.85.36.72:5000
+  python3 tools/property_manager/generate_asset_qr.py --dashboard-base http://<dashboard-host>:5000
+
+--dashboard-base is required: it is printed into physical labels, so the
+operator must choose the DEV or PROD dashboard explicitly.
 """
 
 from __future__ import annotations
@@ -41,8 +44,8 @@ def main() -> int:
     parser.add_argument("--api", default="http://127.0.0.1:5062", help="PropertyManager API base URL")
     parser.add_argument(
         "--dashboard-base",
-        default="http://100.85.36.72:5000",
-        help="Dashboard base URL encoded in QR codes",
+        required=True,
+        help="Dashboard base URL encoded in QR codes (required; no default target)",
     )
     parser.add_argument("--out", type=Path, default=Path("reports/asset-qr"), help="Output directory")
     parser.add_argument("--meter-only", action="store_true", help="Skip assets with meter_type=none")

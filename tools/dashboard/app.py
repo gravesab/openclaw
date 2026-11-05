@@ -64,9 +64,16 @@ M4_SSH_KEY = os.environ.get(
     "OPENCLAW_M4_SSH_KEY",
     str(Path.home() / ".ssh/openclaw_m4_metrics_ed25519"),
 )
+# No default host: this used to fall back to the PROD host, so a DEV dashboard
+# without /mnt/ai-storage silently SSHed into PROD storage. Remote storage now
+# requires OPENCLAW_INTELMINI_STORAGE_HOST; hosts that mount the drive locally
+# never use it.
 INTELMINI_STORAGE_HOST = os.environ.get(
     "OPENCLAW_INTELMINI_STORAGE_HOST",
-    "100.85.36.72",
+    "",
+).strip()
+INTELMINI_STORAGE_NOT_CONFIGURED = (
+    "Remote storage not configured: set OPENCLAW_INTELMINI_STORAGE_HOST."
 )
 INTELMINI_STORAGE_USER = os.environ.get(
     "OPENCLAW_INTELMINI_STORAGE_USER",
@@ -80,6 +87,17 @@ PROPERTYMANAGER_API_BASE = os.environ.get(
     "PROPERTYMANAGER_API_BASE",
     "http://127.0.0.1:5062",
 ).rstrip("/")
+
+
+def intelmini_storage_target():
+    """Return ``user@host`` for remote storage SSH, or raise if unconfigured."""
+    if not INTELMINI_STORAGE_HOST:
+        raise RuntimeError(INTELMINI_STORAGE_NOT_CONFIGURED)
+    return f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}"
+
+
+def intelmini_storage_host_label():
+    return INTELMINI_STORAGE_HOST or "host not configured"
 PROPERTYMANAGER_API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "").strip()
 PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN = os.environ.get(
     "PROPERTYMANAGER_MANUAL_LIBRARY_SERVICE_TOKEN",
@@ -238,7 +256,7 @@ def get_remote_external_storage_info():
                 "StrictHostKeyChecking=yes",
                 "-o",
                 "ConnectTimeout=5",
-                f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
+                intelmini_storage_target(),
                 remote_command,
             ],
             text=True,
@@ -292,7 +310,11 @@ def get_remote_external_storage_info():
             "pct": "—",
             "pct_num": None,
             "color": "#64748b",
-            "status": "Intel Mini probe unavailable",
+            "status": (
+                "Intel Mini probe unavailable"
+                if INTELMINI_STORAGE_HOST
+                else "Remote storage not configured"
+            ),
             "available": False,
             "source": "unknown",
             "filesystem": "unknown",
@@ -350,7 +372,7 @@ def get_remote_internal_storage_info():
                 "StrictHostKeyChecking=yes",
                 "-o",
                 "ConnectTimeout=5",
-                f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
+                intelmini_storage_target(),
                 remote_command,
             ],
             text=True,
@@ -418,7 +440,11 @@ def get_remote_internal_storage_info():
             "pct": "—",
             "pct_num": None,
             "color": "#64748b",
-            "status": "Intel Mini probe unavailable",
+            "status": (
+                "Intel Mini probe unavailable"
+                if INTELMINI_STORAGE_HOST
+                else "Remote storage not configured"
+            ),
             "available": False,
             "source": "unknown",
             "filesystem": "unknown",
@@ -3560,7 +3586,7 @@ def ai_storage_ssh(remote_command, timeout=30, binary=False):
             "StrictHostKeyChecking=yes",
             "-o",
             "ConnectTimeout=8",
-            f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
+            intelmini_storage_target(),
             remote_command,
         ],
         capture_output=True,
@@ -3673,7 +3699,7 @@ def ai_storage_stream_remote(root_path, relative_path, mimetype=None):
             "StrictHostKeyChecking=yes",
             "-o",
             "ConnectTimeout=8",
-            f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
+            intelmini_storage_target(),
             remote_command,
         ],
         stdout=subprocess.PIPE,
@@ -4186,7 +4212,7 @@ def pdf_upload_copy_remote(local_path, relative_path, expected_sha256):
         timeout=20,
     )
     remote_target = (
-        f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}:"
+        f"{intelmini_storage_target()}:"
         f"{staging_path}"
     )
     result = subprocess.run(
@@ -4543,7 +4569,7 @@ def documentation_upload_pdf():
 
     storage_note = (
         "This development host does not mount /mnt/ai-storage. "
-        f"Uploads are stored on Intel Mini ({html.escape(INTELMINI_STORAGE_HOST)}) "
+        f"Uploads are stored on Intel Mini ({html.escape(intelmini_storage_host_label())}) "
         "at /mnt/ai-storage/openclaw-documents."
         if remote_mode
         else "Uploads are stored on the local external AI drive at "
@@ -5031,7 +5057,7 @@ def propertymanager_manual_library():
 """
 
     storage_note = (
-        f"PDFs stay on the IntelMini external drive ({html.escape(INTELMINI_STORAGE_HOST)})."
+        f"PDFs stay on the IntelMini external drive ({html.escape(intelmini_storage_host_label())})."
         if not pdf_document_storage_is_local()
         else f"PDFs stay on the local external drive at {html.escape(str(PDF_DOCUMENT_ROOT))}."
     )
@@ -6410,7 +6436,7 @@ print(json.dumps({
             "StrictHostKeyChecking=yes",
             "-o",
             "ConnectTimeout=8",
-            f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
+            intelmini_storage_target(),
             remote_command,
         ],
         capture_output=True,

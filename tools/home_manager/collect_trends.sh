@@ -83,8 +83,10 @@ if [ "$EXTERNAL_MOUNT_TARGET" = "/mnt/ai-storage" ]; then
     df -P /mnt/ai-storage |
       awk 'NR==2 {gsub("%","",$5); print $5}'
   )"
-else
-  INTELMINI_STORAGE_HOST="${OPENCLAW_INTELMINI_STORAGE_HOST:-100.85.36.72}"
+elif [ -n "${OPENCLAW_INTELMINI_STORAGE_HOST:-}" ]; then
+  # Remote storage is opt-in: no default host. This used to fall back to the
+  # PROD host. When unset, the external-disk sample is left empty.
+  INTELMINI_STORAGE_HOST="$OPENCLAW_INTELMINI_STORAGE_HOST"
   INTELMINI_STORAGE_USER="${OPENCLAW_INTELMINI_STORAGE_USER:-gravesab}"
   INTELMINI_STORAGE_KEY="${OPENCLAW_INTELMINI_STORAGE_KEY:-$HOME/.ssh/openclaw_dev_backup_ed25519}"
   EXTERNAL_DISK_USED="$(

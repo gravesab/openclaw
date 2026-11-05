@@ -93,6 +93,12 @@ SPEC.loader.exec_module(dashboard)
 
 class ScorecardDashboardTests(unittest.TestCase):
     def setUp(self):
+        # Remote storage has no default host; name an explicit test target.
+        host_patch = mock.patch.object(
+            dashboard, "INTELMINI_STORAGE_HOST", "storage-host.invalid"
+        )
+        host_patch.start()
+        self.addCleanup(host_patch.stop)
         dashboard.request.remote_addr = "127.0.0.1"
         dashboard.request.form = {}
         dashboard.request.args = {}
@@ -1190,6 +1196,14 @@ Kind          : Network
 
 
 class PdfUploadHardeningTests(unittest.TestCase):
+    def setUp(self):
+        # Remote storage has no default host; name an explicit test target.
+        host_patch = mock.patch.object(
+            dashboard, "INTELMINI_STORAGE_HOST", "storage-host.invalid"
+        )
+        host_patch.start()
+        self.addCleanup(host_patch.stop)
+
     def test_relative_path_rejects_traversal_hidden_and_wrong_type(self):
         for path in (
             "../secret.pdf",
@@ -1363,6 +1377,69 @@ class PdfUploadHardeningTests(unittest.TestCase):
         dashboard.request.args = {}
         review_page = dashboard.ai_scorecard()
         self.assertNotIn("Scorecard Navigation", review_page)
+
+
+class RemoteStorageUnconfiguredTests(unittest.TestCase):
+    """With no OPENCLAW_INTELMINI_STORAGE_HOST, nothing may SSH or SCP anywhere.
+
+    The host used to default to PROD, so a DEV dashboard reached PROD storage.
+    """
+
+    def setUp(self):
+        host_patch = mock.patch.object(dashboard, "INTELMINI_STORAGE_HOST", "")
+        host_patch.start()
+        self.addCleanup(host_patch.stop)
+        self.check_output = self._patch_subprocess("check_output")
+        self.run_proc = self._patch_subprocess("run")
+        self.popen = self._patch_subprocess("Popen")
+
+    def _patch_subprocess(self, name):
+        patcher = mock.patch.object(dashboard.subprocess, name)
+        started = patcher.start()
+        self.addCleanup(patcher.stop)
+        return started
+
+    def assert_no_process(self):
+        self.check_output.assert_not_called()
+        self.run_proc.assert_not_called()
+        self.popen.assert_not_called()
+
+    def test_storage_probes_report_not_configured_without_ssh(self):
+        for probe in (
+            dashboard.get_remote_external_storage_info,
+            dashboard.get_remote_internal_storage_info,
+        ):
+            with self.subTest(probe=probe.__name__):
+                disk = probe()
+                self.assertFalse(disk["available"])
+                self.assertEqual(disk["status"], "Remote storage not configured")
+        self.assert_no_process()
+
+    def test_ssh_helpers_refuse_without_host(self):
+        calls = (
+            lambda: dashboard.ai_storage_ssh("true"),
+            lambda: dashboard.backup_center_remote_probe(),
+            lambda: dashboard.ai_storage_stream_remote(
+                dashboard.PDF_DOCUMENT_ROOT, "Assets/manual.pdf"
+            ),
+        )
+        for call in calls:
+            with self.subTest(call=call):
+                with self.assertRaisesRegex(
+                    RuntimeError, "OPENCLAW_INTELMINI_STORAGE_HOST"
+                ):
+                    call()
+        self.assert_no_process()
+
+    def test_storage_target_uses_only_the_configured_host(self):
+        with mock.patch.object(
+            dashboard, "INTELMINI_STORAGE_HOST", "storage-host.invalid"
+        ):
+            self.assertEqual(
+                dashboard.intelmini_storage_target(),
+                f"{dashboard.INTELMINI_STORAGE_USER}@storage-host.invalid",
+            )
+        self.assertEqual(dashboard.intelmini_storage_host_label(), "host not configured")
 
 
 if __name__ == "__main__":

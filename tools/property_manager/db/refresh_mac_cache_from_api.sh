@@ -2,7 +2,13 @@
 # Refresh Mac PropertyManager cache from Postgres via PropertyManager API.
 set -euo pipefail
 
-API_BASE="${PROPERTYMANAGER_API_BASE:-http://intelmini:5062}"
+# No default target: the operator must name the API (DEV or PROD) explicitly.
+# A default here once pointed at PROD.
+API_BASE="${PROPERTYMANAGER_API_BASE:-}"
+if [[ -z "${API_BASE}" ]]; then
+  echo "PROPERTYMANAGER_API_BASE is not set; refusing to guess a target. Set it to the DEV or PROD API base URL." >&2
+  exit 2
+fi
 TOKEN="${PROPERTYMANAGER_API_TOKEN:-}"
 APP_SUPPORT="${HOME}/Library/Application Support/PropertyManagerApp"
 TASKS_JSON="${APP_SUPPORT}/maintenance_tasks.json"

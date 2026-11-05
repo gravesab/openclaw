@@ -27,7 +27,8 @@ struct SettingsView: View {
                     .textContentType(.URL)
                     .noWritingTools()
 
-                Text("Use your Intel Mini Tailscale or LAN address, for example http://100.85.36.72:5062")
+                // Example follows the build so a DEV build never suggests the PROD host.
+                Text("Use your Intel Mini Tailscale or LAN address, for example \(PropertyManagerBuildEnvironment.apiBaseURL)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {
@@ -41,7 +42,7 @@ struct SettingsView: View {
                     .autocorrectionDisabled()
                     .textContentType(.URL)
                     .noWritingTools()
-                Text("Stores uploaded manuals and serves them for Extract, for example http://100.85.188.74:5051")
+                Text("Stores uploaded manuals and serves them for Extract, for example \(PropertyManagerBuildEnvironment.manualLibraryBaseURL)")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {

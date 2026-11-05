@@ -170,6 +170,24 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
   - Swift `HubTests` and `Tests`
 - Current pass/fail state: UNKNOWN (not run; read-only).
 - **Done when:** A DEV CI lane runs the Python suites, plus the disposable-Postgres and RLS suites with a throwaway database, on every PR to `development`. Swift tests run on a macOS runner or a documented manual gate.
+- **Status (2026-11-05, uncommitted):** `.github/workflows/ranchos-python-tests.yml` added.
+  - **`unit` job:** no database. `docker`, `ssh`, `scp`, `psql`, `systemctl`, `pg_ctl`, and `initdb` are stubbed to fail loudly.
+  - **`postgres-proofs` job:**
+    - the `*_disposable_pg.py` proofs, using the runner's `/usr/lib/postgresql/16/bin`, which is assumed to exist and is checked first;
+    - the two-tenant RLS script against a `postgres:16` service, with a non-superuser `ranchos_dev_migrator` and a NOBYPASSRLS `ranchos_dev_runtime`;
+    - the PropertyManager container tests on `pgvector/pgvector:pg16`.
+
+    It was **not run locally**: the VM has no Postgres binaries, and I would not start containers on DEV. Its first CI run is the proof.
+  - **Local baseline:** scratchpad venv from the repo requirements plus pytest, temporary `HOME`, stubbed binaries.
+    - `tools/ai_intelligence`: 165/165 pass.
+    - `ranchbrain_app` without the disposable-PG files: 315/315 pass. With them, and no binaries: the 11 Finance tests skip, and the **17 Livestock tests error instead of skipping** (`LiveProofBlocked` is raised, not `skipTest`).
+    - `tools/property_manager`, unit set: **237/253 pass; 13 fail and 3 error**. The same failures, plus the 5 in `test_migration_chain`, reproduce on pre-session commit `08d91b12e68`, so they predate this work. Causes:
+      - 11 in `test_work_requests` and 2 in `test_migration_authority` are stale after migrations 017/018 (#61, #62). Health expects `017` but sees `018`; the manifest count is 261 vs 260; requests return 500 where the fixtures predate the parent-asset requirement.
+      - `test_migration_chain` reports an "ambiguous migration chain" (CI-only).
+      - `test_task_completion` and `test_task_photos` make a real `docker exec` call, so they are not hermetic.
+      - `test_asset_pseudo` raises "Working outside of application context".
+  - The PropertyManager step will be **red** until these are fixed. I did not add an expected-failure list, because repo policy forbids silencing failures without approval.
+  - **Hazard:** `test_phase1_meters.py`, `test_phase2_meters.py`, and `test_run_hours_trigger.py` are pytest-style module functions that call the live API at `127.0.0.1:5062`. `unittest` ignores them, but `pytest tools/property_manager` would run them against the live DEV API. They should move out of `tests/` or be gated behind an env var like `test_restart_drain.py`.
 
 ### P1-4. The model-router designs conflict, and the hybrid design's trust controls are missing
 - **Evidence:**
@@ -220,7 +238,7 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
   - `RANCH_OS_CURSOR_ONBOARDING.md` contains `/Users/andrewgraves/...` paths.
   - Telegram scripts contain `/home/gravesab/...` paths.
   - `docs/ranch-os/` sits outside `docs/internal/`, which is the only directory `scripts/docs-sync-publish.mjs:13` excludes. `docs/CLAUDE.md` also requires public docs to stay generic.
-  - The fork's visibility is UNKNOWN (`gh` is not installed).
+  - The fork's visibility is **private, per the owner (2026-11-05)**. I could not verify it from the VM because `gh` is not installed. Being private makes pushing this branch safe for now. It does not remove the need to scrub before any public release.
 - **Done when:** There is a decided home for private operator material, either `docs/internal/` or a separate private repo, plus a placeholder/config pattern for hosts and paths. A secret and PII scan has been run before any public release.
 
 ### P1-9. Three RanchBrain codebases, and no vector store

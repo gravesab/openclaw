@@ -1,0 +1,159 @@
+name: Ranch OS Python tests
+
+# Runs the Ranch OS Python suites (GAP_ANALYSIS.md P1-3).
+# - unit: no database, network, Docker, or SSH. Every external binary the
+#   suites might shell out to is replaced by a stub that fails loudly, so a
+#   non-hermetic test fails here instead of reaching real infrastructure.
+# - postgres-proofs: throwaway PostgreSQL clusters/containers only.
+#
+# Never run here (they target a live API/DB or restart services):
+#   tools/property_manager/tests/test_phase1_meters.py
+#   tools/property_manager/tests/test_phase2_meters.py
+#   tools/property_manager/tests/test_run_hours_trigger.py
+#   tools/property_manager/tests/test_restart_drain.py
+# They are pytest-style module functions; unittest does not collect them,
+# but pytest would, so PropertyManager tests must stay on unittest.
+
+on:
+  pull_request:
+    paths:
+      - "ranchbrain_app/**"
+      - "tools/**"
+      - "config/ai_intelligence/**"
+      - ".github/workflows/ranchos-python-tests.yml"
+  push:
+    branches: [development]
+    paths:
+      - "ranchbrain_app/**"
+      - "tools/**"
+      - "config/ai_intelligence/**"
+      - ".github/workflows/ranchos-python-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONDONTWRITEBYTECODE: "1"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  unit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PROPERTYMANAGER_POSTGRES_CONTAINER: ranchos-ci-no-such-container
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q \
+            -r tools/property_manager/api/requirements.txt \
+            -r tools/ai_intelligence/requirements.txt \
+            "pytest>=8,<9"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
+      - name: Block external binaries
+        run: |
+          stub="$RUNNER_TEMP/stubbin"
+          mkdir -p "$stub"
+          for c in docker ssh scp psql systemctl pg_ctl initdb; do
+            printf '#!/usr/bin/env bash\necho "blocked in unit lane: %s $*" >&2\nexit 97\n' "$c" > "$stub/$c"
+            chmod +x "$stub/$c"
+          done
+          echo "$stub" >> "$GITHUB_PATH"
+
+      - name: AI intelligence (unittest)
+        if: success() || failure()
+        run: python -m unittest discover -s tools/ai_intelligence/tests -t .
+
+      - name: RanchBrain app (pytest, no database)
+        if: success() || failure()
+        working-directory: ranchbrain_app
+        run: python -m pytest -q -p no:cacheprovider --ignore-glob='*_disposable_pg.py' tests
+
+      - name: PropertyManager (unittest, no database)
+        if: success() || failure()
+        run: |
+          modules=$(ls tools/property_manager/tests/test_*.py \
+            | grep -vE '/test_(phase1_meters|phase2_meters|run_hours_trigger|restart_drain|migration_chain|manual_package)\.py$' \
+            | sed 's#/#.#g; s#\.py$##')
+          python -m unittest $modules
+
+  postgres-proofs:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: ci-disposable
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          persist-credentials: false
+
+      - name: Require PostgreSQL 16 binaries
+        run: |
+          for b in initdb pg_ctl psql; do
+            test -x "/usr/lib/postgresql/16/bin/$b" || { echo "missing /usr/lib/postgresql/16/bin/$b on runner" >&2; exit 1; }
+          done
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m venv "$RUNNER_TEMP/venv"
+          "$RUNNER_TEMP/venv/bin/pip" install -q \
+            -r tools/property_manager/api/requirements.txt \
+            -r tools/ai_intelligence/requirements.txt \
+            "pytest>=8,<9"
+          echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
+
+      - name: RanchBrain disposable PostgreSQL proofs
+        if: success() || failure()
+        working-directory: ranchbrain_app
+        run: python -m pytest -q -p no:cacheprovider -rs tests/*_disposable_pg.py
+
+      - name: Provision disposable RLS roles
+        if: success() || failure()
+        env:
+          PGPASSWORD: ci-disposable
+        run: |
+          # 001 must run as a non-superuser migrator; the runtime role must not
+          # bypass RLS. The migrator may SET ROLE to the runtime role.
+          /usr/lib/postgresql/16/bin/psql -h localhost -U postgres -d postgres -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE ranchos_dev_runtime NOLOGIN NOSUPERUSER NOBYPASSRLS;
+          CREATE ROLE ranchos_dev_migrator LOGIN NOSUPERUSER NOBYPASSRLS PASSWORD 'ci-disposable';
+          GRANT ranchos_dev_runtime TO ranchos_dev_migrator;
+          CREATE DATABASE ranchos_rls_ci OWNER ranchos_dev_migrator;
+          SQL
+
+      - name: Two-tenant RLS script
+        if: success() || failure()
+        env:
+          RANCHOS_TENANCY_TEST_DATABASE_URL: postgresql://ranchos_dev_migrator:ci-disposable@localhost:5432/ranchos_rls_ci
+        run: PATH="/usr/lib/postgresql/16/bin:$PATH" bash ranchbrain_app/scripts/run_two_tenant_rls_test.sh
+
+      - name: PropertyManager container tests
+        if: success() || failure()
+        run: |
+          docker pull -q pgvector/pgvector:pg16
+          python -m unittest \
+            tools.property_manager.tests.test_migration_chain \
+            tools.property_manager.tests.test_manual_package

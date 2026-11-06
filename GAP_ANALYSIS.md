@@ -227,7 +227,16 @@ The repo is further along than the `docs/ranch-os/` designs suggest in four area
     - 77 new tests pass locally.
     - The superseded double-entry code (15 files) is removed.
     - **Not yet done:**
-      - the disposable-Postgres proof and the two-tenant RLS SQL. The migration SQL has never run against a real Postgres; its first CI run is the proof.
+      - ~~the disposable-Postgres proof~~ **added (2026-11-06):** `tests/test_finance_v1_disposable_pg.py`, 8 proofs in a throwaway cluster:
+        - 001 + 005 apply; migrator ownership and FORCE RLS;
+        - idempotent seed and immutable domain codes;
+        - constraint and foreign-key rejections, and the derived `normalized_description`;
+        - deferred transfer pairing;
+        - runtime read-only, with audit append-only even for the owner;
+        - two-tenant RLS through the runtime role, and a missing tenant setting refused;
+        - the read contract end to end.
+
+        Two-tenant isolation is proven here, not in a separate RLS SQL file. **It has not run yet:** locally it reports blocked (no Postgres binaries), and CI `postgres-proofs` is its first real run. Running it locally downloaded `psycopg2-binary` into a temp venv; that is the harness's existing design, and the temp directory was cleaned up.
       - redefining the double-entry write capabilities left in `tenancy.py`.
     - **Owner review:** a refund in an expense category counts as income in §6.1 and also nets down its category in §6.2.
 

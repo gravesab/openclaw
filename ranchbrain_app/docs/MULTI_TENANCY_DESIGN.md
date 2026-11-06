@@ -55,20 +55,19 @@ database/RLS work, runtime integration, device work, or Production.
 | `livestock.lifecycle.write`   | Yes   | Yes     | No     |
 | `livestock.lifecycle.correct` | Yes   | No      | No     |
 
-The following Finance capabilities are DEV-only contracts authorized only
-through the same server-derived `TenantContext` boundary. A second equal
-Finance administrator is a second tenant owner. Tenant owner means full Ranch
-OS owner authority, not Finance-only authority. Owner has all five; manager
-has the first four only; viewer has `finance.read` only. This does not
+Finance (Ranch Finance Master Specification v1.1, Checkpoint 1) is read-only
+and has one capability, authorized only through the same server-derived
+`TenantContext` boundary. A second equal Finance administrator is a second
+tenant owner. Tenant owner means full Ranch OS owner authority, not
+Finance-only authority. The earlier double-entry write capabilities
+(`finance.chart.write`, `finance.source.write`, `finance.interpretation.*`)
+were retired with that design (Checkpoint 0 ruling D6); write capabilities for
+CSV import and categorization are defined with Checkpoints 3–4. This does not
 authorize Production, connectors, credentials, HTTP ingress, or money movement.
 
-| Capability                       | Owner | Manager | Viewer |
-| -------------------------------- | ----- | ------- | ------ |
-| `finance.read`                   | Yes   | Yes     | Yes    |
-| `finance.chart.write`            | Yes   | Yes     | No     |
-| `finance.source.write`           | Yes   | Yes     | No     |
-| `finance.interpretation.write`   | Yes   | Yes     | No     |
-| `finance.interpretation.correct` | Yes   | No      | No     |
+| Capability     | Owner | Manager | Viewer |
+| -------------- | ----- | ------- | ------ |
+| `finance.read` | Yes   | Yes     | Yes    |
 
 An asset belongs to a tenant, not to the user who created it. Tenant-owned
 records retain `created_by_user_id` and `updated_by_user_id` for attribution,

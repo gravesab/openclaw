@@ -6,6 +6,7 @@ verification is injected through ``TokenSignatureVerifier``. The adapter
 refuses to verify when no signature verifier is configured, so there is no
 silent unsigned path. A JOSE-backed verifier plugs in once a crypto
 dependency is approved — signature verification is never hand-rolled here.
+The JOSE-backed verifier lives in ``identity_jose``.
 
 Only ``sub``, ``iss``, ``aud``, ``exp``, ``iat``, ``amr``, and ``auth_time``
 are read. Email, display name, and other presentation attributes are ignored
@@ -22,6 +23,9 @@ from .tenancy import TenancyError, VerifiedPrincipal
 
 
 GOOGLE_OIDC_ISSUER = "https://accounts.google.com"
+# Google documents both spellings as valid `iss` values for its ID tokens:
+# https://developers.google.com/identity/openid-connect/openid-connect
+_ISSUER_ALIASES = {GOOGLE_OIDC_ISSUER: frozenset({GOOGLE_OIDC_ISSUER, "accounts.google.com"})}
 
 _DEFAULT_AUTH_FRESHNESS = timedelta(minutes=5)
 _DEFAULT_CLOCK_SKEW_LEEWAY = timedelta(seconds=60)
@@ -102,7 +106,7 @@ class GoogleOidcIdentityAdapter:
         leeway = config.clock_skew_leeway
 
         issuer = claims.get("iss")
-        if issuer != config.issuer:
+        if issuer not in _ISSUER_ALIASES.get(config.issuer, frozenset({config.issuer})):
             raise TenancyError("OIDC issuer is not trusted")
         if claims.get("aud") != config.audience:
             raise TenancyError("OIDC audience does not match this deployment")

@@ -1,0 +1,4 @@
+# RanchBrain runtime dependencies (exact pins; owner-approved 2026-11-06).
+# PyJWT[crypto]: Google ID-token signature verification (ranchbrain/identity_jose.py).
+PyJWT[crypto]==2.15.1
+cryptography==50.0.2

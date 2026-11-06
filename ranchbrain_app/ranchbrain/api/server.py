@@ -11,14 +11,17 @@ termination. Bind loopback + Tailscale only; DEV port default 5063.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import logging
+import os
 import re
 import sys
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from dataclasses import dataclass
+from typing import Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from os.path import basename
 from urllib.parse import parse_qs, unquote, urlparse
@@ -39,7 +42,7 @@ from ..tenancy import (
     TenantContextResolver,
     VerifiedPrincipal,
 )
-from .membership import MembershipStore, MembershipStoreError
+from .membership import MembershipStore, MembershipStoreError, StaticMembershipStore
 from .rate_limit import RateLimiter
 
 log = logging.getLogger("ranchbrain.api")
@@ -415,12 +418,69 @@ def create_server(config: ServiceConfig, *, time_fn=None) -> ThreadingHTTPServer
     return _Server((config.host, config.port), BoundHandler, state)
 
 
-def main() -> int:
-    """Manual DEV entry point. Always fails closed until a verifier exists."""
-    print("No TokenSignatureVerifier is configured in this build: refusing to start. "
-          "Wire a JOSE-backed verifier (crypto dependency pending approval) and retry.",
-          file=sys.stderr, flush=True)
-    return 2
+_ENV_AUDIENCE = "RANCHBRAIN_OIDC_AUDIENCE"
+_ENV_MEMBERSHIPS = "RANCHBRAIN_MEMBERSHIP_FILE"
+_ENV_HOST = "RANCHBRAIN_API_HOST"
+_ENV_PORT = "RANCHBRAIN_API_PORT"
+# Tailscale CGNAT range; the service binds loopback or a tailnet address only.
+_TAILNET = ipaddress.ip_network("100.64.0.0/10")
+
+
+def _allowed_bind_host(host: str) -> bool:
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return address.is_loopback or (address.version == 4 and address in _TAILNET)
+
+
+def config_from_env(env: Mapping[str, str], *, verifier: TokenSignatureVerifier) -> ServiceConfig:
+    """DEV config from environment. No defaults for audience or memberships."""
+    audience = env.get(_ENV_AUDIENCE, "").strip()
+    memberships = env.get(_ENV_MEMBERSHIPS, "").strip()
+    if not audience or not memberships:
+        raise TenancyError(f"set {_ENV_AUDIENCE} and {_ENV_MEMBERSHIPS}")
+    host = env.get(_ENV_HOST, "127.0.0.1").strip()
+    if not _allowed_bind_host(host):
+        raise TenancyError("bind host must be loopback or a Tailscale (100.64.0.0/10) address")
+    try:
+        port = int(env.get(_ENV_PORT, "5063"))
+    except ValueError as error:
+        raise TenancyError(f"{_ENV_PORT} must be an integer") from error
+    if not 1024 <= port <= 65535:
+        raise TenancyError(f"{_ENV_PORT} must be 1024-65535")
+    try:
+        store = StaticMembershipStore.from_json_file(memberships)
+    except MembershipStoreError as error:
+        raise TenancyError(f"membership file unusable: {error}") from error
+    return ServiceConfig(
+        oidc=OidcConfiguration(audience=audience, environment="development"),
+        verifier=verifier,
+        memberships=store,
+        host=host,
+        port=port,
+    )
+
+
+def main(env: Mapping[str, str] | None = None, *, verifier_factory=None, serve=None) -> int:
+    """Manual DEV entry point. Fails closed (exit 2) on any missing config."""
+    from ..identity_jose import JoseSignatureVerifier, google_jwks_client
+
+    make_verifier = verifier_factory or (lambda: JoseSignatureVerifier(google_jwks_client()))
+    try:
+        config = config_from_env(os.environ if env is None else env, verifier=make_verifier())
+        server = create_server(config)
+    except (TenancyError, OSError) as error:
+        print(f"RanchBrain API refusing to start: {error}", file=sys.stderr, flush=True)
+        return 2
+    print(f"RanchBrain API (DEV) listening on {config.host}:{config.port}", file=sys.stderr, flush=True)
+    try:
+        (serve or (lambda s: s.serve_forever()))(server)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.server_close()
+    return 0
 
 
 if __name__ == "__main__":

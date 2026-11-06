@@ -61,6 +61,7 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install -q \
             -r tools/property_manager/api/requirements.txt \
             -r tools/ai_intelligence/requirements.txt \
+            -r ranchbrain_app/requirements.txt \
             "pytest>=8,<9"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 
@@ -134,6 +135,7 @@ jobs:
           "$RUNNER_TEMP/venv/bin/pip" install -q \
             -r tools/property_manager/api/requirements.txt \
             -r tools/ai_intelligence/requirements.txt \
+            -r ranchbrain_app/requirements.txt \
             "pytest>=8,<9"
           echo "$RUNNER_TEMP/venv/bin" >> "$GITHUB_PATH"
 

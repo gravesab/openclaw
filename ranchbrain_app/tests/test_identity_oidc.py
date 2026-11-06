@@ -92,7 +92,8 @@ def test_rejects_non_mapping_claims():
     "override",
     [
         {"iss": "https://evil.example.com"},
-        {"iss": "accounts.google.com"},
+        {"iss": "accounts.google.com.evil.example"},
+        {"iss": "http://accounts.google.com"},
         {"aud": "other-client-id"},
         {"aud": ["dev-client-id"]},
         {"sub": ""},
@@ -125,3 +126,9 @@ def test_rejects_empty_audience_or_environment_in_config():
 def test_rejects_naive_verification_time():
     with pytest.raises(TenancyError, match="timezone-aware"):
         adapter(StubVerifier(claims())).verify("token", now=datetime(2026, 8, 27, 14))
+
+
+@pytest.mark.parametrize("issuer", ["https://accounts.google.com", "accounts.google.com"])
+def test_accepts_both_documented_google_issuer_spellings(issuer):
+    principal = adapter(StubVerifier(claims(iss=issuer))).verify("token", now=NOW)
+    assert principal.id.startswith("google-oidc:")

@@ -62,6 +62,16 @@ def _bindir() -> Path:
     raise LiveProofBlocked("blocked: PostgreSQL binaries unavailable")
 
 
+def _bindir_or_skip() -> Path:
+    """Missing PostgreSQL skips locally; CI sets RANCHOS_REQUIRE_PG_PROOFS=1 so it fails loudly."""
+    try:
+        return _bindir()
+    except LiveProofBlocked as error:
+        if os.environ.get("RANCHOS_REQUIRE_PG_PROOFS") == "1":
+            raise
+        raise unittest.SkipTest(str(error)) from error
+
+
 def _pg_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in ("PGPORT", "PGHOST", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGSERVICE",
@@ -102,7 +112,7 @@ class FinanceV1DisposablePgTests(unittest.TestCase):
 
     @classmethod
     def setUpClass(cls) -> None:
-        cls._bindir = _bindir()
+        cls._bindir = _bindir_or_skip()
         cls._workdir = Path(tempfile.mkdtemp(prefix="rfpg", dir="/tmp"))
         cls._conn = None
         try:

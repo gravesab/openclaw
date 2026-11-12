@@ -1,10 +1,18 @@
 import json
 import os
+import re
+import sys
+from datetime import datetime
+from pathlib import Path
+
 import redis
 import requests
-import subprocess
 
-from datetime import datetime
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.security.shell_guard import allowed_url, run_checked
 
 OLLAMA_URL = os.environ.get(
     "OPENCLAW_OLLAMA_GENERATE_URL",
@@ -24,14 +32,7 @@ r = redis.Redis(
 )
 
 def cmd(command):
-    try:
-        return subprocess.check_output(
-            command,
-            shell=True,
-            text=True
-        ).strip()
-    except Exception as e:
-        return str(e)
+    return run_checked(command, state_changing=False, timeout=30, service="ai_summary")
 
 def recent_events(limit=15):
 
@@ -61,6 +62,8 @@ def recent_events(limit=15):
 
 def recent_memories(limit=5):
     safe_limit = max(1, min(int(limit), 50))
+    if not (re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", DB_CONTAINER) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", DB_USER) and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", DB_NAME)):
+        return "command refused"
     query = f"""
         SELECT json_build_object(
             'agent_name', agent_name,
@@ -72,20 +75,21 @@ def recent_memories(limit=5):
         ORDER BY created_at DESC
         LIMIT {safe_limit}
     """
-    result = subprocess.run(
+    result = run_checked(
         [
             "docker", "exec", DB_CONTAINER,
             "psql", "-U", DB_USER, "-d", DB_NAME,
             "-v", "ON_ERROR_STOP=1", "-At", "-c", query,
         ],
-        check=True,
-        capture_output=True,
-        text=True,
+        state_changing=True,
         timeout=20,
+        service="ai_summary",
     )
+    if result.startswith("dry-run:") or result in {"command refused", "eject"}:
+        return result
 
     output = []
-    for line in result.stdout.splitlines():
+    for line in result.splitlines():
         row = json.loads(line)
         output.append(
             f"[{row['agent_name']}:{row['category']}] {row['content']}"
@@ -96,7 +100,7 @@ def recent_memories(limit=5):
 def infrastructure_status():
 
     return cmd(
-        "docker ps --format '{{.Names}} - {{.Status}}'"
+        ["docker", "ps", "--format", "{{.Names}} - {{.Status}}"]
     )
 
 def generate_summary():
@@ -120,6 +124,9 @@ Generate a concise operational summary:
 - any concerns
 - recommended attention items
 """
+
+    if not allowed_url(OLLAMA_URL, service="ai_summary"):
+        return "summary refused: model URL is not allowlisted"
 
     response = requests.post(
         OLLAMA_URL,

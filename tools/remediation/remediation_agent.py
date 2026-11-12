@@ -1,7 +1,15 @@
 import json
-import redis
-import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
+
+import redis
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.security.shell_guard import run_checked
 
 r = redis.Redis(
     host="127.0.0.1",
@@ -23,17 +31,13 @@ def publish(event_type, message):
     print(json.dumps(event, indent=2))
 
 def cmd(command):
-    try:
-        return subprocess.check_output(
-            command,
-            shell=True,
-            text=True
-        ).strip()
-    except subprocess.CalledProcessError as e:
-        return str(e)
+    return run_checked(command, state_changing=True, timeout=30, service="remediation")
 
 def restart_container(container):
-    result = cmd(f"docker restart {container}")
+    if container not in {"homeassistant", "scrypted"}:
+        publish("container_restart", f"Restart attempt for {container}: command refused")
+        return
+    result = cmd(["docker", "restart", container])
 
     publish(
         "container_restart",

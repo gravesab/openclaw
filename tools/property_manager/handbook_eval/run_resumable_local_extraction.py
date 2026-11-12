@@ -42,7 +42,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
-    parser.add_argument("--ollama-url", default="http://192.168.50.117:11434")
+    parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--timeout-seconds", type=float, default=180)
     args = parser.parse_args()
     checkpoint = load_checkpoint(args.checkpoint, args.fixture)

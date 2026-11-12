@@ -72,26 +72,47 @@ class EndpointMatrixTests(unittest.TestCase):
                 is_endpoint_allowed("http://localhost:8088", env)
             )
 
-    def test_private_and_local_allowed_both_stacks(self) -> None:
+    def test_private_and_local_need_opt_in(self) -> None:
         for env in AIStackEnv:
-            self.assertTrue(
+            self.assertFalse(
                 is_endpoint_allowed("http://192.168.50.10:8000", env)
             )
-            # Tailscale fleet IPs are CGNAT, not RFC1918.
-            self.assertTrue(
+            self.assertFalse(
+                is_endpoint_allowed("http://10.0.0.1:11434", env)
+            )
+            self.assertFalse(
+                is_endpoint_allowed("http://0.0.0.0:11434", env)
+            )
+            self.assertFalse(
                 is_endpoint_allowed("http://100.104.100.96:11434", env)
             )
-            self.assertTrue(
+            self.assertFalse(
                 is_endpoint_allowed(
                     "http://Andrew-M4-Pro-2.local:5062", env
                 )
             )
+        with patch.dict("os.environ", {"RANCH_ALLOW_PRIVATE_LAN": "1"}, clear=False):
+            for env in AIStackEnv:
+                self.assertTrue(
+                    is_endpoint_allowed("http://10.0.0.1:11434", env)
+                )
+                self.assertFalse(
+                    is_endpoint_allowed("http://0.0.0.0:11434", env)
+                )
+                self.assertFalse(
+                    is_endpoint_allowed("https://attacker.com", env)
+                )
 
-    def test_openrouter_allowed_both_stacks(self) -> None:
+    def test_pinned_cloud_host_allowed_both_stacks(self) -> None:
         for env in AIStackEnv:
             self.assertTrue(
                 is_endpoint_allowed(
                     "https://openrouter.ai/api/v1", env
+                )
+            )
+            self.assertFalse(
+                is_endpoint_allowed(
+                    "https://api.openrouter.ai.attacker.com/v1", env
                 )
             )
 
@@ -114,7 +135,7 @@ class EndpointMatrixTests(unittest.TestCase):
         with self.assertRaises(AIEnvironmentError):
             assert_endpoint_allowed("http://100.85.188.74:5062", env)
 
-    def test_each_stack_reaches_own_infra(self) -> None:
+    def test_each_stack_reaches_own_pinned_infra(self) -> None:
         self.assertTrue(
             is_endpoint_allowed(
                 "http://100.85.188.74:5062", AIStackEnv.DEVELOPMENT
@@ -125,6 +146,31 @@ class EndpointMatrixTests(unittest.TestCase):
                 "http://100.85.36.72:5062", AIStackEnv.PRODUCTION
             )
         )
+        # Pinning is per host, not the CGNAT range.
+        for env in AIStackEnv:
+            self.assertFalse(
+                is_endpoint_allowed("http://100.85.188.75:5062", env)
+            )
+        with patch.dict(
+            "os.environ",
+            {"RANCH_HOST_ALLOWLIST": "100.85.188.74,100.85.36.72"},
+            clear=False,
+        ):
+            self.assertTrue(
+                is_endpoint_allowed(
+                    "http://100.85.188.74:5062", AIStackEnv.DEVELOPMENT
+                )
+            )
+            self.assertFalse(
+                is_endpoint_allowed(
+                    "http://100.85.36.72:5062", AIStackEnv.DEVELOPMENT
+                )
+            )
+            self.assertTrue(
+                is_endpoint_allowed(
+                    "http://100.85.36.72:5062", AIStackEnv.PRODUCTION
+                )
+            )
 
     def test_public_hosts_blocked(self) -> None:
         for env in AIStackEnv:
@@ -182,10 +228,28 @@ class ChainEndpointTests(unittest.TestCase):
     def test_vector_stores_share_host_policy(self) -> None:
         for env in AIStackEnv:
             self.assertTrue(is_host_allowed("127.0.0.1", env))
-            self.assertTrue(
+            self.assertTrue(is_host_allowed("::1", env))
+            self.assertTrue(is_host_allowed("localhost", env))
+            self.assertFalse(is_host_allowed("attacker.com", env))
+            self.assertFalse(is_host_allowed("10.0.0.1", env))
+            self.assertFalse(is_host_allowed("0.0.0.0", env))
+            self.assertFalse(
                 is_endpoint_allowed(
                     "http://192.168.50.117:11434/api/embeddings",
                     env,
+                )
+            )
+        with patch.dict("os.environ", {"RANCH_ALLOW_PRIVATE_LAN": "1"}, clear=False):
+            self.assertTrue(
+                is_endpoint_allowed(
+                    "http://10.0.0.1:11434/api/embeddings",
+                    AIStackEnv.DEVELOPMENT,
+                )
+            )
+            self.assertFalse(
+                is_endpoint_allowed(
+                    "http://0.0.0.0:11434/api/embeddings",
+                    AIStackEnv.DEVELOPMENT,
                 )
             )
         self.assertTrue(

@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import unittest
 from unittest.mock import patch
 
 from tools.ai_intelligence.omlx_config import (
     OMLXConfig,
     OMLXConfigurationError,
+    _is_allowed_host,
     is_omlx_configured,
     is_omlx_model_id,
     to_omlx_model_name,
@@ -16,12 +18,12 @@ from tools.ai_intelligence.omlx_config import (
 
 class OMLXConfigTests(unittest.TestCase):
     def test_normalizes_base_url(self) -> None:
-        config = OMLXConfig("http://10.0.2.2:8000/v1/", "secret")
-        self.assertEqual(config.base_url, "http://10.0.2.2:8000/v1")
+        config = OMLXConfig("http://127.0.0.1:8000/v1/", "secret")
+        self.assertEqual(config.base_url, "http://127.0.0.1:8000/v1")
 
     def test_requires_api_key(self) -> None:
         with self.assertRaises(OMLXConfigurationError):
-            OMLXConfig("http://10.0.2.2:8000/v1", " ")
+            OMLXConfig("http://127.0.0.1:8000/v1", " ")
 
     def test_rejects_invalid_scheme(self) -> None:
         with self.assertRaises(OMLXConfigurationError):
@@ -30,7 +32,7 @@ class OMLXConfigTests(unittest.TestCase):
     @patch.dict(
         "os.environ",
         {
-            "OPENCLAW_OMLX_BASE_URL": "http://10.0.2.2:8000/v1",
+            "OPENCLAW_OMLX_BASE_URL": "http://127.0.0.1:8000/v1",
             "OPENCLAW_OMLX_API_KEY": "secret",
             "OPENCLAW_OMLX_TIMEOUT_SECONDS": "45",
         },
@@ -76,6 +78,21 @@ class OMLXConfigTests(unittest.TestCase):
     def test_rejects_unknown_model(self) -> None:
         with self.assertRaises(OMLXConfigurationError):
             to_omlx_model_name("omlx-unknown")
+
+    def test_private_host_is_blocked_until_opt_in(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"RANCH_ALLOW_PRIVATE_LAN": "0", "OMLX_HOST_ALLOWLIST": "", "ENVIRONMENT": ""},
+            clear=False,
+        ), patch("tools.security.allowlist._note_private_lan"):
+            self.assertTrue(_is_allowed_host("127.0.0.1"))
+            self.assertFalse(_is_allowed_host("10.0.0.1"))
+            self.assertFalse(_is_allowed_host("0.0.0.0"))
+        with patch.dict(
+            os.environ, {"RANCH_ALLOW_PRIVATE_LAN": "1"}, clear=False
+        ), patch("tools.security.allowlist._note_private_lan"):
+            self.assertTrue(_is_allowed_host("10.0.0.1"))
+            self.assertFalse(_is_allowed_host("0.0.0.0"))
 
 
 if __name__ == "__main__":

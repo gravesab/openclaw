@@ -1,17 +1,18 @@
 """Stack-environment isolation for AI provider endpoints.
 
-DEV reaches DEV, PROD reaches PROD. Each stack keeps loopback, private
-RFC1918, and .local egress, but the other stack's infrastructure hosts are
-always blocked. Third-party cloud hosts (OpenRouter) are reachable from
-either stack; privacy tiers still decide whether cloud may be used.
+DEV reaches DEV, PROD reaches PROD. Each stack may use loopback, its own
+pinned infrastructure host, and the pinned cloud hosts. Any other private
+address needs RANCH_ALLOW_PRIVATE_LAN=1 or an explicit host list. The other
+stack's infrastructure hosts stay blocked either way.
 """
 
 from __future__ import annotations
 
-import ipaddress
 from enum import Enum
 from os import environ
 from urllib.parse import urlparse
+
+from tools.security.allowlist import _is_allowed_host
 
 
 class AIEnvironmentError(ValueError):
@@ -43,19 +44,16 @@ PROD_BLOCKED_HOSTS = frozenset(
     }
 )
 
-# Third-party cloud endpoints. Not stack infrastructure, so no cross-env
-# link; reachable from either stack when privacy policy allows cloud.
-CLOUD_HOSTS = frozenset(
-    {
-        "openrouter.ai",
-    }
-)
+# Each stack's own server, pinned by exact Tailscale IP. No CGNAT range
+# and no mDNS names: only these hosts pass without an opt-in.
+DEV_OWN_HOSTS = frozenset({"100.85.188.74"})
+PROD_OWN_HOSTS = frozenset({"100.85.36.72"})
+
+# Third-party cloud endpoints. Not stack infrastructure, so either stack
+# may reach them; privacy tiers still decide whether cloud may be used.
+CLOUD_HOSTS = frozenset({"openrouter.ai"})
 
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-
-# Tailscale fleet range. CGNAT space is not RFC1918, and ipaddress does
-# not count it as private, so it needs its own allowance.
-_TAILSCALE_NETWORK = ipaddress.ip_network("100.64.0.0/10")
 
 
 def stack_env_from_env() -> AIStackEnv:
@@ -83,6 +81,16 @@ def blocked_hosts(env: AIStackEnv) -> frozenset[str]:
     raise AIEnvironmentError(f"Unsupported stack environment: {env}")
 
 
+def own_hosts(env: AIStackEnv) -> frozenset[str]:
+    """Return the pinned infrastructure hosts the given stack owns."""
+
+    if env is AIStackEnv.DEVELOPMENT:
+        return DEV_OWN_HOSTS
+    if env is AIStackEnv.PRODUCTION:
+        return PROD_OWN_HOSTS
+    raise AIEnvironmentError(f"Unsupported stack environment: {env}")
+
+
 def is_host_allowed(hostname: str, env: AIStackEnv) -> bool:
     """Return whether the stack may reach a host (no scheme needed).
 
@@ -95,18 +103,14 @@ def is_host_allowed(hostname: str, env: AIStackEnv) -> bool:
         return False
     if host in blocked_hosts(env):
         return False
-    if host in CLOUD_HOSTS:
-        return True
     if host in _LOOPBACK_HOSTS:
         return True
-    if host.endswith(".local"):
+    if host in own_hosts(env) or host in CLOUD_HOSTS:
         return True
-    try:
-        ip = ipaddress.ip_address(host)
-    except ValueError:
-        return False
-    return (
-        ip.is_loopback or ip.is_private or ip in _TAILSCALE_NETWORK
+    return _is_allowed_host(
+        host,
+        service="ai_environment",
+        allowlist_env="RANCH_HOST_ALLOWLIST",
     )
 
 

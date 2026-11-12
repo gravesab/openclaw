@@ -78,6 +78,41 @@ if "192.168.50.117" in ollama_cfg:
 if "127.0.0.1:8000" in omlx_cfg:
     log("EGR-OMLX-DEFAULT: 127.0.0.1:8000 OK", "INFO")
 
+def central_egress(src):
+    return "tools.security.allowlist" in src and "ip.is_private" not in src
+
+chat_src = read(ROOT/"tools/chat_agent/chat_agent.py")
+env_src = read(ROOT/"tools/ai_intelligence/ai_environment.py")
+handbook_src = read(ROOT/"tools/property_manager/handbook_eval/run_local_llm_handbook_eval.py")
+log(f"EGR-CHAT: {'PASS' if central_egress(chat_src) and '_post_local' in chat_src else 'FAIL'}")
+log(f"EGR-ENV-CHECK: {'PASS' if central_egress(env_src) else 'FAIL'}")
+log(f"EGR-HANDBOOK: {'PASS' if central_egress(handbook_src) and 'is_private_local_url' in handbook_src else 'FAIL'}")
+
+shell_files = [
+    ROOT / "tools/security/shell_guard.py",
+    ROOT / "tools/watchdog/watchdog.py",
+    ROOT / "tools/command_agent/command_agent.py",
+    ROOT / "tools/remediation/remediation_agent.py",
+    ROOT / "tools/recovery/recovery_agent.py",
+    ROOT / "tools/home_manager/home_manager.py",
+    ROOT / "tools/ai_summary/ai_summary_agent.py",
+]
+shell_src = {path.name: read(path) for path in shell_files}
+guard_src = shell_src["shell_guard.py"]
+agent_texts = [text for name, text in shell_src.items() if name != "shell_guard.py"]
+shell_allowlist = (
+    "_is_allowed_host" in guard_src
+    and "allowed_url" in guard_src
+    and all("from tools.security.shell_guard import" in text for text in agent_texts)
+)
+shell_no_true = "shell=True" not in "\n".join(shell_src.values()) and "shell=False" in guard_src
+shell_timeout = "DEFAULT_TIMEOUT = 30" in guard_src and "timeout=bounded" in guard_src
+shell_approval = "RANCH_SHELL_APPROVAL" in guard_src and "dry-run: approval required" in guard_src and "state_changing=True" in shell_src["remediation_agent.py"] and "state_changing=True" in shell_src["command_agent.py"] and "restart" not in shell_src["watchdog.py"]
+log(f"SHELL-ALLOWLIST: {'PASS' if shell_allowlist else 'FAIL'}")
+log(f"SHELL-NO-SHELL-TRUE: {'PASS' if shell_no_true else 'FAIL'}")
+log(f"SHELL-TIMEOUT: {'PASS' if shell_timeout else 'FAIL'}")
+log(f"SHELL-APPROVAL: {'PASS' if shell_approval else 'FAIL'}")
+
 # 3. Prompt injection detector
 chat_agent = read(ROOT/"tools/chat_agent/chat_agent.py")
 has_detector = any(k in chat_agent for k in ["injection","detect","DETECT","EJECT","qwen","score"])
@@ -147,23 +182,26 @@ log(f"UPLOAD-PDF-SIG: {'PASS' if has_pdf_sig else 'FAIL'}")
 log(f"UPLOAD-TRAVERSAL: {'PASS' if has_traversal else 'FAIL'}")
 log(f"UPLOAD-SIZE-LIMIT: {'PASS' if has_size else 'FAIL'}")
 
+watchdog_src = read(ROOT / "tools/watchdog/watchdog.py")
+sentinel_loop = read(ROOT / "tools/security/sentinel.py")
+actuator_src = read(ROOT / "tools/security/actuator.py")
+soc_src = read(ROOT / "tools/security/soc_analyst.py")
+log(f"WATCHDOG-DRY-RUN: {'PASS' if '_redis_client' in watchdog_src and 'redis dry-run' in watchdog_src else 'FAIL'}")
+log(f"SENTINEL-LOOPBACK: {'PASS' if 'host=\"127.0.0.1\"' in sentinel_loop and 'unspecified bind' in sentinel_loop else 'FAIL'}")
+log(f"SENTINEL-HEALTH: {'PASS' if 'def health' in sentinel_loop and '\"bind\": \"127.0.0.1\"' in sentinel_loop else 'FAIL'}")
+log(f"SNAPSHOT-FALLBACK: {'PASS' if 'redteam_logs' in actuator_src and 'incidents' in actuator_src and '0o400' in actuator_src else 'FAIL'}")
+log(f"SOC-LOCAL-ONLY: {'PASS' if '127.0.0.1' in soc_src and '\"applied\": False' in soc_src else 'FAIL'}")
+
 log("=== Phase 3 Verify END ===")
 
 # --- Generate fix patches ---
 print("\n--- FIX PATCHES ---\n")
 
 fix_ollama = '''
-# PATCH for tools/ai_intelligence/ollama_config.py - add DEV allowlist
-import ipaddress
-def _is_allowed_host(hostname: str) -> bool:
-    if hostname in ("127.0.0.1","localhost","::1"): return True
-    if hostname.endswith(".local"): return True
-    try:
-        ip = ipaddress.ip_address(hostname)
-        return ip.is_loopback or ip.is_private  # 10/8, 172.16/12, 192.168/16
-    except: return False
-# In __post_init__ after hostname check:
-# if not _is_allowed_host(parsed.hostname): raise OllamaConfigurationError("DEV only: localhost/private IPs allowed")
+# PATCH for tools/ai_intelligence/ollama_config.py - loopback allowlist
+# Default hosts: 127.0.0.1, localhost, ::1. Reject 0.0.0.0.
+# RFC1918 only when RANCH_ALLOW_PRIVATE_LAN=1, or via OLLAMA_HOST_ALLOWLIST.
+# .local only when ENVIRONMENT=development and RANCH_ALLOW_PRIVATE_LAN=1.
 '''
 print(fix_ollama)
 

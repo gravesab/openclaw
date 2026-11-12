@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from os import environ
 from urllib.parse import urlparse
 
+from tools.ai_intelligence.egress_allowlist import host_allowed
+
 
 class OMLXConfigurationError(ValueError):
     """Raised when oMLX provider configuration is invalid."""
@@ -14,6 +16,11 @@ class OMLXConfigurationError(ValueError):
 MODEL_NAME_MAP: dict[str, str] = {
     "omlx-qwen3.5-9b-4bit": "Qwen3.5-9B-4bit",
 }
+
+
+def _is_allowed_host(hostname: str) -> bool:
+    """Loopback allowlist. RFC1918 requires RANCH_ALLOW_PRIVATE_LAN=1."""
+    return host_allowed(hostname, service="omlx", allowlist_env="OMLX_HOST_ALLOWLIST")
 
 
 @dataclass(frozen=True)
@@ -29,39 +36,25 @@ class OMLXConfig:
         object.__setattr__(self, "base_url", normalized_url)
         parsed = urlparse(normalized_url)
         if parsed.scheme not in {"http", "https"}:
-            raise OMLXConfigurationError(
-                "oMLX base URL must use http or https"
-            )
+            raise OMLXConfigurationError("oMLX base URL must use http or https")
         if not parsed.hostname:
-            raise OMLXConfigurationError(
-                "oMLX base URL must include a hostname"
-            )
+            raise OMLXConfigurationError("oMLX base URL must include a hostname")
+        if not _is_allowed_host(parsed.hostname):
+            raise OMLXConfigurationError(f"DEV-only egress blocked: {parsed.hostname} not allowed")
         if not self.api_key.strip():
-            raise OMLXConfigurationError(
-                "oMLX API key must not be blank"
-            )
+            raise OMLXConfigurationError("oMLX API key must not be blank")
         if self.default_timeout_seconds <= 0:
-            raise OMLXConfigurationError(
-                "Default timeout must be greater than zero"
-            )
+            raise OMLXConfigurationError("Default timeout must be greater than zero")
 
     @classmethod
     def from_env(cls) -> "OMLXConfig":
-        raw_timeout = environ.get(
-            "OPENCLAW_OMLX_TIMEOUT_SECONDS", "300"
-        )
+        raw_timeout = environ.get("OPENCLAW_OMLX_TIMEOUT_SECONDS", "300")
         try:
             timeout = float(raw_timeout)
         except ValueError as exc:
-            raise OMLXConfigurationError(
-                "OPENCLAW_OMLX_TIMEOUT_SECONDS must be numeric"
-            ) from exc
-
+            raise OMLXConfigurationError("OPENCLAW_OMLX_TIMEOUT_SECONDS must be numeric") from exc
         return cls(
-            base_url=environ.get(
-                "OPENCLAW_OMLX_BASE_URL",
-                "http://127.0.0.1:8000/v1",
-            ),
+            base_url=environ.get("OPENCLAW_OMLX_BASE_URL", "http://127.0.0.1:8000/v1"),
             api_key=environ.get("OPENCLAW_OMLX_API_KEY", ""),
             default_timeout_seconds=timeout,
         )
@@ -69,25 +62,20 @@ class OMLXConfig:
 
 def is_omlx_configured() -> bool:
     """Return whether an oMLX credential is available in the environment."""
-
     return bool(environ.get("OPENCLAW_OMLX_API_KEY", "").strip())
 
 
 def to_omlx_model_name(model_id: str) -> str:
     """Translate an AI Intelligence model ID into an oMLX model name."""
-
     normalized_id = model_id.strip()
     if not normalized_id:
         raise OMLXConfigurationError("model_id must not be blank")
     try:
         return MODEL_NAME_MAP[normalized_id]
     except KeyError as exc:
-        raise OMLXConfigurationError(
-            f"Unsupported oMLX model ID: {normalized_id}"
-        ) from exc
+        raise OMLXConfigurationError(f"Unsupported oMLX model ID: {normalized_id}") from exc
 
 
 def is_omlx_model_id(model_id: str) -> bool:
     """Return whether a model ID belongs to the oMLX provider."""
-
     return model_id.strip().startswith("omlx-")

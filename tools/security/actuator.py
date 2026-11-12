@@ -56,6 +56,26 @@ def incident_dir() -> Path:
     return fallback
 
 
+def _recent_events(limit: int = 5) -> list[dict]:
+    chain = Path(__file__).resolve().parents[2] / "redteam_logs" / "security_chain.jsonl"
+    if not chain.exists():
+        return []
+    rows: list[dict] = []
+    for line in chain.read_text().splitlines()[-limit:]:
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        rows.append(
+            {
+                "type": record.get("type"),
+                "service": record.get("service"),
+                "hash": record.get("hash"),
+            }
+        )
+    return rows
+
+
 def snapshot_incident(record: dict) -> Path:
     directory = incident_dir()
     stamp = int(datetime.now(timezone.utc).timestamp())
@@ -70,15 +90,24 @@ def snapshot_incident(record: dict) -> Path:
         "docker_pause": False,
         "tokens_revoked": 0,
         "stamp": stamp,
-        "recent_events": [],
+        "recent_events": _recent_events(),
     }
     path.write_text(json.dumps(bundle, indent=2, sort_keys=True))
     path.chmod(0o400)
     return path
 
 
+def _approved() -> bool:
+    return os.environ.get("RANCH_SHELL_APPROVAL") == "1"
+
+
 def pause_container(name: str) -> bool:
-    if dry_run() or os.environ.get("RANCH_ACTUATOR_PAUSE", "0") != "1" or not _development():
+    if (
+        dry_run()
+        or not _approved()
+        or os.environ.get("RANCH_ACTUATOR_PAUSE", "0") != "1"
+        or not _development()
+    ):
         return False
     if not _CONTAINER_NAME.fullmatch(name):
         return False
@@ -87,12 +116,19 @@ def pause_container(name: str) -> bool:
         check=False,
         capture_output=True,
         text=True,
+        timeout=30,
+        shell=False,
     )
     return completed.returncode == 0
 
 
 def revoke_tokens(tenant_id: str) -> int:
-    if dry_run() or os.environ.get("RANCH_ACTUATOR_REVOKE", "0") != "1" or not _development():
+    if (
+        dry_run()
+        or not _approved()
+        or os.environ.get("RANCH_ACTUATOR_REVOKE", "0") != "1"
+        or not _development()
+    ):
         return 0
     if not _TENANT_ID.fullmatch(tenant_id):
         return 0
@@ -105,7 +141,7 @@ def revoke_tokens(tenant_id: str) -> int:
 
 
 def freeze_memory_writes() -> None:
-    if dry_run() or not _development():
+    if dry_run() or not _approved() or not _development():
         return
     try:
         client = _redis()

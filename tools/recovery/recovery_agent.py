@@ -1,8 +1,16 @@
 import json
 import os
-import socket
-import subprocess
+import re
+import sys
 from datetime import datetime
+from pathlib import Path
+from urllib.parse import urlparse
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.security.shell_guard import allowed_url, run_checked
 
 import psycopg2
 import redis
@@ -21,9 +29,9 @@ if os.environ.get("OPENCLAW_DB_PASSWORD"):
 DASHBOARD_URL = "http://127.0.0.1:5050"
 OLLAMA_URL = os.environ.get(
     "OPENCLAW_OLLAMA_BASE_URL",
-    "http://192.168.50.117:11434",
+    "http://127.0.0.1:11434",
 ).rstrip("/")
-VOICE_HEALTH_URL = "http://192.168.50.117:6060/health"
+VOICE_HEALTH_URL = "http://127.0.0.1:6060/health"
 HOME_ASSISTANT_URL = "http://127.0.0.1:8123"
 SCRYPTED_CONTAINER = "scrypted"
 
@@ -36,15 +44,7 @@ REQUIRED_CONTAINERS = [
 ]
 
 def run_cmd(command):
-    try:
-        return subprocess.check_output(
-            command,
-            shell=True,
-            text=True,
-            stderr=subprocess.STDOUT
-        ).strip()
-    except Exception as e:
-        return str(e)
+    return run_checked(command, state_changing=False, timeout=30, service="recovery")
 
 def publish(event_type, message):
     event = {
@@ -65,6 +65,8 @@ def publish(event_type, message):
     print(json.dumps(event, indent=2))
 
 def check_redis():
+    if not _is_loopback_only(REDIS_HOST):
+        return False, "Redis host is not loopback"
     try:
         r = redis.Redis(
             host=REDIS_HOST,
@@ -76,6 +78,8 @@ def check_redis():
         return False, f"Redis failed: {e}"
 
 def check_postgres():
+    if not _is_loopback_only(POSTGRES_DB["host"]):
+        return False, "PostgreSQL host is not loopback"
     try:
         conn = psycopg2.connect(**POSTGRES_DB)
         cur = conn.cursor()
@@ -88,6 +92,8 @@ def check_postgres():
         return False, f"PostgreSQL failed: {e}"
 
 def check_http(name, url):
+    if _loopback_http_url(url) is None or not allowed_url(url, service="recovery"):
+        return False, f"{name} URL is not loopback"
     try:
         response = requests.get(url, timeout=10)
         if response.status_code < 500:
@@ -96,16 +102,31 @@ def check_http(name, url):
     except Exception as e:
         return False, f"{name} failed: {e}"
 
+def _is_loopback_only(hostname):
+    return hostname in {"127.0.0.1", "::1"}
+
+def _loopback_http_url(url):
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"}:
+        return None
+    if not _is_loopback_only(parsed.hostname):
+        return None
+    return url
+
 def check_ollama():
+    if _loopback_http_url(OLLAMA_URL) is None or not allowed_url(OLLAMA_URL, service="recovery"):
+        return False, "Ollama URL is not loopback"
     try:
         response = requests.get(OLLAMA_URL, timeout=10)
         if "Ollama is running" in response.text:
-            return True, "Ollama reachable on M4"
+            return True, "Ollama reachable"
         return False, f"Ollama unexpected response: {response.text[:120]}"
     except Exception as e:
         return False, f"Ollama failed: {e}"
 
 def check_voice():
+    if _loopback_http_url(VOICE_HEALTH_URL) is None or not allowed_url(VOICE_HEALTH_URL, service="recovery"):
+        return False, "Voice URL is not loopback"
     try:
         response = requests.get(VOICE_HEALTH_URL, timeout=10)
         data = response.json()
@@ -116,7 +137,7 @@ def check_voice():
         return False, f"Voice service failed: {e}"
 
 def check_containers():
-    running = run_cmd("docker ps --format '{{.Names}}'").splitlines()
+    running = run_cmd(["docker", "ps", "--format", "{{.Names}}"]).splitlines()
     missing = [
         name for name in REQUIRED_CONTAINERS
         if name not in running
@@ -128,7 +149,9 @@ def check_containers():
     return True, "All required containers running"
 
 def check_systemd_service(service_name):
-    result = run_cmd(f"systemctl is-active {service_name}")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9@._-]*", service_name):
+        return False, f"{service_name} not active: command refused"
+    result = run_cmd(["systemctl", "is-active", service_name])
     if result == "active":
         return True, f"{service_name} active"
     return False, f"{service_name} not active: {result}"

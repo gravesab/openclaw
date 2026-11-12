@@ -1,3 +1,4 @@
+import hashlib
 import json
 import os
 import sys
@@ -9,8 +10,14 @@ import psycopg2
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
-import ipaddress
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.security.allowlist import _append_chain
+from tools.security.allowlist import _is_allowed_host as _central_allowed_host
+from tools.security.allowlist import _notify_sentinel
 
 ENV_FILE = Path("/home/gravesab/.openclaw/credentials/chat-agent.env")
 
@@ -30,15 +37,11 @@ load_environment()
 
 
 def _is_allowed_host(hostname: str) -> bool:
-    if hostname in ("127.0.0.1", "localhost", "::1"):
-        return True
-    if hostname.endswith(".local"):
-        return True
-    try:
-        ip = ipaddress.ip_address(hostname)
-        return ip.is_loopback or ip.is_private
-    except Exception:
-        return False
+    return _central_allowed_host(
+        hostname,
+        service="chat_agent",
+        allowlist_env="OLLAMA_HOST_ALLOWLIST",
+    )
 
 
 def _validate_local_url(url: str, name: str) -> str:
@@ -101,25 +104,16 @@ def sanitize_context(name: str, text: str, max_len: int = 2000) -> str:
     return f"{name}: {sanitized}"
 
 
-def _notify_sentinel(event: dict) -> None:
-    if os.environ.get("RANCH_SENTINEL_ENABLED", "0") != "1":
-        return
-    url = os.environ.get("RANCH_SENTINEL_URL", "http://127.0.0.1:8001/sense")
+def _post_local(url: str, **kwargs):
     parsed = urlparse(url)
-    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
-        return
-    payload = json.dumps(event).encode("utf-8")
-    request = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-    try:
-        with urlopen(request, timeout=0.5):
-            return
-    except Exception as exc:
-        print(f"[sentinel] {type(exc).__name__}", file=sys.stderr)
+    if not _is_allowed_host(parsed.hostname or ""):
+        raise ValueError(f"DEV-only: {parsed.hostname or url} not allowed")
+    return requests.post(url, **kwargs)
 
 
 def _query_detector(model: str, question: str, timeout: float):
     try:
-        response = requests.post(
+        response = _post_local(
             OLLAMA_URL,
             json={
                 "model": model,
@@ -187,7 +181,7 @@ def cmd(command: list[str]) -> str:
 
 
 def embed(text):
-    response = requests.post(
+    response = _post_local(
         EMBED_URL,
         json={"model": EMBED_MODEL, "prompt": text},
         timeout=120,
@@ -277,12 +271,17 @@ def ask_llm(question):
     score, reason = detect_injection(question)
     if score >= DETECTOR_THRESHOLD:
         print(f"[SECURITY] EJECT score={score} reason={reason}", file=sys.stderr)
-        _notify_sentinel({
+        event = {
             "type": "chat.injection",
             "service": "chat_agent",
             "score": score,
-            "payload": {"reason": reason, "question": question[:500]},
-        })
+            "payload": {
+                "reason": reason,
+                "question_hash": hashlib.sha256(question.encode()).hexdigest(),
+            },
+        }
+        _append_chain(event)
+        _notify_sentinel(event)
         raise ValueError(f"EJECT injection score {score:.2f} reason={reason}")
     infrastructure = safe_context("Infrastructure status", infrastructure_status)
     events = safe_context("Recent events", recent_events)
@@ -302,7 +301,7 @@ def ask_llm(question):
 {safe_question}
 </user_question>
 Answer directly, concisely. Do not invent status.'''
-    response = requests.post(
+    response = _post_local(
         OLLAMA_URL,
         json={"model": MODEL, "prompt": context, "stream": False},
         timeout=180,

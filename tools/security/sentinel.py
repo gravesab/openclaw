@@ -6,9 +6,14 @@ import hashlib
 import json
 import os
 import socket
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from time import perf_counter
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import redis
 from fastapi import FastAPI
@@ -200,6 +205,20 @@ def quarantine(service: str) -> dict:
     return {"quarantined": flagged}
 
 
+def _health_body() -> dict:
+    return {"status": "ok", "bind": "127.0.0.1", "redis": _redis_reachable()}
+
+
+@app.get("/")
+def root() -> dict:
+    return _health_body()
+
+
+@app.get("/health")
+def health() -> dict:
+    return _health_body()
+
+
 @app.get("/status")
 def status() -> dict:
     try:
@@ -210,6 +229,18 @@ def status() -> dict:
 
 
 if __name__ == "__main__":
+    if "--dry-run" in sys.argv:
+        os.environ["RANCH_SENTINEL_DRY_RUN"] = "1"
+    if any(part in {"0.0.0.0", "::"} for part in sys.argv[1:]):
+        _append_chain(
+            {
+                "type": "sentinel.bind_refused",
+                "service": "sentinel",
+                "score": 0.95,
+                "payload": {"bind": "unspecified"},
+            }
+        )
+        raise SystemExit("sentinel refuses an unspecified bind")
     if os.environ.get("ENVIRONMENT") != "development":
         raise SystemExit("sentinel refuses to start unless ENVIRONMENT=development")
     import uvicorn

@@ -1,4 +1,0 @@
-module third_party_IsAppEncrypted {
-umbrella "/Users/andrewgraves/Developer/OpenClaw-DEV/packages/RanchAuth/.build/checkouts/GoogleUtilities/third_party/IsAppEncrypted/Public"
-export *
-}

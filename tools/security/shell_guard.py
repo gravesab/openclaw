@@ -135,7 +135,17 @@ def _docker_ps(args: list[str]) -> bool:
     return index > 0
 
 
+# psql under this setting refuses writes, so the exec is a read.
+_READ_ONLY_PSQL = ["-e", "PGOPTIONS=-c default_transaction_read_only=on"]
+
+
+def _read_only_exec(args: list[str]) -> bool:
+    return args[: len(_READ_ONLY_PSQL)] == _READ_ONLY_PSQL
+
+
 def _docker_exec(args: list[str]) -> bool:
+    if _read_only_exec(args):
+        args = args[len(_READ_ONLY_PSQL) :]
     if len(args) != 11:
         return False
     container, program, user_flag, user, db_flag, database, verbose, stop, tuples, command_flag, query = args
@@ -184,7 +194,11 @@ def _allowed_argv(argv: list[str]) -> bool:
 
 
 def _mutating(argv: list[str]) -> bool:
-    return argv[0] == "docker" and argv[1] in {"restart", "exec"}
+    if argv[0] != "docker":
+        return False
+    if argv[1] == "exec":
+        return not _read_only_exec(argv[2:])
+    return argv[1] == "restart"
 
 
 def _audit(

@@ -116,6 +116,22 @@ class ShellGuardTests(unittest.TestCase):
             self.assertEqual(run_checked(argv, service="test", input_text="a\nb"), "eject")
             run.assert_not_called()
 
+    def test_read_only_memory_query_runs_without_approval(self):
+        query = "SELECT json_build_object('a', a)::text FROM long_term_memory ORDER BY 1 LIMIT 5"
+        psql = ["postgres", "psql", "-U", "openclaw", "-d", "openclaw", "-v", "ON_ERROR_STOP=1", "-At", "-c", query]
+        read_only = ["docker", "exec", "-e", "PGOPTIONS=-c default_transaction_read_only=on", *psql]
+        with patch("tools.security.shell_guard.subprocess.run") as run:
+            run.return_value.stdout = "{}\n"
+            run.return_value.stderr = ""
+            run.return_value.returncode = 0
+            self.assertEqual(run_checked(read_only, service="test"), "{}")
+            run.assert_called_once()
+            self.assertEqual(run.call_args.args[0], read_only)
+            run.reset_mock()
+            # Without the read-only session the same exec stays a dry run.
+            self.assertEqual(run_checked(["docker", "exec", *psql], service="test"), "dry-run: approval required")
+            run.assert_not_called()
+
     def test_agents_delegate_and_keep_the_shell_off(self):
         for path in AGENTS:
             text = path.read_text()

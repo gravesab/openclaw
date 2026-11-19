@@ -75,13 +75,16 @@ def recent_memories(limit=5):
         ORDER BY created_at DESC
         LIMIT {safe_limit}
     """
+    # Read-only psql session: Postgres refuses writes, so no approval is needed.
     result = run_checked(
         [
-            "docker", "exec", DB_CONTAINER,
+            "docker", "exec",
+            "-e", "PGOPTIONS=-c default_transaction_read_only=on",
+            DB_CONTAINER,
             "psql", "-U", DB_USER, "-d", DB_NAME,
             "-v", "ON_ERROR_STOP=1", "-At", "-c", query,
         ],
-        state_changing=True,
+        state_changing=False,
         timeout=20,
         service="ai_summary",
     )

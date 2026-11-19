@@ -21,6 +21,16 @@ final class ServerAddressTests: XCTestCase {
         }
     }
 
+    /// Dashboard library requests carry credentials too, so their aliases map to Tailscale as well.
+    @MainActor
+    func testSavedDashboardAliasesUseTailscale() {
+        let builtIn = "http://100.85.36.72:5051"
+        let aliases = ["http://192.168.50.104:5051", "http://intelmini.local:5051"]
+        for saved in ["http://intelmini.local:5051/", "http://192.168.50.104:5051"] {
+            XCTAssertEqual(PropertyStore.baseURL(stored: saved, builtIn: builtIn, otherAddresses: aliases), builtIn, saved)
+        }
+    }
+
     func testNoBuiltInAddressUsesALocalHostName() {
         typealias Env = PropertyManagerBuildEnvironment
         for address in [Env.apiBaseURL, Env.manualLibraryBaseURL] {

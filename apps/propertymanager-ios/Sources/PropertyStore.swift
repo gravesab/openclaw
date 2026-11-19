@@ -80,6 +80,16 @@ final class PropertyStore: ObservableObject {
         )
     }
 
+    /// The Dashboard address library requests use, mapped the same way: these requests carry
+    /// the API key and PIN too, so a saved Wi-Fi or .local alias must not be used as stored.
+    var activeManualLibraryBaseURL: String {
+        Self.baseURL(
+            stored: manualLibraryBaseURL,
+            builtIn: PropertyManagerBuildEnvironment.manualLibraryBaseURL,
+            otherAddresses: PropertyManagerBuildEnvironment.manualLibraryOtherAddresses
+        )
+    }
+
     var client: PropertyAPIClient {
         PropertyAPIClient(
             baseURLString: activeAPIBaseURL,

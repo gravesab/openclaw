@@ -10,12 +10,9 @@ enum PropertyManagerBuildEnvironment {
     static let apiBaseURL = "http://100.104.100.96:15062"
     static let manualLibraryBaseURLKey = "propertyManager.dev.v2.manualLibraryBaseURL"
     static let manualLibraryBaseURL = "http://100.104.100.96:15051"
-    /// Ranch Wi-Fi addresses, tried before Tailscale when on the local network.
-    /// The Mac relays the DEV API on its LAN; the DEV Dashboard is relayed on Tailscale only.
-    static let apiLANBaseURL: String? = "http://andrew-m4-pro-2.local:5062"
-    static let manualLibraryLANBaseURL: String? = nil
-    /// Other addresses of the same servers; a saved one is treated as the built-in address.
-    static let apiOtherAddresses: [String] = []
+    /// Other addresses of the same servers; a saved one is replaced by the Tailscale address.
+    /// The Mac's Wi-Fi name is listed so builds that saved it move back to Tailscale.
+    static let apiOtherAddresses = ["http://andrew-m4-pro-2.local:5062"]
     static let manualLibraryOtherAddresses: [String] = []
     static let apiKeyKey = "propertyManager.dev.apiKey"
     static let operatorPINKey = "propertyManager.dev.operatorPIN"
@@ -28,12 +25,10 @@ enum PropertyManagerBuildEnvironment {
     static let apiBaseURL = "http://100.85.36.72:5062"
     static let manualLibraryBaseURLKey = "propertyManager.manualLibraryBaseURL"
     static let manualLibraryBaseURL = "http://100.85.36.72:5051"
-    /// Ranch Wi-Fi addresses of the Intel Mini, tried before Tailscale when on the local network.
-    static let apiLANBaseURL: String? = "http://intelmini.local:5062"
-    static let manualLibraryLANBaseURL: String? = "http://intelmini.local:5051"
-    /// Other addresses of the Intel Mini. Older builds saved its Wi-Fi IP, which fails off the ranch.
-    static let apiOtherAddresses = ["http://192.168.50.104:5062"]
-    static let manualLibraryOtherAddresses = ["http://192.168.50.104:5051"]
+    /// Other addresses of the Intel Mini. Older builds saved its Wi-Fi IP or .local name, which
+    /// fail off the ranch and send credentials in cleartext; a saved one is replaced by Tailscale.
+    static let apiOtherAddresses = ["http://192.168.50.104:5062", "http://intelmini.local:5062"]
+    static let manualLibraryOtherAddresses = ["http://192.168.50.104:5051", "http://intelmini.local:5051"]
     static let apiKeyKey = "propertyManager.apiKey"
     static let operatorPINKey = "propertyManager.operatorPIN"
     static let operatorIdentityKey = "propertyManager.operatorIdentity"
@@ -75,13 +70,15 @@ final class PropertyStore: ObservableObject {
     @Published private(set) var recentlyClearedTaskIDs: Set<UUID> = []
     @Published var errorMessage: String?
     @Published var statusMessage: String?
-    /// Addresses in use after routing; requests go here, not to the Settings text directly.
-    @Published private(set) var activeAPIBaseURL: String = PropertyManagerBuildEnvironment.apiBaseURL
-    @Published private(set) var activeManualLibraryBaseURL: String = PropertyManagerBuildEnvironment.manualLibraryBaseURL
-    @Published private(set) var apiConnectionVia: ServerRouteVia?
-
-    private let routeResolver = ServerRouteResolver()
-    private var pathWatcher: NetworkPathWatcher?
+    /// The API address requests use: the Tailscale address for any address of the built-in
+    /// server, otherwise the address as typed. Credentials only go to the server over Tailscale.
+    var activeAPIBaseURL: String {
+        Self.baseURL(
+            stored: apiBaseURL,
+            builtIn: PropertyManagerBuildEnvironment.apiBaseURL,
+            otherAddresses: PropertyManagerBuildEnvironment.apiOtherAddresses
+        )
+    }
 
     var client: PropertyAPIClient {
         PropertyAPIClient(
@@ -230,92 +227,38 @@ final class PropertyStore: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    /// True when a saved address is one of the built-in server's own addresses (Tailscale, LAN,
-    /// or another known address), which means "route automatically".
-    static func isBuiltInServer(stored: String, tailscaleDefault: String, lanDefault: String?, otherAddresses: [String] = []) -> Bool {
-        let typed = stored.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        return typed == tailscaleDefault || typed == lanDefault || otherAddresses.contains(typed)
+    /// True when a saved address is one of the built-in server's own addresses.
+    static func isBuiltInServer(stored: String, builtIn: String, otherAddresses: [String] = []) -> Bool {
+        let typed = trimmedAddress(stored)
+        return typed == builtIn || otherAddresses.contains(typed)
     }
 
-    /// The built-in server in Settings means "route automatically"; any other address is used as typed.
-    static func route(stored: String, tailscaleDefault: String, lanDefault: String?, otherAddresses: [String] = []) -> ServerRoute? {
-        if isBuiltInServer(stored: stored, tailscaleDefault: tailscaleDefault, lanDefault: lanDefault, otherAddresses: otherAddresses) {
-            guard let tailscale = URL(string: tailscaleDefault) else { return nil }
-            return ServerRoute(lan: lanDefault.flatMap(URL.init(string:)), tailscale: tailscale)
-        }
-        let typed = stored.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        guard let url = URL(string: typed), url.scheme != nil, url.host != nil else { return nil }
-        return .fixed(url)
+    /// The built-in server always means its Tailscale address; any other address is used as typed.
+    static func baseURL(stored: String, builtIn: String, otherAddresses: [String] = []) -> String {
+        isBuiltInServer(stored: stored, builtIn: builtIn, otherAddresses: otherAddresses) ? builtIn : trimmedAddress(stored)
     }
 
-    var apiRoute: ServerRoute? {
-        Self.route(
-            stored: apiBaseURL,
-            tailscaleDefault: PropertyManagerBuildEnvironment.apiBaseURL,
-            lanDefault: PropertyManagerBuildEnvironment.apiLANBaseURL,
-            otherAddresses: PropertyManagerBuildEnvironment.apiOtherAddresses
-        )
-    }
-
-    var manualLibraryRoute: ServerRoute? {
-        Self.route(
-            stored: manualLibraryBaseURL,
-            tailscaleDefault: PropertyManagerBuildEnvironment.manualLibraryBaseURL,
-            lanDefault: PropertyManagerBuildEnvironment.manualLibraryLANBaseURL,
-            otherAddresses: PropertyManagerBuildEnvironment.manualLibraryOtherAddresses
-        )
+    private static func trimmedAddress(_ stored: String) -> String {
+        stored.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
     }
 
     /// Shows the built-in address in Settings when a saved address is another address of the same server.
     private func showBuiltInAddressesInSettings() {
         typealias Env = PropertyManagerBuildEnvironment
         if apiBaseURL != Env.apiBaseURL,
-           Self.isBuiltInServer(stored: apiBaseURL, tailscaleDefault: Env.apiBaseURL, lanDefault: Env.apiLANBaseURL, otherAddresses: Env.apiOtherAddresses) {
+           Self.isBuiltInServer(stored: apiBaseURL, builtIn: Env.apiBaseURL, otherAddresses: Env.apiOtherAddresses) {
             apiBaseURL = Env.apiBaseURL
         }
         if manualLibraryBaseURL != Env.manualLibraryBaseURL,
-           Self.isBuiltInServer(stored: manualLibraryBaseURL, tailscaleDefault: Env.manualLibraryBaseURL, lanDefault: Env.manualLibraryLANBaseURL, otherAddresses: Env.manualLibraryOtherAddresses) {
+           Self.isBuiltInServer(stored: manualLibraryBaseURL, builtIn: Env.manualLibraryBaseURL, otherAddresses: Env.manualLibraryOtherAddresses) {
             manualLibraryBaseURL = Env.manualLibraryBaseURL
         }
-    }
-
-    /// Chooses Ranch Wi-Fi or Tailscale for the API and the Dashboard. `forget` drops
-    /// earlier choices after the network changed or a request could not connect.
-    func resolveRoutes(forget: Bool = false) async {
-        if pathWatcher == nil {
-            pathWatcher = NetworkPathWatcher { [weak self] in
-                Task { await self?.networkChanged() }
-            }
-        }
-        showBuiltInAddressesInSettings()
-        if forget { await routeResolver.forgetChoices() }
-        await pathWatcher?.waitForFirstPath()
-        let onLocalNetwork = pathWatcher?.onLocalNetwork ?? false
-        if let route = apiRoute {
-            let chosen = await routeResolver.resolve(route, onLocalNetwork: onLocalNetwork)
-            activeAPIBaseURL = chosen.url.absoluteString
-            apiConnectionVia = route.lan == nil ? nil : chosen.via
-        } else {
-            activeAPIBaseURL = apiBaseURL
-            apiConnectionVia = nil
-        }
-        if let route = manualLibraryRoute {
-            activeManualLibraryBaseURL = await routeResolver.resolve(route, onLocalNetwork: onLocalNetwork).url.absoluteString
-        } else {
-            activeManualLibraryBaseURL = manualLibraryBaseURL
-        }
-    }
-
-    private func networkChanged() async {
-        await resolveRoutes(forget: true)
-        await refresh()
-        await refreshAssets()
     }
 
     func testConnection() async {
         errorMessage = nil
         statusMessage = "Testing connection…"
-        await resolveRoutes(forget: true)
+        showBuiltInAddressesInSettings()
         do {
             try await client.authCheck()
             let health = try await client.health()
@@ -331,8 +274,7 @@ final class PropertyStore: ObservableObject {
                 return
             }
             let label = health.status ?? "ok"
-            let via = apiConnectionVia.map { " via \($0.label)" } ?? ""
-            statusMessage = "Online\(via) — \(label) · \(tasks.count) tasks, \(assets.count) assets"
+            statusMessage = "Online — \(label) · \(tasks.count) tasks, \(assets.count) assets"
         } catch {
             guard !error.isCancellation else { return }
             statusMessage = nil
@@ -348,41 +290,12 @@ final class PropertyStore: ObservableObject {
         }
         defer { isLoading = false }
 
-        await resolveRoutes()
+        showBuiltInAddressesInSettings()
         do {
             try await loadTasksAndCategories()
-        } catch where ServerRouteResolver.isUnreachable(error) {
-            // The chosen address stopped answering, for example Wi-Fi dropped mid-request: route again once.
-            await resolveRoutes(forget: true)
-            do {
-                try await loadTasksAndCategories()
-            } catch {
-                errorMessage = error.localizedDescription
-            }
         } catch {
             guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription
-        }
-    }
-
-    private func fetchAssetsRerouting() async throws -> [RanchAsset] {
-        do {
-            return try await client.fetchAssets()
-        } catch where ServerRouteResolver.isUnreachable(error) {
-            await resolveRoutes(forget: true)
-            return try await client.fetchAssets()
-        }
-    }
-
-    /// Runs a write on the chosen address. When the request never reached a server
-    /// (for example a cached Ranch Wi-Fi host that is gone), routes again and retries
-    /// once. Timeouts are not retried, so a write is never sent twice.
-    private func withRerouting<T>(_ operation: (PropertyAPIClient) async throws -> T) async throws -> T {
-        do {
-            return try await operation(client)
-        } catch where ServerRouteResolver.neverReachedServer(error) {
-            await resolveRoutes(forget: true)
-            return try await operation(client)
         }
     }
 
@@ -400,9 +313,9 @@ final class PropertyStore: ObservableObject {
             errorMessage = nil
         }
         defer { isLoadingAssets = false }
-        await resolveRoutes()
+        showBuiltInAddressesInSettings()
         do {
-            assets = try await fetchAssetsRerouting()
+            assets = try await client.fetchAssets()
             if statusMessage == nil
                 || statusMessage?.hasPrefix("Updated") == true
                 || statusMessage?.hasPrefix("Testing") == true
@@ -442,14 +355,12 @@ final class PropertyStore: ObservableObject {
         defer { isCompleting = false }
 
         do {
-            let updated = try await withRerouting {
-                try await $0.completeTask(
-                    id: task.id,
-                    note: note,
-                    meterValueAtCompletion: meterValue,
-                    confirmCurrentMeter: confirmCurrentMeter
-                )
-            }
+            let updated = try await client.completeTask(
+                id: task.id,
+                note: note,
+                meterValueAtCompletion: meterValue,
+                confirmCurrentMeter: confirmCurrentMeter
+            )
             showCleared(updated)
             statusMessage = "Marked \(updated.area) / \(updated.item) done"
             await refreshAssets()
@@ -494,7 +405,7 @@ final class PropertyStore: ObservableObject {
         errorMessage = nil
         defer { isBypassing = false }
         do {
-            let updated = try await withRerouting(request)
+            let updated = try await request(client)
             let listed = keepListed ?? updated.isInSchedulingWindow()
             showBypassed(updated, keepListed: listed)
             statusMessage = status(updated)
@@ -539,9 +450,9 @@ final class PropertyStore: ObservableObject {
         defer { isSaving = false }
 
         do {
-            var updated = try await withRerouting { try await $0.updateTask(id: taskID, fields: fields) }
+            var updated = try await client.updateTask(id: taskID, fields: fields)
             if let parts {
-                updated = try await withRerouting { try await $0.replaceParts(taskID: taskID, parts: parts) }
+                updated = try await client.replaceParts(taskID: taskID, parts: parts)
             }
             if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
                 tasks[index] = updated
@@ -556,7 +467,7 @@ final class PropertyStore: ObservableObject {
 
     func delete(task: MaintenanceTask) async -> Bool {
         do {
-            _ = try await withRerouting { try await $0.deleteTask(id: task.id) }
+            _ = try await client.deleteTask(id: task.id)
             tasks.removeAll { $0.id == task.id }
             statusMessage = "Deleted \(task.area) / \(task.item)"
             return true
@@ -575,12 +486,10 @@ final class PropertyStore: ObservableObject {
         let firstUploadIndex = attachmentIDs.count
         for (index, photo) in photos.dropFirst(attachmentIDs.count).enumerated() {
             attachmentIDs.append(
-                try await withRerouting {
-                    try await $0.uploadWorkRequestPhoto(
-                        photo,
-                        idempotencyKey: "\(idempotencyKey)-photo-\(firstUploadIndex + index)"
-                    )
-                }
+                try await client.uploadWorkRequestPhoto(
+                    photo,
+                    idempotencyKey: "\(idempotencyKey)-photo-\(firstUploadIndex + index)"
+                )
             )
         }
         return attachmentIDs
@@ -590,7 +499,7 @@ final class PropertyStore: ObservableObject {
         _ payload: WorkRequestSubmission,
         idempotencyKey: String
     ) async throws -> SubmittedWorkRequest {
-        let result = try await withRerouting { try await $0.submitWorkRequest(payload, idempotencyKey: idempotencyKey) }
+        let result = try await client.submitWorkRequest(payload, idempotencyKey: idempotencyKey)
         statusMessage = "Submitted work request \(result.requestNumber)"
         return result
     }
@@ -598,7 +507,7 @@ final class PropertyStore: ObservableObject {
     /// Soft-deactivate: hides from lists; meter history remains on the server.
     func deactivateAsset(id: UUID) async -> Bool {
         do {
-            try await withRerouting { try await $0.deactivateAsset(id: id) }
+            try await client.deactivateAsset(id: id)
             assets.removeAll { $0.id == id }
             statusMessage = "Deactivated asset"
             return true
@@ -610,7 +519,7 @@ final class PropertyStore: ObservableObject {
 
     func deleteCategory(_ category: MaintenanceCategory, reassignTo: String? = nil) async -> Bool {
         do {
-            _ = try await withRerouting { try await $0.deleteCategory(id: category.id, reassignTo: reassignTo) }
+            _ = try await client.deleteCategory(id: category.id, reassignTo: reassignTo)
             categories.removeAll { $0.id == category.id }
             if let reassignTo {
                 for index in tasks.indices where tasks[index].categoryName.caseInsensitiveCompare(category.name) == .orderedSame {

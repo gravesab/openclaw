@@ -97,12 +97,6 @@ targets:
             100.85.36.72:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
-            intelmini.local:
-              NSExceptionAllowsInsecureHTTPLoads: true
-              NSExceptionRequiresForwardSecrecy: false
-            Andrew-M4-Pro-2.local:
-              NSExceptionAllowsInsecureHTTPLoads: true
-              NSExceptionRequiresForwardSecrecy: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.dev
@@ -138,9 +132,6 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
             100.85.36.72:
-              NSExceptionAllowsInsecureHTTPLoads: true
-              NSExceptionRequiresForwardSecrecy: false
-            intelmini.local:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
     settings:

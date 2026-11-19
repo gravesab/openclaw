@@ -27,13 +27,9 @@ struct SettingsView: View {
                     .textContentType(.URL)
                     .noWritingTools()
 
-                Text("Leave the built-in address to switch automatically: Ranch Wi-Fi when you are home, Tailscale everywhere else. Any other address is used as typed.")
+                Text("The built-in address connects over Tailscale, at home and away. Any other address is used as typed.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                if let via = store.apiConnectionVia {
-                    LabeledContent("Connected via", value: via.label)
-                        .font(.footnote)
-                }
             } header: {
                 Text("PropertyManager API")
             }

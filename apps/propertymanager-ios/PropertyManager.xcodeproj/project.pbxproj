@@ -29,7 +29,7 @@
 		55ED495EAD8952B8E0882BCF /* PartRequestContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B0145C234AD48964CA2720 /* PartRequestContractTests.swift */; };
 		5933F3D6CFA7B91919C9E4CC /* TaskCompletionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E732A53271A9B3269E327049 /* TaskCompletionSheet.swift */; };
 		5C61F9531EF3D0790ED29411 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023093999D743305833F30C2 /* TaskDetailView.swift */; };
-		5F59647A9CB8D01E3046C597 /* ServerRouteTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7613215D2C2967BF27FE57F3 /* ServerRouteTests.swift */; };
+		5F59647A9CB8D01E3046C597 /* ServerAddressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7613215D2C2967BF27FE57F3 /* ServerAddressTests.swift */; };
 		659B9F66766604273CB7B775 /* TaskListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03C0D159BDC9BEC3188EBE2 /* TaskListView.swift */; };
 		6775B824320E14795CCC3785 /* PropertyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F671E23757B190E198B6028B /* PropertyStore.swift */; };
 		6DFF3FA7B72483D5EFC95F95 /* WeekHorizonPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE309362C1C2985708E3CE7E /* WeekHorizonPlanning.swift */; };
@@ -41,7 +41,6 @@
 		9C02F27113A17DF941654A27 /* BuildIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C41D00310D419A5FB82814DE /* BuildIdentity.swift */; };
 		A2BB55D974229462DE8DA5C9 /* WorkRequestDraftAssistantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DFCECF05E081E1BE7B97E6E /* WorkRequestDraftAssistantTests.swift */; };
 		A87EBBCC88680531C0859821 /* FieldDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1767C998AEC2165AF123B938 /* FieldDictation.swift */; };
-		AB4F2D3657FA3830AC04383F /* ServerRoute.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC8B6810F9CDBE084925A135 /* ServerRoute.swift */; };
 		ABDF22C86150A30CA3FCF6D8 /* CategoryDeleteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8200B623E46B0F06130C30 /* CategoryDeleteSheet.swift */; };
 		AD5CED1FCD4213DA5C40D173 /* AssetListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 261B773B69CF4B49F065620A /* AssetListView.swift */; };
 		ADC374B7EEBA20C105D1EED6 /* TaskAssetContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C0D0F886444414364A2A8E /* TaskAssetContext.swift */; };
@@ -101,7 +100,7 @@
 		7024D52AC8A29FCDDA888235 /* TaskEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditView.swift; sourceTree = "<group>"; };
 		73C0D0F886444414364A2A8E /* TaskAssetContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskAssetContext.swift; sourceTree = "<group>"; };
 		7532BD714B83E82BA385358D /* WeekHorizonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekHorizonView.swift; sourceTree = "<group>"; };
-		7613215D2C2967BF27FE57F3 /* ServerRouteTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRouteTests.swift; sourceTree = "<group>"; };
+		7613215D2C2967BF27FE57F3 /* ServerAddressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerAddressTests.swift; sourceTree = "<group>"; };
 		7D33AD22C8C9CA0330D5E59C /* WorkRequestIntakeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkRequestIntakeView.swift; sourceTree = "<group>"; };
 		7EE904FCD0E6E296BE0280DA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		821805D7A9565876E1231DCC /* TaskPartDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPartDraft.swift; sourceTree = "<group>"; };
@@ -110,7 +109,6 @@
 		8A275FE8B3EF82508A0DB18A /* TaskTitleHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTitleHelpers.swift; sourceTree = "<group>"; };
 		AB8200B623E46B0F06130C30 /* CategoryDeleteSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryDeleteSheet.swift; sourceTree = "<group>"; };
 		AC78B8C8EE87900D01DD7E54 /* TaskBypass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBypass.swift; sourceTree = "<group>"; };
-		AC8B6810F9CDBE084925A135 /* ServerRoute.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerRoute.swift; sourceTree = "<group>"; };
 		ADEFFEBC49BF0424AC0E1CA6 /* VoiceMeterEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceMeterEntry.swift; sourceTree = "<group>"; };
 		B29D9384E0F4BBE3102A3ED6 /* AppleWorkRequestDraftGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleWorkRequestDraftGenerator.swift; sourceTree = "<group>"; };
 		BF6AB40D3385E587F2B22A5D /* WorkRequestDraftAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkRequestDraftAssistant.swift; sourceTree = "<group>"; };
@@ -158,7 +156,6 @@
 				F671E23757B190E198B6028B /* PropertyStore.swift */,
 				44BB0D475C157F307DFCF510 /* RootView.swift */,
 				D8B5F578B875E2AD52FE1EB3 /* RunHoursTriggerSheet.swift */,
-				AC8B6810F9CDBE084925A135 /* ServerRoute.swift */,
 				7EE904FCD0E6E296BE0280DA /* SettingsView.swift */,
 				089E05964E405EF4D8E77726 /* SpellChecking.swift */,
 				73C0D0F886444414364A2A8E /* TaskAssetContext.swift */,
@@ -189,7 +186,7 @@
 				F04F5B4C3038DF442EE39018 /* ErrorCancellationTests.swift */,
 				D4B53559FB4ADB0ED598BF97 /* ManualImportTests.swift */,
 				20B0145C234AD48964CA2720 /* PartRequestContractTests.swift */,
-				7613215D2C2967BF27FE57F3 /* ServerRouteTests.swift */,
+				7613215D2C2967BF27FE57F3 /* ServerAddressTests.swift */,
 				849F8D270810E2E0F62625AF /* TaskAssetContextTests.swift */,
 				625DDCD4DDAC15C9C143B5D5 /* TaskBypassTests.swift */,
 				39A2B564CD2A7CD9F31CD33D /* TaskCompletionPolicyTests.swift */,
@@ -342,7 +339,6 @@
 				6775B824320E14795CCC3785 /* PropertyStore.swift in Sources */,
 				C37188AE2D778155C4E41F76 /* RootView.swift in Sources */,
 				FF7186CA4D7633487FC03161 /* RunHoursTriggerSheet.swift in Sources */,
-				AB4F2D3657FA3830AC04383F /* ServerRoute.swift in Sources */,
 				413E4BE7C4C3AAF12CE4E76E /* SettingsView.swift in Sources */,
 				5446F23683705DBAC06CD81D /* SpellChecking.swift in Sources */,
 				ADC374B7EEBA20C105D1EED6 /* TaskAssetContext.swift in Sources */,
@@ -373,7 +369,7 @@
 				2CA12C3FAA9346B9E0ECA8D6 /* ErrorCancellationTests.swift in Sources */,
 				DF83BEF49FA56F7AFDA06D6D /* ManualImportTests.swift in Sources */,
 				55ED495EAD8952B8E0882BCF /* PartRequestContractTests.swift in Sources */,
-				5F59647A9CB8D01E3046C597 /* ServerRouteTests.swift in Sources */,
+				5F59647A9CB8D01E3046C597 /* ServerAddressTests.swift in Sources */,
 				3BD98D5B80E7D69722DC3924 /* TaskAssetContextTests.swift in Sources */,
 				7F5B296A17F4E14F20190DDD /* TaskBypassTests.swift in Sources */,
 				507719C0719B4692D5C76CAF /* TaskCompletionPolicyTests.swift in Sources */,

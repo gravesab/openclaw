@@ -27,9 +27,13 @@ struct SettingsView: View {
                     .textContentType(.URL)
                     .noWritingTools()
 
-                Text("Use your Intel Mini Tailscale or LAN address, for example http://100.85.36.72:5062")
+                Text("Leave the built-in address to switch automatically: Ranch Wi-Fi when you are home, Tailscale everywhere else. Any other address is used as typed.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
+                if let via = store.apiConnectionVia {
+                    LabeledContent("Connected via", value: via.label)
+                        .font(.footnote)
+                }
             } header: {
                 Text("PropertyManager API")
             }
@@ -41,7 +45,7 @@ struct SettingsView: View {
                     .autocorrectionDisabled()
                     .textContentType(.URL)
                     .noWritingTools()
-                Text("Stores uploaded manuals and serves them for Extract, for example http://100.85.188.74:5051")
+                Text("Stores uploaded manuals and serves them for Extract. The built-in address switches between Ranch Wi-Fi and Tailscale automatically.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {

@@ -336,22 +336,6 @@ class Handler(SimpleHTTPRequestHandler):
             self._send_json(404, {"error": "not found"})
             return
 
-        if parsed.path == "/Jarvis-MCP-3D-Rotatable":
-            # Stable URL for the 3D rotatable artifact (live page).
-            target = WEBROOT / "index-connected.html"
-            if not target.is_file():
-                self._send_json(
-                    404, {"error": "3D artifact not deployed yet"}
-                )
-                return
-            body = target.read_bytes()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-
         if parsed.path == "/":
             self.path = "/index.html"
         return super().do_GET()

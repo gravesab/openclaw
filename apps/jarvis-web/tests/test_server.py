@@ -278,29 +278,5 @@ class RootTests(LiveServerCase):
         self.assertTrue(len(body) > 1000)
 
 
-class ArtifactTests(LiveServerCase):
-    def test_rotatable_alias_serves_live_page(self) -> None:
-        status, headers, body = self.get("/Jarvis-MCP-3D-Rotatable")
-        ctype = {k.lower(): v for k, v in headers.items()}
-        self.assertEqual(status, 200)
-        self.assertIn("text/html", ctype["content-type"])
-        expected = (
-            Path(server.WEBROOT) / "index-connected.html"
-        ).read_bytes()
-        self.assertEqual(body, expected)
-
-    def test_rotatable_missing_is_404(self) -> None:
-        with tempfile.TemporaryDirectory() as tmp:
-            with patch.object(
-                server, "WEBROOT", Path(tmp)
-            ):
-                try:
-                    self.get("/Jarvis-MCP-3D-Rotatable")
-                except HTTPError as exc:
-                    self.assertEqual(exc.code, 404)
-                else:
-                    self.fail("missing artifact was served")
-
-
 if __name__ == "__main__":
     unittest.main()

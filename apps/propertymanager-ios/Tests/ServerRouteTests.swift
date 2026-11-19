@@ -73,6 +73,24 @@ final class ServerRouteTests: XCTestCase {
         XCTAssertEqual(chosen, .init(url: tailscale, via: .tailscale))
     }
 
+    func testOnlyFailuresBeforeAnyServerAreSafeToResend() {
+        XCTAssertTrue(ServerRouteResolver.neverReachedServer(URLError(.cannotConnectToHost)))
+        XCTAssertTrue(ServerRouteResolver.neverReachedServer(URLError(.cannotFindHost)))
+        XCTAssertTrue(ServerRouteResolver.neverReachedServer(URLError(.notConnectedToInternet)))
+        // The server may already have applied a write that timed out or lost its connection.
+        XCTAssertFalse(ServerRouteResolver.neverReachedServer(URLError(.timedOut)))
+        XCTAssertFalse(ServerRouteResolver.neverReachedServer(URLError(.networkConnectionLost)))
+        XCTAssertFalse(ServerRouteResolver.neverReachedServer(CocoaError(.fileReadCorruptFile)))
+    }
+
+    @MainActor
+    func testPathWatcherStartsOffTheLocalNetworkUntilItReports() {
+        let watcher = NetworkPathWatcher {}
+        if !watcher.hasReportedPath {
+            XCTAssertFalse(watcher.onLocalNetwork)
+        }
+    }
+
     func testOnlyConnectionFailuresCountAsUnreachable() {
         XCTAssertTrue(ServerRouteResolver.isUnreachable(URLError(.cannotConnectToHost)))
         XCTAssertTrue(ServerRouteResolver.isUnreachable(URLError(.timedOut)))

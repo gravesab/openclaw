@@ -21,11 +21,13 @@ from pathlib import Path
 from urllib.parse import urlparse, parse_qs
 
 PORT = 8080
+# Loopback by default: the page and API are unauthenticated. Expose on a
+# LAN/Tailscale interface only by setting OPENCLAW_JARVIS_BIND_HOST.
+BIND_HOST = os.environ.get("OPENCLAW_JARVIS_BIND_HOST", "127.0.0.1").strip() or "127.0.0.1"
 WEBROOT = Path(__file__).parent
 SIGNAL_FILE = Path(
     os.environ.get("OPENCLAW_LAYER_SIGNAL_PATH", "/tmp/layer-signal.json")
 )
-TMP_ALLOWLIST = frozenset({".json", ".html", ".png"})
 
 ISOLATION_LABEL = "DEV→DEV / PROD→PROD"
 CAPTIONS = {
@@ -73,7 +75,8 @@ def _load_gate():
         pass
 
     try:
-        repo_root = Path(__file__).resolve().parents[1]
+        # apps/jarvis-web/server.py -> repo root is two levels up.
+        repo_root = Path(__file__).resolve().parents[2]
         if str(repo_root) not in sys.path:
             sys.path.insert(0, str(repo_root))
         from tools.ai_intelligence.ai_environment import (  # type: ignore
@@ -214,10 +217,8 @@ class Handler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(WEBROOT), **kwargs)
 
     def end_headers(self):
-        origin = self.headers.get("Origin", "")
-        self.send_header("Access-Control-Allow-Origin", origin or "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        # No CORS headers: the visualizer is same-origin, and other sites
+        # must not read /api/signal or /api/env through a viewer's browser.
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
@@ -243,6 +244,17 @@ class Handler(SimpleHTTPRequestHandler):
             "requested_env": query_env,
             "isolation": ISOLATION_LABEL,
         }
+
+    @staticmethod
+    def _is_tmp_signal_path(path: str) -> bool:
+        if not path.startswith("/tmp/"):
+            return False
+        name = path[len("/tmp/"):]
+        tmp_roots = {Path("/tmp"), Path("/tmp").resolve()}
+        return (
+            name == SIGNAL_FILE.name
+            and SIGNAL_FILE.parent in tmp_roots
+        )
 
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -302,13 +314,16 @@ class Handler(SimpleHTTPRequestHandler):
             )
             return
 
-        if parsed.path == "/layer-signal.json":
-            # Raw file passthrough for debugging (same-env only).
+        if parsed.path == "/layer-signal.json" or self._is_tmp_signal_path(
+            parsed.path
+        ):
+            # Raw file passthrough for debugging (same-env only). /tmp/<name>
+            # serves only the configured signal file, never other /tmp files.
             rejected = self._env_rejection(query_env)
             if rejected is not None:
                 self._send_json(403, rejected)
                 return
-            if SIGNAL_FILE.exists():
+            if SIGNAL_FILE.is_file():
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.end_headers()
@@ -318,36 +333,7 @@ class Handler(SimpleHTTPRequestHandler):
             return
 
         if parsed.path.startswith("/tmp/"):
-            name = Path(parsed.path[len("/tmp/"):]).name
-            if (
-                not name
-                or name.startswith(".")
-                or Path(name).suffix.lower() not in TMP_ALLOWLIST
-            ):
-                self._send_json(404, {"error": "not found"})
-                return
-            try:
-                resolved = (Path("/tmp") / name).resolve()
-            except OSError:
-                self._send_json(404, {"error": "not found"})
-                return
-            tmp_roots = {Path("/tmp"), Path("/tmp").resolve()}
-            if (
-                resolved.parent not in tmp_roots
-                or not resolved.is_file()
-            ):
-                self._send_json(404, {"error": "not found"})
-                return
-            target = resolved
-            ctype = {
-                ".json": "application/json",
-                ".html": "text/html",
-                ".png": "image/png",
-            }[Path(name).suffix.lower()]
-            self.send_response(200)
-            self.send_header("Content-Type", ctype)
-            self.end_headers()
-            self.wfile.write(target.read_bytes())
+            self._send_json(404, {"error": "not found"})
             return
 
         if parsed.path == "/Jarvis-MCP-3D-Rotatable":
@@ -379,15 +365,13 @@ if __name__ == "__main__":
     print(f"Signal: {SIGNAL_FILE} exists={SIGNAL_FILE.exists()}")
     print(f"Gate: {GATE_SOURCE}")
     print("")
-    print(f"DEV:  http://localhost:{PORT}/?env=dev")
-    print(f"      http://100.85.188.74:{PORT}/?env=dev")
-    print(f"PROD: http://100.85.36.72:{PORT}/?env=prod  — from intelmini")
-    print(f"      http://intelmini.local:{PORT}/?env=prod")
-    print("")
-    print(f"Live API: http://localhost:{PORT}/api/signal")
+    print(f"Listening: http://{BIND_HOST}:{PORT}/?env={OWN_ENV}")
+    if BIND_HOST in {"127.0.0.1", "::1", "localhost"}:
+        print("Loopback only; set OPENCLAW_JARVIS_BIND_HOST to expose.")
+    print(f"Live API: http://{BIND_HOST}:{PORT}/api/signal")
     print(f"Isolation: {ISOLATION_LABEL}, cross-env refused (403)")
     print("")
-    server = ThreadingHTTPServer(("0.0.0.0", PORT), Handler)
+    server = ThreadingHTTPServer((BIND_HOST, PORT), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

@@ -256,6 +256,38 @@ class BuildLayerSignalTests(unittest.TestCase):
         self.assertEqual(signal.layer, "ollama")
         self.assertFalse(signal.ok)
 
+    def test_unlisted_ollama_attempt_is_not_llamacpp(self) -> None:
+        # Regression: "llama" in "ollama" mapped unmatched Ollama to llama.cpp.
+        decision = decision_for(
+            assignment(
+                "ollama-hermes3-8b",
+                "ollama",
+                "local",
+                assignment_type=AssignmentType.PRIMARY,
+                priority=1,
+            ),
+        )
+        now = datetime.now(timezone.utc)
+        result = ExecutionResult(
+            request_id="req-10",
+            component_id="ranchbrain",
+            status=ExecutionStatus.FAILED,
+            attempts=(
+                ExecutionAttempt(
+                    provider_name="ollama",
+                    model_id="ollama-not-in-chain",
+                    status=AttemptStatus.UNAVAILABLE,
+                    started_at=now,
+                    finished_at=now,
+                    duration_ms=50,
+                    error_type="ProviderUnavailableError",
+                    error_message="down",
+                ),
+            ),
+        )
+        signal = build_layer_signal(decision, result, {})
+        self.assertEqual(signal.layer, "ollama")
+
 
 class LayerSignalBusTests(unittest.TestCase):
     def test_latest_tracks_emissions(self) -> None:

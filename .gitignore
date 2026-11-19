@@ -43,6 +43,7 @@ apps/shared/MoltbotKit/.build/
 apps/shared/OpenClawKit/.build/
 apps/shared/*/.build/
 packages/*/.build/
+/.build/
 apps/shared/OpenClawKit/Package.resolved
 **/ModuleCache/
 bin/

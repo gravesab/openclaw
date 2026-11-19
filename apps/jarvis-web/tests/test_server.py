@@ -11,7 +11,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import HTTPError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 APP_DIR = Path(__file__).resolve().parents[1]
 
@@ -191,13 +191,18 @@ class SignalApiTests(LiveServerCase):
                 else:
                     self.fail("corrupt signal file was not rejected")
 
-    def test_cors_header_present(self) -> None:
+    def test_no_cors_header_for_foreign_origin(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             missing = str(Path(tmp) / "nope.json")
             with patch.object(server, "SIGNAL_FILE", Path(missing)):
-                _, headers, _ = self.get("/api/signal")
+                request = Request(
+                    self.url("/api/signal"),
+                    headers={"Origin": "https://evil.example"},
+                )
+                with urlopen(request) as response:
+                    headers = dict(response.headers)
         ctype = {k.lower(): v for k, v in headers.items()}
-        self.assertIn("access-control-allow-origin", ctype)
+        self.assertNotIn("access-control-allow-origin", ctype)
 
 
 class EnvApiTests(LiveServerCase):
@@ -212,6 +217,13 @@ class EnvApiTests(LiveServerCase):
         self.assertIn("signal_exists", payload)
         self.assertIn(payload["gate_source"], ("sibling", "repo", "fallback"))
 
+    def test_repo_gate_loads_from_checkout(self) -> None:
+        # Regression: parents[1] pointed at apps/ and fell back silently.
+        self.assertIn(server.GATE_SOURCE, ("sibling", "repo"))
+
+    def test_default_bind_is_loopback(self) -> None:
+        self.assertEqual(server.BIND_HOST, "127.0.0.1")
+
     def test_env_cross_refused(self) -> None:
         try:
             self.get(f"/api/env?env={OTHER}")
@@ -222,53 +234,39 @@ class EnvApiTests(LiveServerCase):
 
 
 class TmpStaticTests(LiveServerCase):
-    def test_serves_allowlisted_tmp_file(self) -> None:
-        name = "viz-probe-allowlisted.json"
-        target = Path("/tmp") / name
+    def test_serves_signal_file_under_tmp(self) -> None:
+        target = Path("/tmp") / "viz-probe-signal.json"
         target.write_text('{"probe": true}')
-        self.addCleanup(
-            lambda: target.unlink(missing_ok=True)
-        )
-        status, headers, body = self.get(f"/tmp/{name}")
+        self.addCleanup(lambda: target.unlink(missing_ok=True))
+        with patch.object(server, "SIGNAL_FILE", target):
+            status, headers, body = self.get(f"/tmp/{target.name}")
         ctype = {k.lower(): v for k, v in headers.items()}
         self.assertEqual(status, 200)
         self.assertEqual(ctype["content-type"], "application/json")
         self.assertEqual(json.loads(body), {"probe": True})
 
-    def test_rejects_traversal_hidden_and_suffix(self) -> None:
-        for path in (
-            "/tmp/../viz-probe-allowlisted.json",
-            "/tmp/.hidden.json",
-            "/tmp/viz-probe.sh",
-            "/tmp/",
-        ):
-            try:
-                self.get(path)
-            except HTTPError as exc:
-                self.assertEqual(exc.code, 404, path)
-            else:
-                self.fail(f"{path} was served")
-
-    def test_rejects_symlink_escape(self) -> None:
-        link = Path("/tmp") / "viz-probe-link.json"
-        outside = Path("/tmp") / "viz-probe-outside-dir"
-        outside.mkdir(exist_ok=True)
-        secret = outside / "secret.json"
-        secret.write_text("{}")
-        try:
-            if link.exists() or link.is_symlink():
-                link.unlink()
-            link.symlink_to(secret)
-            try:
-                self.get("/tmp/viz-probe-link.json")
-            except HTTPError as exc:
-                self.assertEqual(exc.code, 404)
-            else:
-                self.fail("symlink escape was served")
-        finally:
-            link.unlink(missing_ok=True)
-            secret.unlink(missing_ok=True)
-            outside.rmdir()
+    def test_refuses_other_tmp_files(self) -> None:
+        planted = Path("/tmp") / "viz-probe-planted.html"
+        other = Path("/tmp") / "viz-probe-other.json"
+        planted.write_text("<script>alert(1)</script>")
+        other.write_text("{}")
+        self.addCleanup(lambda: planted.unlink(missing_ok=True))
+        self.addCleanup(lambda: other.unlink(missing_ok=True))
+        signal = Path("/tmp") / "viz-probe-signal.json"
+        with patch.object(server, "SIGNAL_FILE", signal):
+            for path in (
+                f"/tmp/{planted.name}",
+                f"/tmp/{other.name}",
+                f"/tmp/../{signal.name}",
+                "/tmp/.hidden.json",
+                "/tmp/",
+            ):
+                try:
+                    self.get(path)
+                except HTTPError as exc:
+                    self.assertEqual(exc.code, 404, path)
+                else:
+                    self.fail(f"{path} was served")
 
 
 class RootTests(LiveServerCase):
@@ -286,7 +284,6 @@ class ArtifactTests(LiveServerCase):
         ctype = {k.lower(): v for k, v in headers.items()}
         self.assertEqual(status, 200)
         self.assertIn("text/html", ctype["content-type"])
-        self.assertIn("access-control-allow-origin", ctype)
         expected = (
             Path(server.WEBROOT) / "index-connected.html"
         ).read_bytes()

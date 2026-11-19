@@ -56,6 +56,18 @@ _MEMORY_ARGV = [
     str(_MEMORY_DIR / ".venv" / "bin" / "python3"),
     str(_MEMORY_DIR / "memory_context_agent.py"),
 ]
+# The memory agent reads its embeddings/DB settings from the environment.
+# URLs pass only when the host clears the loopback allowlist; with none,
+# it gets loopback Ollama instead of its hard-coded private-LAN default.
+_MEMORY_URL_ENV = ("OPENCLAW_OLLAMA_EMBEDDINGS_URL", "OPENCLAW_OLLAMA_BASE_URL")
+_MEMORY_PLAIN_ENV = (
+    "OPENCLAW_MEMORY_EMBEDDING_MODEL",
+    "OPENCLAW_DB_HOST",
+    "OPENCLAW_DB_PORT",
+    "OPENCLAW_DB_NAME",
+    "OPENCLAW_DB_USER",
+)
+_MEMORY_DEFAULT_OLLAMA = "http://127.0.0.1:11434"
 
 
 class _Refused(Exception):
@@ -84,6 +96,23 @@ def _scrub_env() -> dict[str, str]:
         if value:
             cleaned[key] = value
     return cleaned
+
+
+def _child_env(argv: list[str], service: str) -> dict[str, str]:
+    env = _scrub_env()
+    if argv != _MEMORY_ARGV:
+        return env
+    for key in _MEMORY_PLAIN_ENV:
+        value = os.environ.get(key)
+        if value:
+            env[key] = value
+    for key in _MEMORY_URL_ENV:
+        value = os.environ.get(key)
+        if value and allowed_url(value, service=service):
+            env[key] = value
+    if not any(key in env for key in _MEMORY_URL_ENV):
+        env["OPENCLAW_OLLAMA_BASE_URL"] = _MEMORY_DEFAULT_OLLAMA
+    return env
 
 
 def _timeout(value: object) -> int:
@@ -357,7 +386,7 @@ def run_checked(
             text=True,
             timeout=bounded,
             cwd=sandboxed,
-            env=_scrub_env(),
+            env=_child_env(argv, service),
             shell=False,
         )
     except subprocess.TimeoutExpired:

@@ -124,12 +124,13 @@ def _layer_for_model(
     provider = provider_name.strip().lower()
     if "foundation" in provider or provider.startswith("apple"):
         return RuntimeFamily.APPLE_INTELLIGENCE.value
+    # "ollama" contains "llama": check it before the llama.cpp match.
+    if "ollama" in provider:
+        return RuntimeFamily.OLLAMA.value
     if "llama" in provider:
         return RuntimeFamily.LLAMA_CPP.value
     if "mlx" in provider or "omlx" in provider:
         return RuntimeFamily.MLX.value
-    if "ollama" in provider:
-        return RuntimeFamily.OLLAMA.value
     return RuntimeFamily.CLOUD.value
 
 

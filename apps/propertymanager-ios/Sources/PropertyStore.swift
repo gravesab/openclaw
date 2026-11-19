@@ -289,7 +289,8 @@ final class PropertyStore: ObservableObject {
         }
         showBuiltInAddressesInSettings()
         if forget { await routeResolver.forgetChoices() }
-        let onLocalNetwork = pathWatcher?.onLocalNetwork ?? true
+        await pathWatcher?.waitForFirstPath()
+        let onLocalNetwork = pathWatcher?.onLocalNetwork ?? false
         if let route = apiRoute {
             let chosen = await routeResolver.resolve(route, onLocalNetwork: onLocalNetwork)
             activeAPIBaseURL = chosen.url.absoluteString
@@ -373,6 +374,18 @@ final class PropertyStore: ObservableObject {
         }
     }
 
+    /// Runs a write on the chosen address. When the request never reached a server
+    /// (for example a cached Ranch Wi-Fi host that is gone), routes again and retries
+    /// once. Timeouts are not retried, so a write is never sent twice.
+    private func withRerouting<T>(_ operation: (PropertyAPIClient) async throws -> T) async throws -> T {
+        do {
+            return try await operation(client)
+        } catch where ServerRouteResolver.neverReachedServer(error) {
+            await resolveRoutes(forget: true)
+            return try await operation(client)
+        }
+    }
+
     private func loadTasksAndCategories() async throws {
         async let fetchedCategories = client.fetchCategories()
         async let fetchedTasks = client.fetchTasks()
@@ -429,12 +442,14 @@ final class PropertyStore: ObservableObject {
         defer { isCompleting = false }
 
         do {
-            let updated = try await client.completeTask(
-                id: task.id,
-                note: note,
-                meterValueAtCompletion: meterValue,
-                confirmCurrentMeter: confirmCurrentMeter
-            )
+            let updated = try await withRerouting {
+                try await $0.completeTask(
+                    id: task.id,
+                    note: note,
+                    meterValueAtCompletion: meterValue,
+                    confirmCurrentMeter: confirmCurrentMeter
+                )
+            }
             showCleared(updated)
             statusMessage = "Marked \(updated.area) / \(updated.item) done"
             await refreshAssets()
@@ -479,7 +494,7 @@ final class PropertyStore: ObservableObject {
         errorMessage = nil
         defer { isBypassing = false }
         do {
-            let updated = try await request(client)
+            let updated = try await withRerouting(request)
             let listed = keepListed ?? updated.isInSchedulingWindow()
             showBypassed(updated, keepListed: listed)
             statusMessage = status(updated)
@@ -524,9 +539,9 @@ final class PropertyStore: ObservableObject {
         defer { isSaving = false }
 
         do {
-            var updated = try await client.updateTask(id: taskID, fields: fields)
+            var updated = try await withRerouting { try await $0.updateTask(id: taskID, fields: fields) }
             if let parts {
-                updated = try await client.replaceParts(taskID: taskID, parts: parts)
+                updated = try await withRerouting { try await $0.replaceParts(taskID: taskID, parts: parts) }
             }
             if let index = tasks.firstIndex(where: { $0.id == updated.id }) {
                 tasks[index] = updated
@@ -541,7 +556,7 @@ final class PropertyStore: ObservableObject {
 
     func delete(task: MaintenanceTask) async -> Bool {
         do {
-            _ = try await client.deleteTask(id: task.id)
+            _ = try await withRerouting { try await $0.deleteTask(id: task.id) }
             tasks.removeAll { $0.id == task.id }
             statusMessage = "Deleted \(task.area) / \(task.item)"
             return true
@@ -560,10 +575,12 @@ final class PropertyStore: ObservableObject {
         let firstUploadIndex = attachmentIDs.count
         for (index, photo) in photos.dropFirst(attachmentIDs.count).enumerated() {
             attachmentIDs.append(
-                try await client.uploadWorkRequestPhoto(
-                    photo,
-                    idempotencyKey: "\(idempotencyKey)-photo-\(firstUploadIndex + index)"
-                )
+                try await withRerouting {
+                    try await $0.uploadWorkRequestPhoto(
+                        photo,
+                        idempotencyKey: "\(idempotencyKey)-photo-\(firstUploadIndex + index)"
+                    )
+                }
             )
         }
         return attachmentIDs
@@ -573,7 +590,7 @@ final class PropertyStore: ObservableObject {
         _ payload: WorkRequestSubmission,
         idempotencyKey: String
     ) async throws -> SubmittedWorkRequest {
-        let result = try await client.submitWorkRequest(payload, idempotencyKey: idempotencyKey)
+        let result = try await withRerouting { try await $0.submitWorkRequest(payload, idempotencyKey: idempotencyKey) }
         statusMessage = "Submitted work request \(result.requestNumber)"
         return result
     }
@@ -581,7 +598,7 @@ final class PropertyStore: ObservableObject {
     /// Soft-deactivate: hides from lists; meter history remains on the server.
     func deactivateAsset(id: UUID) async -> Bool {
         do {
-            try await client.deactivateAsset(id: id)
+            try await withRerouting { try await $0.deactivateAsset(id: id) }
             assets.removeAll { $0.id == id }
             statusMessage = "Deactivated asset"
             return true
@@ -593,7 +610,7 @@ final class PropertyStore: ObservableObject {
 
     func deleteCategory(_ category: MaintenanceCategory, reassignTo: String? = nil) async -> Bool {
         do {
-            _ = try await client.deleteCategory(id: category.id, reassignTo: reassignTo)
+            _ = try await withRerouting { try await $0.deleteCategory(id: category.id, reassignTo: reassignTo) }
             categories.removeAll { $0.id == category.id }
             if let reassignTo {
                 for index in tasks.indices where tasks[index].categoryName.caseInsensitiveCompare(category.name) == .orderedSame {

@@ -108,6 +108,52 @@ class ShellGuardTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["input"], "pump repair\n")
         self.assertFalse(run.call_args.kwargs["shell"])
 
+    def test_memory_search_env_passes_vetted_ollama_only(self):
+        memory = ROOT / "tools" / "memory_context"
+        argv = [str(memory / ".venv" / "bin" / "python3"), str(memory / "memory_context_agent.py")]
+        keys = (
+            "OPENCLAW_OLLAMA_BASE_URL",
+            "OPENCLAW_OLLAMA_EMBEDDINGS_URL",
+            "OPENCLAW_DB_HOST",
+            "OPENCLAW_DB_PASSWORD",
+        )
+        saved = {key: os.environ.get(key) for key in keys}
+        self.addCleanup(
+            lambda: [
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+                for k, v in saved.items()
+            ]
+        )
+
+        def env_for() -> dict:
+            with patch("tools.security.shell_guard.subprocess.run") as run:
+                run.return_value.stdout = "hit\n"
+                run.return_value.stderr = ""
+                run.return_value.returncode = 0
+                run_checked(argv, cwd=str(memory), service="test", input_text="pump repair")
+            return run.call_args.kwargs["env"]
+
+        for key in keys:
+            os.environ.pop(key, None)
+        env = env_for()
+        self.assertEqual(env["OPENCLAW_OLLAMA_BASE_URL"], "http://127.0.0.1:11434")
+
+        os.environ["OPENCLAW_OLLAMA_BASE_URL"] = "http://localhost:11500"
+        os.environ["OPENCLAW_DB_HOST"] = "127.0.0.1"
+        os.environ["OPENCLAW_DB_PASSWORD"] = "not-a-real-secret"
+        env = env_for()
+        self.assertEqual(env["OPENCLAW_OLLAMA_BASE_URL"], "http://localhost:11500")
+        self.assertEqual(env["OPENCLAW_DB_HOST"], "127.0.0.1")
+        self.assertNotIn("OPENCLAW_DB_PASSWORD", env)
+
+        os.environ["OPENCLAW_OLLAMA_BASE_URL"] = "http://192.168.50.117:11434"
+        env = env_for()
+        self.assertEqual(env["OPENCLAW_OLLAMA_BASE_URL"], "http://127.0.0.1:11434")
+
+        os.environ["RANCH_HOST_ALLOWLIST"] = "192.168.50.117"
+        env = env_for()
+        self.assertEqual(env["OPENCLAW_OLLAMA_BASE_URL"], "http://192.168.50.117:11434")
+
     def test_memory_search_ejects_hostile_stdin(self):
         memory = ROOT / "tools" / "memory_context"
         argv = [str(memory / ".venv" / "bin" / "python3"), str(memory / "memory_context_agent.py")]

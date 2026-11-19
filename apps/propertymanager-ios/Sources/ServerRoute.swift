@@ -84,6 +84,20 @@ actor ServerRouteResolver {
         return response is HTTPURLResponse
     }
 
+    /// Errors raised before a request could reach any server, so resending it cannot
+    /// apply a write twice. Timeouts and dropped connections are excluded: the server
+    /// may already have handled the request.
+    static func neverReachedServer(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+             .notConnectedToInternet, .internationalRoamingOff, .dataNotAllowed:
+            return true
+        default:
+            return false
+        }
+    }
+
     /// Errors that mean "this address is unreachable", as opposed to a server answer.
     static func isUnreachable(_ error: Error) -> Bool {
         guard let urlError = error as? URLError else { return false }
@@ -101,7 +115,9 @@ actor ServerRouteResolver {
 /// reachability changes so routes can be re-chosen.
 @MainActor
 final class NetworkPathWatcher {
-    private(set) var onLocalNetwork = true
+    /// Off until the monitor reports, so a cold start on cellular does not probe the LAN.
+    private(set) var onLocalNetwork = false
+    private(set) var hasReportedPath = false
     private let monitor = NWPathMonitor()
     private var lastSignature: String?
 
@@ -113,6 +129,7 @@ final class NetworkPathWatcher {
             Task { @MainActor in
                 guard let self else { return }
                 self.onLocalNetwork = local
+                self.hasReportedPath = true
                 // The first update only reports the starting state.
                 let changed = self.lastSignature != nil && self.lastSignature != signature
                 self.lastSignature = signature
@@ -120,6 +137,14 @@ final class NetworkPathWatcher {
             }
         }
         monitor.start(queue: DispatchQueue(label: "ServerRoute.NetworkPathWatcher"))
+    }
+
+    /// Waits briefly for the monitor's first report; NWPathMonitor usually answers at once.
+    func waitForFirstPath(timeout: Duration = .milliseconds(500)) async {
+        let deadline = ContinuousClock.now + timeout
+        while !hasReportedPath, ContinuousClock.now < deadline {
+            try? await Task.sleep(for: .milliseconds(20))
+        }
     }
 
     deinit {

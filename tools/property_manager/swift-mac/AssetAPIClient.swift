@@ -362,22 +362,26 @@ struct MacAssetTaskSummary: Codable, Hashable, Identifiable {
 }
 
 struct MacPMSummary: Codable, Hashable {
+    var activeTaskCount: Int
     var overdueMeterCount: Int
     var dueSoonCount: Int?
 
     enum CodingKeys: String, CodingKey {
+        case activeTaskCount = "active_task_count"
         case overdueMeterCount = "overdue_meter_count"
         case dueSoonCount = "due_soon_count"
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        activeTaskCount = try c.decodeIfPresent(Int.self, forKey: .activeTaskCount) ?? 0
         overdueMeterCount = try c.decodeIfPresent(Int.self, forKey: .overdueMeterCount) ?? 0
         dueSoonCount = try c.decodeIfPresent(Int.self, forKey: .dueSoonCount)
     }
 
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(activeTaskCount, forKey: .activeTaskCount)
         try c.encode(overdueMeterCount, forKey: .overdueMeterCount)
         try c.encodeIfPresent(dueSoonCount, forKey: .dueSoonCount)
     }

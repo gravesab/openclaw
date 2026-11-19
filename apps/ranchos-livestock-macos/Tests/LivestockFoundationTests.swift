@@ -257,7 +257,7 @@ final class LivestockFoundationTests: XCTestCase {
     func testNavigationKeepsFirstSliceScreensOnly() {
         XCTAssertEqual(
             LivestockDestination.allCases.map(\.label),
-            ["Herds/groups overview", "Herd/group", "Create herd/group", "Herds/groups retired to a better life", "Current livestock/group", "Livestock/group retired to a better life", "Current pets", "Pets retired to a better life"]
+            ["Herds/groups overview", "Herd/group", "Create herd/group", "Herds/groups retired to a better life", "Current livestock/group", "Livestock/group retired to a better life", "Breeding tree", "Current pets", "Pets retired to a better life"]
         )
         XCTAssertTrue(AnimalCategory.liveStock.includes(.cattle))
         XCTAssertFalse(AnimalCategory.liveStock.includes(.pet))

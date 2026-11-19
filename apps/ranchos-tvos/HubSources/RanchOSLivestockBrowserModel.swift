@@ -114,7 +114,7 @@ enum RanchOSLivestockBrowserListState: Equatable, Sendable {
 }
 
 enum RanchOSLivestockSampleCatalog {
-    static let fixtureLabel = "DEV fixture — sample animals are synthetic and not live ranch records."
+    static let fixtureLabel = "Sample animal — not a real ranch record."
     static let unavailableHistoriesNote =
         "Care, feeding, routine lifecycle, and cost histories are not included in this sample."
 
@@ -353,6 +353,35 @@ final class RanchOSLivestockBrowserModel {
         guard let selectedAnimalID else { return }
         if !visibleAnimals.contains(where: { $0.id == selectedAnimalID }) {
             self.selectedAnimalID = nil
+        }
+    }
+}
+
+struct RanchOSLivestockGroupSummary: Identifiable, Equatable, Sendable {
+    let id: String
+    let title: String
+    let animals: [RanchOSLivestockSampleAnimal]
+
+    var animalCount: Int { animals.count }
+    var attentionCount: Int { animals.filter { $0.factFreshness != .current }.count }
+
+    var summary: String {
+        let animalsLabel = animalCount == 1 ? "1 animal" : "\(animalCount) animals"
+        if attentionCount == 0 { return "\(animalsLabel) · current" }
+        let review = attentionCount == 1 ? "1 needs review" : "\(attentionCount) need review"
+        return "\(animalsLabel) · \(review)"
+    }
+}
+
+enum RanchOSLivestockGroups {
+    /// One summary per species that has animals. Species with none are omitted.
+    static func summaries(from animals: [RanchOSLivestockSampleAnimal]) -> [RanchOSLivestockGroupSummary] {
+        RanchOSLivestockSpecies.allCases.compactMap { species in
+            let members = animals
+                .filter { $0.species == species }
+                .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+            guard !members.isEmpty else { return nil }
+            return RanchOSLivestockGroupSummary(id: species.rawValue, title: species.label, animals: members)
         }
     }
 }

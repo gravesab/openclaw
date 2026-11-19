@@ -158,6 +158,30 @@ struct AssetPMSummary: Codable, Hashable {
     }
 }
 
+struct AssetRef: Identifiable, Codable, Hashable {
+    let id: UUID
+    var name: String
+    var isPseudo: Bool
+
+    enum CodingKeys: String, CodingKey {
+        case id, name
+        case isPseudo = "is_pseudo"
+    }
+
+    init(id: UUID, name: String, isPseudo: Bool = false) {
+        self.id = id
+        self.name = name
+        self.isPseudo = isPseudo
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try FlexibleUUID.decode(c, key: .id)
+        name = try c.decode(String.self, forKey: .name)
+        isPseudo = try c.decodeIfPresent(Bool.self, forKey: .isPseudo) ?? false
+    }
+}
+
 struct RanchAsset: Identifiable, Codable, Hashable {
     let id: UUID
     var externalId: String
@@ -174,15 +198,22 @@ struct RanchAsset: Identifiable, Codable, Hashable {
     var meterActivatedAt: Date?
     var tasks: [AssetTaskSummary]?
     var pmSummary: AssetPMSummary?
+    var hostAssetId: UUID?
+    var host: AssetRef?
+    var attachments: [AssetRef]?
+    /// Display-only group (e.g. Mowers); members attach via host_asset_id.
+    var isPseudo: Bool
 
     enum CodingKeys: String, CodingKey {
-        case id, name, manufacturer, model, category, location, aliases, tasks, meter
+        case id, name, manufacturer, model, category, location, aliases, tasks, meter, host, attachments
         case externalId = "external_id"
         case placedInServiceDate = "placed_in_service_date"
         case qrToken = "qr_token"
         case proposedMeter = "proposed_meter"
         case meterActivatedAt = "meter_activated_at"
         case pmSummary = "pm_summary"
+        case hostAssetId = "host_asset_id"
+        case isPseudo = "is_pseudo"
     }
 
     init(from decoder: Decoder) throws {
@@ -202,6 +233,10 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         meterActivatedAt = FlexibleDate.decode(c, key: .meterActivatedAt)
         tasks = try c.decodeIfPresent([AssetTaskSummary].self, forKey: .tasks)
         pmSummary = try c.decodeIfPresent(AssetPMSummary.self, forKey: .pmSummary)
+        hostAssetId = try? FlexibleUUID.decode(c, key: .hostAssetId)
+        host = try c.decodeIfPresent(AssetRef.self, forKey: .host)
+        attachments = try c.decodeIfPresent([AssetRef].self, forKey: .attachments)
+        isPseudo = try c.decodeIfPresent(Bool.self, forKey: .isPseudo) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -221,10 +256,17 @@ struct RanchAsset: Identifiable, Codable, Hashable {
         try c.encodeIfPresent(meterActivatedAt, forKey: .meterActivatedAt)
         try c.encodeIfPresent(tasks, forKey: .tasks)
         try c.encodeIfPresent(pmSummary, forKey: .pmSummary)
+        try c.encodeIfPresent(hostAssetId, forKey: .hostAssetId)
+        try c.encodeIfPresent(host, forKey: .host)
+        try c.encodeIfPresent(attachments, forKey: .attachments)
+        try c.encode(isPseudo, forKey: .isPseudo)
     }
 
     var meterNeedsActivation: Bool {
-        meterActivatedAt == nil && proposedMeter?.meterType != nil && proposedMeter?.meterType != "none"
+        !isPseudo
+            && meterActivatedAt == nil
+            && proposedMeter?.meterType != nil
+            && proposedMeter?.meterType != "none"
     }
 }
 

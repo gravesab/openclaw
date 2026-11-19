@@ -72,6 +72,9 @@ targets:
       properties:
         CFBundleDisplayName: RanchOS DEV
         NSLocalNetworkUsageDescription: RanchOS Hub (DEV) loads the livestock summary from the DEV Mac on your local network.
+        NSMicrophoneUsageDescription: Jarvis transcribes a question on this device when you press Start listening.
+        NSSpeechRecognitionUsageDescription: Jarvis creates an on-device speech draft for your review before sending.
+        NSCameraUsageDescription: Jarvis shows a local camera preview when you start the camera. No video is recorded or uploaded.
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -126,8 +129,9 @@ targets:
       path: HubSources/RanchOSMac-Info.plist
       properties:
         CFBundleDisplayName: RanchOS DEV
-        NSMicrophoneUsageDescription: RanchOS uses the microphone so you can dictate into a text field. Speech stays on this device.
-        NSSpeechRecognitionUsageDescription: RanchOS turns what you say into text on this device.
+        NSMicrophoneUsageDescription: RanchOS uses the microphone for dictation and for Jarvis questions you start. Speech stays on this device.
+        NSSpeechRecognitionUsageDescription: RanchOS turns what you say into text on this device, including Jarvis speech drafts you review before sending.
+        NSCameraUsageDescription: Jarvis shows a local camera preview when you start the camera. No video is recorded or uploaded.
         NSAppTransportSecurity:
           NSExceptionDomains:
             100.85.188.74:
@@ -179,6 +183,9 @@ targets:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
             Andrew-M4-Pro-2.local:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSExceptionRequiresForwardSecrecy: false
+            andrew-m4-pro.local:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSExceptionRequiresForwardSecrecy: false
             intelmini.local:
@@ -269,6 +276,10 @@ targets:
       - path: HubSources/RanchOSPeopleDirectory.swift
       - path: HubSources/RanchOSPeopleClient.swift
       - path: HubSources/DataIsolationVerifier.swift
+      - path: HubSources/Jarvis/RanchVAAssetGraph.swift
+      - path: HubSources/Jarvis/RanchVADEVQuery.swift
+      - path: HubSources/Jarvis/RanchVAWeather.swift
+      - path: HubSources/Jarvis/VoiceInput.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests

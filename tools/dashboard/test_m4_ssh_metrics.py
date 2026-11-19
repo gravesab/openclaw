@@ -295,7 +295,7 @@ class M4SshMetricsTests(unittest.TestCase):
         )
 
     def test_omlx_inventory_uses_authenticated_model_endpoint(self):
-        config = dashboard.OMLXConfig("http://m4.example:8000/v1", "secret", 45)
+        config = dashboard.OMLXConfig("http://127.0.0.1:8000/v1", "secret", 45)
         response = mock.Mock()
         response.json.return_value = {
             "data": [{"id": "Qwen3.5-9B-4bit"}]
@@ -311,7 +311,7 @@ class M4SshMetricsTests(unittest.TestCase):
         self.assertEqual(result["status"], "Online")
         self.assertEqual(result["model_count"], 1)
         dashboard.requests.get.assert_called_once_with(
-            "http://m4.example:8000/v1/models",
+            "http://127.0.0.1:8000/v1/models",
             headers={"Authorization": "Bearer secret"},
             timeout=5,
         )
@@ -333,7 +333,7 @@ class M4SshMetricsTests(unittest.TestCase):
         get.assert_not_called()
 
     def test_omlx_request_failure_is_offline_without_exposing_details(self):
-        config = dashboard.OMLXConfig("http://m4.example:8000/v1", "secret", 45)
+        config = dashboard.OMLXConfig("http://127.0.0.1:8000/v1", "secret", 45)
         with (
             mock.patch.object(dashboard.OMLXConfig, "from_env", return_value=config),
             mock.patch.object(
@@ -349,7 +349,7 @@ class M4SshMetricsTests(unittest.TestCase):
         self.assertNotIn("connection refused", result["error"])
 
     def test_omlx_rejects_a_malformed_model_catalog(self):
-        config = dashboard.OMLXConfig("http://m4.example:8000/v1", "secret", 45)
+        config = dashboard.OMLXConfig("http://127.0.0.1:8000/v1", "secret", 45)
         response = mock.Mock()
         response.json.return_value = {"data": "not-a-list"}
         dashboard.requests.get.return_value = response

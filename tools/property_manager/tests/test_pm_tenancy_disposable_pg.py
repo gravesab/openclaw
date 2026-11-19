@@ -4,7 +4,7 @@
 Unit tests cover tenant-context resolution with no database. Database tests
 build a unix-socket-only temporary PostgreSQL cluster for this process,
 apply the ranchos tenancy foundation plus PropertyManager migrations
-001-014 as the DEV migrator role, seed two ranches, and prove ranch A
+001-019 as the DEV migrator role, seed two ranches, and prove ranch A
 cannot list, read, insert, update, or delete ranch B rows.
 
 Fail-closed harness: missing PostgreSQL binaries, an unavailable driver,
@@ -51,13 +51,19 @@ PM_MIGRATIONS = (
     "009_maintenance_proposals.sql",
     "010_handbook_ingestion_v1.sql",
     "011_work_request_intake.sql",
-    "012_asset_manual_parts.sql",
-    "013_asset_placed_in_service_date.sql",
-    "014_propertymanager_tenancy.sql",
+    "012_dev_schema_forward_repair.sql",
+    "013_asset_manual_parts.sql",
+    "014_asset_placed_in_service_date.sql",
+    "015_task_schedule_bypass.sql",
+    "016_asset_host.sql",
+    "017_task_require_parent_asset.sql",
+    "018_asset_is_pseudo.sql",
+    "019_propertymanager_tenancy.sql",
 )
 RANCHOS_FOUNDATION = REPO_ROOT / "ranchbrain_app" / "migrations" / "001_ranch_os_tenancy_foundation.sql"
 
 BOOTSTRAP_TENANT = "11111111-1111-4111-8111-111111111111"
+LEGACY_ASSET = "00000000-0000-0000-0000-000000000098"
 TENANT_B = "22222222-2222-4222-8222-222222222222"
 USER_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 USER_B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
@@ -86,6 +92,7 @@ PM_TABLES = (
     "maintenance_attachment_operations",
     "maintenance_task_intake_events",
     "asset_manual_part",
+    "maintenance_task_schedule_events",
 )
 
 DRIVER_SPEC = "psycopg2-binary==2.9.12"
@@ -518,19 +525,26 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
         connection = cls._connect()
         try:
             for filename in PM_MIGRATIONS:
-                if filename == "014_propertymanager_tenancy.sql":
+                if filename == "019_propertymanager_tenancy.sql":
                     continue
                 if filename == "011_work_request_intake.sql":
                     # Same grandfathered legacy row the chain test uses: 002
-                    # allowed it, 011 kept it readable, 014 must keep it too.
+                    # allowed it, 011 kept it readable, 019 must keep it too.
                     connection.autocommit = True
                     with connection.cursor() as cursor:
                         cursor.execute("SET ROLE ranchos_dev_migrator")
+                        # 017 deletes tasks with no parent asset, so the
+                        # legacy row needs one to reach the tenancy step.
+                        cursor.execute(
+                            "INSERT INTO propertymanager.assets (id, external_id, name, qr_token)"
+                            " VALUES (%s, 'legacy-asset', 'Legacy asset', 'legacy-asset-qr')",
+                            (LEGACY_ASSET,),
+                        )
                         cursor.execute(
                             "INSERT INTO propertymanager.maintenance_tasks"
-                            " (id, area, item, warning_days, critical_days, last_done, next_due, kind)"
+                            " (id, area, item, warning_days, critical_days, last_done, next_due, kind, asset_id)"
                             " VALUES ('00000000-0000-0000-0000-000000000099', 'Legacy', 'Work request',"
-                            " 0, 0, now(), now(), 'Work Request')"
+                            " 0, 0, now(), now(), 'Work Request', '00000000-0000-0000-0000-000000000098')"
                         )
                 cls._apply_sql_file(
                     connection,
@@ -555,10 +569,10 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
                 )
             cls._apply_sql_file(
                 connection,
-                PM_DB_DIR / "014_propertymanager_tenancy.sql",
+                PM_DB_DIR / "019_propertymanager_tenancy.sql",
                 preamble=(
                     "SET ROLE ranchos_dev_migrator;"
-                    "SET app.pm_tenancy_014_apply = 'apply-dev-only';"
+                    "SET app.pm_tenancy_019_apply = 'apply-dev-only';"
                     "SET app.bootstrap_tenant_id = '%s';" % BOOTSTRAP_TENANT
                 ),
             )
@@ -694,6 +708,9 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
                     " GROUP BY c.relname, c.relowner, c.relrowsecurity, c.relforcerowsecurity"
                 )
                 posture = {row[0]: row[1:] for row in cursor.fetchall()}
+                # schema_migrations (012) is the global ledger, not ranch data;
+                # 019 grants the runtime role nothing on it.
+                posture.pop("schema_migrations", None)
                 self.assertEqual(set(posture), set(PM_TABLES))
                 for table in PM_TABLES:
                     owner, enabled, forced, policies = posture[table]
@@ -795,6 +812,60 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
         finally:
             connection.close()
 
+    def test_set_null_keys_never_clear_tenant_id(self) -> None:
+        connection = self._connect()
+        try:
+            connection.autocommit = True
+            with connection.cursor() as cursor:
+                # confdelsetcols empty means SET NULL clears every key column,
+                # tenant_id included, which NOT NULL then rejects on delete.
+                cursor.execute(
+                    "SELECT c.conname FROM pg_constraint c"
+                    " JOIN pg_namespace n ON n.oid = c.connamespace"
+                    " WHERE n.nspname = 'propertymanager' AND c.contype = 'f'"
+                    " AND c.confdeltype = 'n' AND array_length(c.conkey, 1) > 1"
+                    " AND coalesce(array_length(c.confdelsetcols, 1), 0) = 0"
+                )
+                self.assertEqual(cursor.fetchall(), [])
+        finally:
+            connection.close()
+
+    def test_host_link_stays_in_ranch_and_detaches_on_delete(self) -> None:
+        host = "c0000007-0000-4000-8000-000000000001"
+        implement = "c0000007-0000-4000-8000-000000000002"
+        insert = (
+            "INSERT INTO propertymanager.assets (tenant_id, id, external_id, name, qr_token, host_asset_id)"
+            " VALUES (%s, %s, %s, %s, %s, %s)"
+        )
+        connection = self._runtime_connection()
+        try:
+            # A ranch A implement cannot hang off ranch B's asset.
+            with self.assertRaises(self._psycopg2.errors.ForeignKeyViolation):
+                with TenantSession(connection, self._owner_a()):
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            insert,
+                            (BOOTSTRAP_TENANT, implement, "host-x", "Cross implement", "host-x-qr", self.ASSET_B),
+                        )
+            connection.rollback()
+            # Deleting a host detaches its implement and keeps tenant_id.
+            with TenantSession(connection, self._owner_a()):
+                with connection.cursor() as cursor:
+                    cursor.execute(insert, (BOOTSTRAP_TENANT, host, "host-1", "Tractor", "host-1-qr", None))
+                    cursor.execute(insert, (BOOTSTRAP_TENANT, implement, "host-2", "Tiller", "host-2-qr", host))
+                    cursor.execute("DELETE FROM propertymanager.assets WHERE id = %s", (host,))
+                    cursor.execute(
+                        "SELECT host_asset_id, tenant_id FROM propertymanager.assets WHERE id = %s",
+                        (implement,),
+                    )
+                    detached = cursor.fetchone()
+            self.assertIsNotNone(detached)
+            self.assertIsNone(detached[0])
+            self.assertEqual(str(detached[1]), str(UUID(BOOTSTRAP_TENANT)))
+            connection.rollback()
+        finally:
+            connection.close()
+
     def test_unfiltered_query_still_cannot_cross_ranches(self) -> None:
         # Deliberately unfiltered SQL through a plain cursor on the same
         # transaction: the repository offers no raw-SQL surface, so the
@@ -833,7 +904,8 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
         connection = self._runtime_connection()
         try:
             with TenantSession(connection, self._viewer_a()) as session:
-                self.assertEqual(len(repo.list_assets(session)), 1)
+                # The seeded asset plus the legacy fixture's parent asset.
+                self.assertEqual(len(repo.list_assets(session)), 2)
                 with self.assertRaises(TenancyError) as raised:
                     repo.create_asset(
                         session, asset_id="c0000005-0000-4000-8000-000000000099",
@@ -907,9 +979,9 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
                     with connection.cursor() as cursor:
                         cursor.execute(
                             "INSERT INTO propertymanager.maintenance_tasks"
-                            " (tenant_id, id, area, item, warning_days, critical_days, last_done, next_due, kind)"
-                            " VALUES (%s, %s, 'New', 'Work request', 0, 0, now(), now(), 'Work Request')",
-                            (BOOTSTRAP_TENANT, "c0000006-0000-4000-8000-000000000099"),
+                            " (tenant_id, id, area, item, warning_days, critical_days, last_done, next_due, kind, asset_id)"
+                            " VALUES (%s, %s, 'New', 'Work request', 0, 0, now(), now(), 'Work Request', %s)",
+                            (BOOTSTRAP_TENANT, "c0000006-0000-4000-8000-000000000099", LEGACY_ASSET),
                         )
             connection.rollback()
         finally:
@@ -938,19 +1010,19 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
             connection.close()
 
     def test_tenancy_migration_refuses_without_guards(self) -> None:
-        migration = (PM_DB_DIR / "014_propertymanager_tenancy.sql").read_text(encoding="utf-8")
+        migration = (PM_DB_DIR / "019_propertymanager_tenancy.sql").read_text(encoding="utf-8")
         cases = [
-            ("wrong role", "SET ROLE ranchos_dev_runtime;", "SET app.pm_tenancy_014_apply = 'apply-dev-only';"
+            ("wrong role", "SET ROLE ranchos_dev_runtime;", "SET app.pm_tenancy_019_apply = 'apply-dev-only';"
              "SET app.bootstrap_tenant_id = '%s';" % BOOTSTRAP_TENANT, "ranchos_dev_migrator"),
             ("missing apply setting", "SET ROLE ranchos_dev_migrator;",
-             "SET app.bootstrap_tenant_id = '%s';" % BOOTSTRAP_TENANT, "app.pm_tenancy_014_apply"),
+             "SET app.bootstrap_tenant_id = '%s';" % BOOTSTRAP_TENANT, "app.pm_tenancy_019_apply"),
             ("missing bootstrap", "SET ROLE ranchos_dev_migrator;",
-             "SET app.pm_tenancy_014_apply = 'apply-dev-only';", "app.bootstrap_tenant_id"),
+             "SET app.pm_tenancy_019_apply = 'apply-dev-only';", "app.bootstrap_tenant_id"),
             ("malformed bootstrap", "SET ROLE ranchos_dev_migrator;",
-             "SET app.pm_tenancy_014_apply = 'apply-dev-only';SET app.bootstrap_tenant_id = 'nope';",
+             "SET app.pm_tenancy_019_apply = 'apply-dev-only';SET app.bootstrap_tenant_id = 'nope';",
              "not a UUID"),
             ("unknown bootstrap", "SET ROLE ranchos_dev_migrator;",
-             "SET app.pm_tenancy_014_apply = 'apply-dev-only';"
+             "SET app.pm_tenancy_019_apply = 'apply-dev-only';"
              "SET app.bootstrap_tenant_id = '99999999-9999-4999-8999-999999999999';",
              "must reference an active"),
         ]
@@ -1021,21 +1093,21 @@ class PropertyManagerTenancyDisposablePgTests(unittest.TestCase):
                         (BOOTSTRAP_TENANT,),
                     )
                 for filename in PM_MIGRATIONS:
-                    if filename == "014_propertymanager_tenancy.sql":
+                    if filename == "019_propertymanager_tenancy.sql":
                         continue
                     self._apply_sql_file(
                         build, PM_DB_DIR / filename, preamble="SET ROLE ranchos_dev_migrator;"
                     )
             finally:
                 build.close()
-            migration = (PM_DB_DIR / "014_propertymanager_tenancy.sql").read_text(encoding="utf-8")
+            migration = (PM_DB_DIR / "019_propertymanager_tenancy.sql").read_text(encoding="utf-8")
             apply = self._connect(dbname)
             try:
                 apply.autocommit = True
                 with apply.cursor() as cursor:
                     cursor.execute(
                         "SET ROLE ranchos_dev_migrator;"
-                        "SET app.pm_tenancy_014_apply = 'apply-dev-only';"
+                        "SET app.pm_tenancy_019_apply = 'apply-dev-only';"
                         "SET app.bootstrap_tenant_id = '%s';" % BOOTSTRAP_TENANT + migration
                     )
                 # Same connection, later transaction: the bootstrap tenant

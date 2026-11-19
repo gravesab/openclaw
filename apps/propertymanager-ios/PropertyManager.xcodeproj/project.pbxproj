@@ -10,6 +10,7 @@
 		069D8A8537AE24D8635C1086 /* VoiceMeterEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADEFFEBC49BF0424AC0E1CA6 /* VoiceMeterEntry.swift */; };
 		0BB24C3460C2EAB01E66DAA3 /* AppleManualExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6CB7E35329B642244A655910 /* AppleManualExtractor.swift */; };
 		11959289E53A223EAAF68421 /* TaskPartDraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 821805D7A9565876E1231DCC /* TaskPartDraft.swift */; };
+		2CA12C3FAA9346B9E0ECA8D6 /* ErrorCancellationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F04F5B4C3038DF442EE39018 /* ErrorCancellationTests.swift */; };
 		30259B5DB9E924715407AD26 /* WorkRequestDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = D048074452C6C34BCEB59BBB /* WorkRequestDictation.swift */; };
 		3BD98D5B80E7D69722DC3924 /* TaskAssetContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 849F8D270810E2E0F62625AF /* TaskAssetContextTests.swift */; };
 		3D71E2F9FF961935890B632A /* AssetModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E238721C0B4E825C08A772C /* AssetModels.swift */; };
@@ -23,16 +24,22 @@
 		50AE4BF1B368D124BE017030 /* WorkRequestModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8500D4F2DB68D3F01B7D9A66 /* WorkRequestModels.swift */; };
 		52C95B61BEA09E3EC32724E7 /* WorkRequestDraftGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12D56367963B90F2D3E17708 /* WorkRequestDraftGenerator.swift */; };
 		541F2BADEB28DF59341827A0 /* WorkRequestDraftSuggestion.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF83DEB3EB0DFE7DD067AD33 /* WorkRequestDraftSuggestion.swift */; };
+		5446F23683705DBAC06CD81D /* SpellChecking.swift in Sources */ = {isa = PBXBuildFile; fileRef = 089E05964E405EF4D8E77726 /* SpellChecking.swift */; };
+		54ED9F0AC687706DAD6B8490 /* TaskBypass.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC78B8C8EE87900D01DD7E54 /* TaskBypass.swift */; };
 		55ED495EAD8952B8E0882BCF /* PartRequestContractTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 20B0145C234AD48964CA2720 /* PartRequestContractTests.swift */; };
 		5933F3D6CFA7B91919C9E4CC /* TaskCompletionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = E732A53271A9B3269E327049 /* TaskCompletionSheet.swift */; };
 		5C61F9531EF3D0790ED29411 /* TaskDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 023093999D743305833F30C2 /* TaskDetailView.swift */; };
 		659B9F66766604273CB7B775 /* TaskListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F03C0D159BDC9BEC3188EBE2 /* TaskListView.swift */; };
 		6775B824320E14795CCC3785 /* PropertyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F671E23757B190E198B6028B /* PropertyStore.swift */; };
+		6DFF3FA7B72483D5EFC95F95 /* WeekHorizonPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = FE309362C1C2985708E3CE7E /* WeekHorizonPlanning.swift */; };
 		71A2C4016D4054B529EE13BA /* AssetAPIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0DDB20EC1AC203C8DCA86D12 /* AssetAPIClient.swift */; };
 		7960A29CD5577D0AB51E4102 /* MaintenanceModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4273633D01E757220BC627D5 /* MaintenanceModels.swift */; };
+		7A00DBE17680DCA2890B00AE /* WeekHorizonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7532BD714B83E82BA385358D /* WeekHorizonView.swift */; };
+		7F5B296A17F4E14F20190DDD /* TaskBypassTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 625DDCD4DDAC15C9C143B5D5 /* TaskBypassTests.swift */; };
 		86A90FFE584363F0D2CEF909 /* MeterEntrySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = D406E130D1642CB8C6629477 /* MeterEntrySheet.swift */; };
 		9C02F27113A17DF941654A27 /* BuildIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = C41D00310D419A5FB82814DE /* BuildIdentity.swift */; };
 		A2BB55D974229462DE8DA5C9 /* WorkRequestDraftAssistantTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4DFCECF05E081E1BE7B97E6E /* WorkRequestDraftAssistantTests.swift */; };
+		A87EBBCC88680531C0859821 /* FieldDictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1767C998AEC2165AF123B938 /* FieldDictation.swift */; };
 		ABDF22C86150A30CA3FCF6D8 /* CategoryDeleteSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB8200B623E46B0F06130C30 /* CategoryDeleteSheet.swift */; };
 		AD5CED1FCD4213DA5C40D173 /* AssetListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 261B773B69CF4B49F065620A /* AssetListView.swift */; };
 		ADC374B7EEBA20C105D1EED6 /* TaskAssetContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73C0D0F886444414364A2A8E /* TaskAssetContext.swift */; };
@@ -47,6 +54,7 @@
 		CF636648F1994721E35B9F98 /* ManualImportReviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 502D626AAA62E6AD1AD15DB9 /* ManualImportReviewView.swift */; };
 		D68C9EC53EA6B4FA19136A25 /* AppleWorkRequestDraftGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = B29D9384E0F4BBE3102A3ED6 /* AppleWorkRequestDraftGenerator.swift */; };
 		DF83BEF49FA56F7AFDA06D6D /* ManualImportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4B53559FB4ADB0ED598BF97 /* ManualImportTests.swift */; };
+		EC11BB8A929D9B61D7589094 /* WeekHorizonPlanningTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6D0CEE1EF501C4734946D5C0 /* WeekHorizonPlanningTests.swift */; };
 		ECB98E37EABD7CB2E8AA65FD /* TaskEditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7024D52AC8A29FCDDA888235 /* TaskEditView.swift */; };
 		F17DE3BEC63952C5EEAD7B27 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = EB901E563539E1B6E1387C0A /* Assets.xcassets */; };
 		F4F1A566F5D850A8A3C5A9F5 /* ManualLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D7342C3FBA23234C5D4D901 /* ManualLibraryView.swift */; };
@@ -65,8 +73,10 @@
 
 /* Begin PBXFileReference section */
 		023093999D743305833F30C2 /* TaskDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskDetailView.swift; sourceTree = "<group>"; };
+		089E05964E405EF4D8E77726 /* SpellChecking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpellChecking.swift; sourceTree = "<group>"; };
 		0DDB20EC1AC203C8DCA86D12 /* AssetAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetAPIClient.swift; sourceTree = "<group>"; };
 		12D56367963B90F2D3E17708 /* WorkRequestDraftGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkRequestDraftGenerator.swift; sourceTree = "<group>"; };
+		1767C998AEC2165AF123B938 /* FieldDictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FieldDictation.swift; sourceTree = "<group>"; };
 		1C0AFE5429B74EEA9E2477DE /* TaskSearch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskSearch.swift; sourceTree = "<group>"; };
 		1E238721C0B4E825C08A772C /* AssetModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssetModels.swift; sourceTree = "<group>"; };
 		1E92D83862DE01339096B029 /* PropertyManagerTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PropertyManagerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -83,9 +93,12 @@
 		50ED5183762E240500D171AD /* PropertyManagerApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyManagerApp.swift; sourceTree = "<group>"; };
 		53A89F833E2E4BC55EA77CA0 /* ManualLibraryAPI.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualLibraryAPI.swift; sourceTree = "<group>"; };
 		61F9312A4345C298D4F3EA2A /* WorkRequestPayloadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkRequestPayloadTests.swift; sourceTree = "<group>"; };
+		625DDCD4DDAC15C9C143B5D5 /* TaskBypassTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBypassTests.swift; sourceTree = "<group>"; };
 		6CB7E35329B642244A655910 /* AppleManualExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleManualExtractor.swift; sourceTree = "<group>"; };
+		6D0CEE1EF501C4734946D5C0 /* WeekHorizonPlanningTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekHorizonPlanningTests.swift; sourceTree = "<group>"; };
 		7024D52AC8A29FCDDA888235 /* TaskEditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskEditView.swift; sourceTree = "<group>"; };
 		73C0D0F886444414364A2A8E /* TaskAssetContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskAssetContext.swift; sourceTree = "<group>"; };
+		7532BD714B83E82BA385358D /* WeekHorizonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekHorizonView.swift; sourceTree = "<group>"; };
 		7D33AD22C8C9CA0330D5E59C /* WorkRequestIntakeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkRequestIntakeView.swift; sourceTree = "<group>"; };
 		7EE904FCD0E6E296BE0280DA /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		821805D7A9565876E1231DCC /* TaskPartDraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskPartDraft.swift; sourceTree = "<group>"; };
@@ -93,6 +106,7 @@
 		8500D4F2DB68D3F01B7D9A66 /* WorkRequestModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkRequestModels.swift; sourceTree = "<group>"; };
 		8A275FE8B3EF82508A0DB18A /* TaskTitleHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskTitleHelpers.swift; sourceTree = "<group>"; };
 		AB8200B623E46B0F06130C30 /* CategoryDeleteSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CategoryDeleteSheet.swift; sourceTree = "<group>"; };
+		AC78B8C8EE87900D01DD7E54 /* TaskBypass.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskBypass.swift; sourceTree = "<group>"; };
 		ADEFFEBC49BF0424AC0E1CA6 /* VoiceMeterEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceMeterEntry.swift; sourceTree = "<group>"; };
 		B29D9384E0F4BBE3102A3ED6 /* AppleWorkRequestDraftGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppleWorkRequestDraftGenerator.swift; sourceTree = "<group>"; };
 		BF6AB40D3385E587F2B22A5D /* WorkRequestDraftAssistant.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkRequestDraftAssistant.swift; sourceTree = "<group>"; };
@@ -106,9 +120,11 @@
 		E732A53271A9B3269E327049 /* TaskCompletionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskCompletionSheet.swift; sourceTree = "<group>"; };
 		EB901E563539E1B6E1387C0A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		F03C0D159BDC9BEC3188EBE2 /* TaskListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaskListView.swift; sourceTree = "<group>"; };
+		F04F5B4C3038DF442EE39018 /* ErrorCancellationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ErrorCancellationTests.swift; sourceTree = "<group>"; };
 		F671E23757B190E198B6028B /* PropertyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyStore.swift; sourceTree = "<group>"; };
 		F8CBD72BB102DF9D87D90599 /* PropertyManager.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PropertyManager.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FDC7B9657058C54324030FA1 /* PropertyAPIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropertyAPIClient.swift; sourceTree = "<group>"; };
+		FE309362C1C2985708E3CE7E /* WeekHorizonPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekHorizonPlanning.swift; sourceTree = "<group>"; };
 		FF83DEB3EB0DFE7DD067AD33 /* WorkRequestDraftSuggestion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkRequestDraftSuggestion.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -125,6 +141,7 @@
 				1E238721C0B4E825C08A772C /* AssetModels.swift */,
 				C41D00310D419A5FB82814DE /* BuildIdentity.swift */,
 				AB8200B623E46B0F06130C30 /* CategoryDeleteSheet.swift */,
+				1767C998AEC2165AF123B938 /* FieldDictation.swift */,
 				4273633D01E757220BC627D5 /* MaintenanceModels.swift */,
 				CC2AF08F8CDAAB822FE148C5 /* ManualImportDraft.swift */,
 				502D626AAA62E6AD1AD15DB9 /* ManualImportReviewView.swift */,
@@ -138,7 +155,9 @@
 				44BB0D475C157F307DFCF510 /* RootView.swift */,
 				D8B5F578B875E2AD52FE1EB3 /* RunHoursTriggerSheet.swift */,
 				7EE904FCD0E6E296BE0280DA /* SettingsView.swift */,
+				089E05964E405EF4D8E77726 /* SpellChecking.swift */,
 				73C0D0F886444414364A2A8E /* TaskAssetContext.swift */,
+				AC78B8C8EE87900D01DD7E54 /* TaskBypass.swift */,
 				E732A53271A9B3269E327049 /* TaskCompletionSheet.swift */,
 				023093999D743305833F30C2 /* TaskDetailView.swift */,
 				7024D52AC8A29FCDDA888235 /* TaskEditView.swift */,
@@ -147,6 +166,8 @@
 				1C0AFE5429B74EEA9E2477DE /* TaskSearch.swift */,
 				8A275FE8B3EF82508A0DB18A /* TaskTitleHelpers.swift */,
 				ADEFFEBC49BF0424AC0E1CA6 /* VoiceMeterEntry.swift */,
+				FE309362C1C2985708E3CE7E /* WeekHorizonPlanning.swift */,
+				7532BD714B83E82BA385358D /* WeekHorizonView.swift */,
 				D048074452C6C34BCEB59BBB /* WorkRequestDictation.swift */,
 				BF6AB40D3385E587F2B22A5D /* WorkRequestDraftAssistant.swift */,
 				12D56367963B90F2D3E17708 /* WorkRequestDraftGenerator.swift */,
@@ -160,10 +181,13 @@
 		7B33874A655EDF6CF5660AC1 /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				F04F5B4C3038DF442EE39018 /* ErrorCancellationTests.swift */,
 				D4B53559FB4ADB0ED598BF97 /* ManualImportTests.swift */,
 				20B0145C234AD48964CA2720 /* PartRequestContractTests.swift */,
 				849F8D270810E2E0F62625AF /* TaskAssetContextTests.swift */,
+				625DDCD4DDAC15C9C143B5D5 /* TaskBypassTests.swift */,
 				39A2B564CD2A7CD9F31CD33D /* TaskCompletionPolicyTests.swift */,
+				6D0CEE1EF501C4734946D5C0 /* WeekHorizonPlanningTests.swift */,
 				4DFCECF05E081E1BE7B97E6E /* WorkRequestDraftAssistantTests.swift */,
 				61F9312A4345C298D4F3EA2A /* WorkRequestPayloadTests.swift */,
 			);
@@ -299,6 +323,7 @@
 				3D71E2F9FF961935890B632A /* AssetModels.swift in Sources */,
 				9C02F27113A17DF941654A27 /* BuildIdentity.swift in Sources */,
 				ABDF22C86150A30CA3FCF6D8 /* CategoryDeleteSheet.swift in Sources */,
+				A87EBBCC88680531C0859821 /* FieldDictation.swift in Sources */,
 				7960A29CD5577D0AB51E4102 /* MaintenanceModels.swift in Sources */,
 				3DB011E4A3FE2628EB3E04D0 /* ManualImportDraft.swift in Sources */,
 				CF636648F1994721E35B9F98 /* ManualImportReviewView.swift in Sources */,
@@ -312,7 +337,9 @@
 				C37188AE2D778155C4E41F76 /* RootView.swift in Sources */,
 				FF7186CA4D7633487FC03161 /* RunHoursTriggerSheet.swift in Sources */,
 				413E4BE7C4C3AAF12CE4E76E /* SettingsView.swift in Sources */,
+				5446F23683705DBAC06CD81D /* SpellChecking.swift in Sources */,
 				ADC374B7EEBA20C105D1EED6 /* TaskAssetContext.swift in Sources */,
+				54ED9F0AC687706DAD6B8490 /* TaskBypass.swift in Sources */,
 				5933F3D6CFA7B91919C9E4CC /* TaskCompletionSheet.swift in Sources */,
 				5C61F9531EF3D0790ED29411 /* TaskDetailView.swift in Sources */,
 				ECB98E37EABD7CB2E8AA65FD /* TaskEditView.swift in Sources */,
@@ -321,6 +348,8 @@
 				3F83AA3B297B270994A2FAE5 /* TaskSearch.swift in Sources */,
 				3FA3002D301196C36F328D4D /* TaskTitleHelpers.swift in Sources */,
 				069D8A8537AE24D8635C1086 /* VoiceMeterEntry.swift in Sources */,
+				6DFF3FA7B72483D5EFC95F95 /* WeekHorizonPlanning.swift in Sources */,
+				7A00DBE17680DCA2890B00AE /* WeekHorizonView.swift in Sources */,
 				30259B5DB9E924715407AD26 /* WorkRequestDictation.swift in Sources */,
 				B2586907EED140974F49766C /* WorkRequestDraftAssistant.swift in Sources */,
 				52C95B61BEA09E3EC32724E7 /* WorkRequestDraftGenerator.swift in Sources */,
@@ -334,10 +363,13 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2CA12C3FAA9346B9E0ECA8D6 /* ErrorCancellationTests.swift in Sources */,
 				DF83BEF49FA56F7AFDA06D6D /* ManualImportTests.swift in Sources */,
 				55ED495EAD8952B8E0882BCF /* PartRequestContractTests.swift in Sources */,
 				3BD98D5B80E7D69722DC3924 /* TaskAssetContextTests.swift in Sources */,
+				7F5B296A17F4E14F20190DDD /* TaskBypassTests.swift in Sources */,
 				507719C0719B4692D5C76CAF /* TaskCompletionPolicyTests.swift in Sources */,
+				EC11BB8A929D9B61D7589094 /* WeekHorizonPlanningTests.swift in Sources */,
 				A2BB55D974229462DE8DA5C9 /* WorkRequestDraftAssistantTests.swift in Sources */,
 				416F52D0ACECE1CB5765C9DF /* WorkRequestPayloadTests.swift in Sources */,
 			);
@@ -362,7 +394,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 37;
 				DEVELOPMENT_TEAM = ZYJVHJWT3P;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;
@@ -492,7 +524,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 37;
 				DEVELOPMENT_TEAM = ZYJVHJWT3P;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Info.plist;

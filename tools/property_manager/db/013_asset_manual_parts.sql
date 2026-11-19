@@ -20,4 +20,10 @@ CREATE TABLE propertymanager.asset_manual_part (
 CREATE INDEX asset_manual_part_version_idx
     ON propertymanager.asset_manual_part (manual_version_id, reference_number);
 
+-- Written last inside the same transaction so the ledger reports 013 only
+-- when the migration committed.
+INSERT INTO propertymanager.schema_migrations (version)
+VALUES ('013')
+ON CONFLICT (version) DO NOTHING;
+
 COMMIT;

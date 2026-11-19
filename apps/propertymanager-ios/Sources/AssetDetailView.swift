@@ -15,20 +15,29 @@ struct AssetDetailView: View {
     @State private var isSavingPlacedInServiceDate = false
     @State private var placedInServiceDate = Date()
     @State private var showDeactivateConfirm = false
+    @State private var showHostPicker = false
+    @State private var isSavingHost = false
     @State private var errorMessage: String?
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 if let asset {
-                    if asset.meterNeedsActivation {
-                        proposedMeterBanner(asset)
+                    if asset.isPseudo {
+                        groupBadge
+                        attachmentsCard(asset)
+                    } else {
+                        if asset.meterNeedsActivation {
+                            proposedMeterBanner(asset)
+                        }
+                        meterCard(asset)
+                        attachedToCard(asset)
+                        attachmentsCard(asset)
+                        assetDetailsCard(asset)
+                        serviceCard(asset)
+                        manualsCard
+                        historyCard
                     }
-                    meterCard(asset)
-                    assetDetailsCard(asset)
-                    serviceCard(asset)
-                    manualsCard
-                    historyCard
                     deactivateCard
                 } else {
                     ProgressView()
@@ -46,7 +55,7 @@ struct AssetDetailView: View {
                     .disabled(isDeactivating)
                 }
             }
-            if asset?.meter?.hasMeter == true {
+            if asset?.isPseudo != true, asset?.meter?.hasMeter == true {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button {
                         showVoiceSheet = true
@@ -74,6 +83,17 @@ struct AssetDetailView: View {
                 Task { await loadReadings() }
             }
         }
+        .sheet(isPresented: $showHostPicker) {
+            if let asset {
+                HostAssetPickerView(
+                    asset: asset,
+                    candidates: hostPickerCandidates(for: asset)
+                ) { hostId in
+                    showHostPicker = false
+                    Task { await saveHost(hostId) }
+                }
+            }
+        }
         .confirmationDialog(
             "Deactivate \(asset?.name ?? "asset")?",
             isPresented: $showDeactivateConfirm,
@@ -96,6 +116,99 @@ struct AssetDetailView: View {
         }
         .task {
             await loadAsset()
+        }
+    }
+
+    private var groupBadge: some View {
+        HStack {
+            Text("Group")
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Color.accentColor.opacity(0.15))
+                .clipShape(Capsule())
+            Text("Display only — attach members with Attached to on each asset.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    @ViewBuilder
+    private func attachedToCard(_ asset: RanchAsset) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Attached to")
+                .font(.headline)
+            if let host = asset.host {
+                NavigationLink(value: host.id) {
+                    Text(host.name)
+                }
+            } else {
+                Text("None")
+                    .foregroundStyle(.secondary)
+            }
+            HStack {
+                Button("Change…") {
+                    showHostPicker = true
+                }
+                .buttonStyle(.bordered)
+                .disabled(isSavingHost)
+                if asset.host != nil {
+                    Button("Clear", role: .destructive) {
+                        Task { await saveHost(nil) }
+                    }
+                    .disabled(isSavingHost)
+                }
+            }
+            Text("Use this when an implement is only used with one host asset, or to place an asset in a Group.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    @ViewBuilder
+    private func attachmentsCard(_ asset: RanchAsset) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(asset.isPseudo ? "Group members" : "Attachments")
+                .font(.headline)
+            if let attachments = asset.attachments, !attachments.isEmpty {
+                ForEach(attachments) { attachment in
+                    NavigationLink(value: attachment.id) {
+                        Text(attachment.name)
+                    }
+                }
+            } else if asset.isPseudo {
+                Text("No members yet. Open a real asset and set Attached to this group.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("None")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding()
+        .background(Color(.secondarySystemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+
+    private func hostPickerCandidates(for asset: RanchAsset) -> [RanchAsset] {
+        let descendants = AssetHostPolicy.descendantIds(of: asset.id, in: store.assets)
+        return store.assets
+            .filter { $0.id != asset.id && !descendants.contains($0.id) }
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    private func saveHost(_ hostId: UUID?) async {
+        isSavingHost = true
+        defer { isSavingHost = false }
+        do {
+            asset = try await store.client.updateHostAsset(id: assetId, hostAssetId: hostId)
+            await store.refreshAssets()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -224,7 +337,7 @@ struct AssetDetailView: View {
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
-                                Text(task.item)
+                                Text(TaskTitle.highlightingSafety(task.item))
                                     .foregroundStyle(.primary)
                                 if let badge = task.runHoursBadge {
                                     Text(badge)
@@ -332,8 +445,13 @@ struct AssetDetailView: View {
             if let placedInServiceDate = asset?.placedInServiceDate {
                 self.placedInServiceDate = placedInServiceDate
             }
-            await loadReadings()
+            if asset?.isPseudo == true {
+                readings = []
+            } else {
+                await loadReadings()
+            }
         } catch {
+            guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -356,6 +474,7 @@ struct AssetDetailView: View {
         do {
             readings = try await store.client.fetchMeterReadings(assetId: assetId)
         } catch {
+            guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription
         }
     }
@@ -391,5 +510,64 @@ struct AssetDetailView: View {
 
     private func formatDecimal(_ value: Decimal) -> String {
         NSDecimalNumber(decimal: value).stringValue
+    }
+}
+
+enum AssetHostPolicy {
+    static func descendantIds(of root: UUID, in assets: [RanchAsset]) -> Set<UUID> {
+        var childrenByHost: [UUID: [UUID]] = [:]
+        for asset in assets {
+            guard let hostId = asset.hostAssetId ?? asset.host?.id else { continue }
+            childrenByHost[hostId, default: []].append(asset.id)
+        }
+        var seen: Set<UUID> = []
+        var stack = childrenByHost[root] ?? []
+        while let next = stack.popLast() {
+            if seen.insert(next).inserted {
+                stack.append(contentsOf: childrenByHost[next] ?? [])
+            }
+        }
+        return seen
+    }
+}
+
+struct HostAssetPickerView: View {
+    let asset: RanchAsset
+    let candidates: [RanchAsset]
+    var onSelect: (UUID) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var searchText = ""
+
+    private var filtered: [RanchAsset] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !query.isEmpty else { return candidates }
+        return candidates.filter { $0.name.lowercased().contains(query) }
+    }
+
+    var body: some View {
+        NavigationStack {
+            List(filtered) { candidate in
+                Button {
+                    onSelect(candidate.id)
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(candidate.name)
+                        if let category = candidate.category, !category.isEmpty {
+                            Text(category)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+            .navigationTitle("Attach \(asset.name) to…")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $searchText, prompt: "Search assets")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") { dismiss() }
+                }
+            }
+        }
     }
 }

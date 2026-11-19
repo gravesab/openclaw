@@ -97,12 +97,13 @@ class PostgresPropertyManagerReadRepository:
     def list_tasks(self, *, days: int) -> list[dict[str, Any]]:
         return self._rows(
             """SELECT t.id, t.area, t.item, t.category_name, t.kind, t.next_due, t.schedule_kind,
-                       t.next_due_meter_value, a.id AS asset_id, a.name AS asset_name,
+                       t.next_due_meter_value, t.deferred_until, a.id AS asset_id, a.name AS asset_name,
                        m.current_value, m.meter_type, m.unit
                  FROM propertymanager.maintenance_tasks t
                  LEFT JOIN propertymanager.assets a ON a.id = t.asset_id AND a.is_active = true
                  LEFT JOIN propertymanager.asset_meter m ON m.asset_id = t.asset_id
-                 WHERE t.is_active = true ORDER BY t.next_due, t.area, t.item LIMIT %s""",
+                 WHERE t.is_active = true AND t.kind <> 'Work Request' AND t.intake_state IS NULL
+                 ORDER BY t.next_due, t.area, t.item LIMIT %s""",
             (min(days * 20, 1000),),
         )
 

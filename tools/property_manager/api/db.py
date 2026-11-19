@@ -174,7 +174,7 @@ def _docker_psql(
     *,
     field_separator: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    """Run one psql statement via docker exec (same argv as legacy callers)."""
+    """Run one psql statement via docker exec without placing SQL in argv."""
     cmd = [
         "docker",
         "exec",
@@ -191,12 +191,15 @@ def _docker_psql(
     ]
     if field_separator is not None:
         cmd.extend(["-F", field_separator])
-    cmd.extend(["-c", sql])
+    # The local extraction path can legitimately contain a large manufacturer
+    # procedure.  Passing rendered SQL through ``-c`` makes it subject to the
+    # host argv limit before PostgreSQL can validate it.
+    cmd.extend(["-f", "-"])
     # Track Popen explicitly so worker_exit can wait. Do not start a new session
     # (that would detach/orphan children across worker death).
     proc: subprocess.Popen[str] = subprocess.Popen(
         cmd,
-        stdin=subprocess.DEVNULL,
+        stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -205,7 +208,7 @@ def _docker_psql(
     with _inflight_lock:
         _inflight_procs.add(proc)
     try:
-        stdout, stderr = proc.communicate()
+        stdout, stderr = proc.communicate(sql)
         return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
     finally:
         with _inflight_lock:
@@ -339,6 +342,12 @@ class DockerConnection:
         return None
 
 
+def _sql_text_literal(text: str) -> str:
+    # Rendered SQL goes to psql with standard_conforming_strings on, where a
+    # backslash is literal. psycopg2 quoting without a connection doubles it.
+    return "'" + text.replace("'", "''") + "'"
+
+
 def _mogrify(query: str, params: Any) -> str:
     if params is None:
         return query
@@ -352,17 +361,18 @@ def _mogrify(query: str, params: Any) -> str:
         if isinstance(value, (int, float, Decimal)):
             return str(value)
         if isinstance(value, (datetime, date)):
-            adapted = psycopg2.extensions.adapt(value.isoformat())
-            adapted.encoding = "utf8"
-            return adapted.getquoted().decode("utf8")
+            return _sql_text_literal(value.isoformat())
         if isinstance(value, uuid.UUID):
-            adapted = psycopg2.extensions.adapt(str(value))
-            adapted.encoding = "utf8"
-            return adapted.getquoted().decode("utf8")
+            return _sql_text_literal(str(value))
         if isinstance(value, (dict, list)):
-            adapted = psycopg2.extensions.adapt(json.dumps(value))
-            adapted.encoding = "utf8"
-            return adapted.getquoted().decode("utf8")
+            return _sql_text_literal(json.dumps(value))
+        if isinstance(value, str):
+            return _sql_text_literal(value)
+        if isinstance(value, (bytes, bytearray, memoryview)):
+            # docker-exec feeds rendered SQL to psql.  psycopg's byte adapter
+            # emits backslash-octal quoting for its native protocol, which
+            # psql with standard_conforming_strings stores as literal text.
+            return "'\\x" + bytes(value).hex() + "'::bytea"
         adapted = psycopg2.extensions.adapt(value)
         if hasattr(adapted, "encoding"):
             adapted.encoding = "utf8"
@@ -409,14 +419,24 @@ def execute_top_level_one_json(query: str, params: Any = None) -> dict[str, Any]
     PostgreSQL requires data-modifying CTEs to be attached to the top-level
     statement, so callers must make their final SELECT emit ``row_to_json``.
     """
-    sql = _mogrify(query, params)
-    result = _docker_psql(sql)
-    if result.returncode != 0:
-        _raise_psql_failure(result)
-    text = (result.stdout or "").strip()
-    if not text:
-        return None
-    payload = json.loads(text)
+    if use_docker():
+        sql = _mogrify(query, params)
+        result = _docker_psql(sql)
+        if result.returncode != 0:
+            _raise_psql_failure(result)
+        text = (result.stdout or "").strip()
+        if not text:
+            return None
+        payload = json.loads(text)
+    else:
+        with connect() as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(query, params)
+                row = cursor.fetchone()
+            connection.commit()
+        if row is None:
+            return None
+        payload = next(iter(row.values())) if isinstance(row, dict) else row[0]
     if not isinstance(payload, dict):
         return None
     return {key: _jsonable(value) for key, value in payload.items()}

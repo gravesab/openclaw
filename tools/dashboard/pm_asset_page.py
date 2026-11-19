@@ -16,6 +16,8 @@ PROPERTYMANAGER_API = os.environ.get(
     "PROPERTYMANAGER_API_BASE",
     "http://127.0.0.1:5062",
 )
+# No defaults: PIN unlock needs both a configured PIN and a session-signing secret,
+# otherwise well-known values would let anyone unlock or forge the session cookie.
 OPERATOR_PIN = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "").strip()
 DASHBOARD_SECRET = os.environ.get("PROPERTYMANAGER_DASHBOARD_SECRET", "").strip()
 API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "")
@@ -182,7 +184,8 @@ def register_pm_asset_routes(app) -> None:
                             )
                         elif status == 401:
                             message = "Authentication required. Enter operator PIN."
-                            session.pop("pm_operator_authenticated", None)
+                            if "pm_operator_authenticated" in session:
+                                session.pop("pm_operator_authenticated", None)
                             authenticated = False
                         elif status >= 400:
                             message = result.get("message", result.get("error", str(result))) if isinstance(result, dict) else str(result)

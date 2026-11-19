@@ -1,6 +1,18 @@
 import XCTest
 
 final class RanchOSLivestockBrowserTests: XCTestCase {
+    func testSampleCatalogSummarizesEachSpeciesGroup() {
+        let groups = RanchOSLivestockGroups.summaries(from: RanchOSLivestockSampleCatalog.developmentSamples)
+
+        XCTAssertEqual(groups.map(\.title), [
+            "Cattle", "Bison", "Goat", "Sheep", "Chicken", "Pig", "Horse", "Pet",
+        ])
+        XCTAssertEqual(groups.first?.animalCount, 3)
+        XCTAssertEqual(groups.first?.attentionCount, 1)
+        XCTAssertEqual(groups.first?.summary, "3 animals · 1 needs review")
+        XCTAssertEqual(groups.first { $0.title == "Goat" }?.summary, "1 animal · current")
+    }
+
     @MainActor
     func testSearchFiltersByDisplayName() {
         let model = RanchOSLivestockBrowserModel()

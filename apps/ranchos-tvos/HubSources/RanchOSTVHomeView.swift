@@ -23,7 +23,7 @@ struct RanchOSTVHomeView: View {
                         RanchOSDevIdentityBadge(style: .television)
                         Text(dashboard.title)
                             .font(.largeTitle.bold())
-                        Text(RanchOSBuildInfo.display(for: environment))
+                        Text("\(environment.tenantDisplayName)\n\(RanchOSBuildInfo.display(for: environment))")
                             .font(.title2)
                             .foregroundStyle(.white.opacity(0.78))
                     }
@@ -78,7 +78,7 @@ private struct RanchOSTVModuleCard: View {
         switch module {
         case .property: environment.propertyLiveCardLabel
         case .livestock: environment.livestockPendingLabel
-        case .finance: RanchOSFinanceDashboard.disconnectedCardLabel
+        case .finance: "Charts and reports"
         }
     }
 
@@ -137,7 +137,7 @@ private struct RanchOSTVModuleDetailView: View {
                     .font(.system(size: 54, weight: .bold, design: .serif))
                     .foregroundStyle(.white)
 
-                Text(environment.tenantDisplayName)
+                Text("\(environment.tenantDisplayName)\n\(RanchOSBuildInfo.display(for: environment))")
                     .font(.title2)
                     .foregroundStyle(.white.opacity(0.74))
 
@@ -161,6 +161,7 @@ private struct RanchOSTVModuleDetailView: View {
             switch module {
             case .property:
                 await propertyStore.refresh()
+                await propertyStore.trackAssets()
             case .livestock:
                 await livestockStore.load()
             case .finance:
@@ -176,9 +177,9 @@ private struct RanchOSTVModuleDetailView: View {
 
     private var headline: String {
         switch module {
-        case .property: "Property overview"
-        case .livestock: "Herd overview"
-        case .finance: "Financial overview"
+        case .property: "Assets and relationships"
+        case .livestock: "Herds and groups"
+        case .finance: "Charts and reports"
         }
     }
 
@@ -191,68 +192,93 @@ private struct RanchOSTVModuleDetailView: View {
         }
     }
 
-    private var items: [RanchOSTVDetailItem] {
-        switch module {
-        case .property:
-            RanchOSPropertyDashboard.developmentFixture.summaries.map { summary in
-                RanchOSTVDetailItem(
-                    title: summary.title,
-                    detail: summary.detail,
-                    symbolName: propertySymbol(for: summary.status),
-                    propertySnapshot: RanchOSPropertyDashboard.developmentFixture.snapshot(for: summary.asset))
-            }
-        case .livestock:
-            RanchOSLivestockDashboard.developmentFixture.summaries.map { summary in
-                RanchOSTVDetailItem(
-                    title: summary.title,
-                    detail: summary.detail,
-                    symbolName: livestockSymbol(for: summary.status))
-            }
-        case .finance:
-            []
-        }
-    }
-
     @ViewBuilder
     private var detailContent: some View {
         switch module {
         case .property:
-            switch propertyStore.state {
-            case .loading:
-                ProgressView("Loading PropertyManager DEV…")
-            case .unavailable(let message):
-                Text(message).foregroundStyle(.white.opacity(0.78))
-            case .ready(let dashboard):
-                let filter = dashboard.resolvedFilter(selectedPropertyCategory)
-                let dueTasks = dashboard.dueTasks(matching: filter)
-                VStack(alignment: .leading, spacing: 16) {
-                    Text("\(dashboard.activeTaskCount) active tasks · \(dashboard.attentionCount) need attention")
-                        .font(.title3.weight(.semibold))
-                    RanchOSPropertyDueTaskCategoryPicker(
-                        filters: dashboard.dueTaskCategoryFilters,
-                        selection: $selectedPropertyCategory,
-                        prominence: .television)
-                    Text(propertyDueTaskSummary(filter: filter, count: dueTasks.count))
-                        .font(.title3.weight(.semibold))
-                    if dueTasks.isEmpty {
-                        Text("No due tasks match this category.")
-                            .foregroundStyle(.white.opacity(0.78))
-                    } else {
-                        ForEach(dueTasks) { task in
-                            RanchOSTVDetailCard(item: RanchOSTVDetailItem(title: task.title, detail: task.detail, symbolName: task.status == .needsAttention ? "exclamationmark.triangle.fill" : "calendar"))
-                        }
-                    }
-                }
-            }
+            propertyContent
         case .livestock:
             livestockContent
         case .finance:
+            financeContent
+        }
+    }
+
+    private var propertyContent: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            propertyAssetsContent
+            propertyDueTasksContent
+        }
+    }
+
+    @ViewBuilder
+    private var propertyAssetsContent: some View {
+        switch propertyStore.assetsState {
+        case .idle, .loading:
+            ProgressView("Loading PropertyManager \(environment.title)…")
+        case .unavailable(let message):
+            Text(message).foregroundStyle(.white.opacity(0.78))
+        case .ready(let assets):
+            propertyAssetSummaries(RanchOSPropertyLiveAsset.relationshipSummaries(from: assets))
+        }
+    }
+
+    @ViewBuilder
+    private var propertyDueTasksContent: some View {
+        switch propertyStore.state {
+        case .loading:
+            ProgressView("Loading due tasks…")
+        case .unavailable(let message):
+            Text(message).foregroundStyle(.white.opacity(0.78))
+        case .ready(let dashboard):
+            let filter = dashboard.resolvedFilter(selectedPropertyCategory)
+            let dueTasks = dashboard.dueTasks(matching: filter)
             VStack(alignment: .leading, spacing: 16) {
-                Text(RanchOSFinanceDashboard.disconnectedCardLabel)
+                Text("\(dashboard.activeTaskCount) active tasks · \(dashboard.attentionCount) need attention")
                     .font(.title3.weight(.semibold))
-                Text(RanchOSFinanceDashboard.disconnectedBanner)
-                    .font(.body)
+                RanchOSPropertyDueTaskCategoryPicker(
+                    filters: dashboard.dueTaskCategoryFilters,
+                    selection: $selectedPropertyCategory,
+                    prominence: .television)
+                Text(propertyDueTaskSummary(filter: filter, count: dueTasks.count))
+                    .font(.title3.weight(.semibold))
+                if dueTasks.isEmpty {
+                    Text("No due tasks match this category.")
+                        .foregroundStyle(.white.opacity(0.78))
+                } else {
+                    ForEach(dueTasks) { task in
+                        RanchOSTVDetailCard(
+                            item: RanchOSTVDetailItem(
+                                title: task.title,
+                                detail: task.detail,
+                                symbolName: task.status == .needsAttention ? "exclamationmark.triangle.fill" : "calendar"))
+                    }
+                }
+            }
+        }
+    }
+
+    private func propertyAssetSummaries(_ summaries: [RanchOSPropertyRelationshipSummary]) -> some View {
+        VStack(spacing: 16) {
+            if summaries.isEmpty {
+                Text("No assets.")
                     .foregroundStyle(.white.opacity(0.78))
+            }
+            ForEach(summaries) { summary in
+                RanchOSTVAssetSummaryCard(summary: summary)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var financeContent: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(RanchOSTVFinanceReport.allCases) { report in
+                RanchOSTVDetailCard(
+                    item: RanchOSTVDetailItem(
+                        title: report.title,
+                        detail: report.emptyDetail,
+                        symbolName: report.symbolName))
             }
         }
     }
@@ -260,8 +286,9 @@ private struct RanchOSTVModuleDetailView: View {
     @ViewBuilder
     private var livestockContent: some View {
         switch livestockStore.presentation {
-        case .fixture(let dashboard):
-            livestockCards(dashboard)
+        case .fixture:
+            Text(RanchOSLivestockConnection.pendingLabel)
+                .foregroundStyle(.white.opacity(0.78))
         case .loading:
             ProgressView("Loading Livestock…")
         case .unavailable(let message):
@@ -303,7 +330,7 @@ private struct RanchOSTVModuleDetailView: View {
                 ? livestockStore.presentation.banner
                 : environment.livestockPendingLabel
         case .finance:
-            RanchOSFinanceDashboard.disconnectedBanner
+            "Read only. These are the finance chart reports. Statements are added on iPhone or Mac."
         }
     }
 
@@ -315,11 +342,75 @@ private struct RanchOSTVModuleDetailView: View {
         }
     }
 
-    private func propertySymbol(for status: RanchOSPropertySummary.Status) -> String {
-        switch status {
-        case .needsAttention: "exclamationmark.triangle.fill"
-        case .upcoming: "calendar"
-        case .current: "checkmark.circle.fill"
+}
+
+private enum RanchOSTVFinanceReport: String, CaseIterable, Identifiable {
+    case expenses
+    case income
+    case weeks
+    case targets
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .expenses: "Expenses by category"
+        case .income: "Income by category"
+        case .weeks: "Month by week"
+        case .targets: "Cost by target"
+        }
+    }
+
+    var emptyDetail: String {
+        switch self {
+        case .expenses, .income, .weeks, .targets:
+            "Live finance summary is not connected."
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .expenses, .income: "chart.bar.fill"
+        case .weeks: "calendar"
+        case .targets: "tag.fill"
+        }
+    }
+}
+
+private struct RanchOSTVAssetSummaryCard: View {
+    let summary: RanchOSPropertyRelationshipSummary
+    @Environment(\.isFocused) private var isFocused
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 18) {
+                Image(systemName: summary.members.isEmpty ? "building.2" : "square.stack.3d.up")
+                    .font(.title2.weight(.semibold))
+                    .foregroundStyle(.mint)
+                    .frame(width: 52)
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(summary.title)
+                        .font(.title3.weight(.semibold))
+                    Text(summary.detail)
+                        .font(.body)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                Spacer()
+            }
+            ForEach(summary.members) { member in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(member.name).font(.body.weight(.semibold))
+                    Text(member.detail).font(.callout).foregroundStyle(.white.opacity(0.72))
+                }
+                .padding(.leading, 70)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(20)
+        .background(.white.opacity(isFocused ? 0.24 : 0.13), in: RoundedRectangle(cornerRadius: 22))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22)
+                .stroke(.white.opacity(isFocused ? 0.9 : 0.16), lineWidth: isFocused ? 4 : 1)
         }
     }
 }

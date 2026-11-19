@@ -29,17 +29,24 @@ MIGRATIONS = (
     "009_maintenance_proposals.sql",
     "010_handbook_ingestion_v1.sql",
     "011_work_request_intake.sql",
-    "012_asset_manual_parts.sql",
-    "013_asset_placed_in_service_date.sql",
-    "014_propertymanager_tenancy.sql",
+    "012_dev_schema_forward_repair.sql",
+    "013_asset_manual_parts.sql",
+    "014_asset_placed_in_service_date.sql",
+    "015_task_schedule_bypass.sql",
+    "016_asset_host.sql",
+    "017_task_require_parent_asset.sql",
+    "018_asset_is_pseudo.sql",
+    "019_propertymanager_tenancy.sql",
 )
+PRE_012_MIGRATIONS = MIGRATIONS[: MIGRATIONS.index("012_dev_schema_forward_repair.sql")]
 REAPPLICABLE_MIGRATIONS = (
     "005_assets_and_meters.sql",
     "006_phase1_meter_audit.sql",
     "009_maintenance_proposals.sql",
 )
-EXPECTED_VERSION = "014"
+EXPECTED_VERSION = "019"
 CHAIN_BOOTSTRAP_TENANT = "11111111-1111-4111-8111-111111111111"
+CHAIN_LEGACY_ASSET = "00000000-0000-0000-0000-000000000097"
 IMAGE = "pgvector/pgvector:pg16"
 TEST_LABEL = "ai.openclaw.test=propertymanager-migration-chain"
 
@@ -193,7 +200,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
 
     @classmethod
     def _provision_tenancy_roles(cls) -> None:
-        """Create the DEV tenancy roles migration 014 requires."""
+        """Create the DEV tenancy roles migration 019 requires."""
         cls._psql(
             "CREATE ROLE ranchos_dev_migrator NOLOGIN;"
             " CREATE ROLE ranchos_dev_runtime NOLOGIN;"
@@ -202,12 +209,12 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
 
     @classmethod
     def _apply_ranchos_foundation(cls) -> None:
-        """Apply the shared ranchos tenancy foundation 014 builds on."""
+        """Apply the shared ranchos tenancy foundation 019 builds on."""
         cls._psql("SET ROLE ranchos_dev_migrator;\n" + RANCHOS_FOUNDATION.read_text(encoding="utf-8"))
 
     @classmethod
     def _seed_chain_bootstrap_tenant(cls) -> None:
-        """Insert the bootstrap ranch 014 attaches pre-tenancy rows to."""
+        """Insert the bootstrap ranch 019 attaches pre-tenancy rows to."""
         cls._psql(
             "SET ROLE ranchos_dev_migrator;"
             f" SET ranchos.tenant_id = '{CHAIN_BOOTSTRAP_TENANT}';"
@@ -219,10 +226,10 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
     def _migration_sql(cls, filename: str) -> str:
         """Render one canonical migration as the DEV migrator would run it."""
         preamble = "SET ROLE ranchos_dev_migrator;\n"
-        if filename == "014_propertymanager_tenancy.sql":
+        if filename == "019_propertymanager_tenancy.sql":
             preamble = (
                 "SET ROLE ranchos_dev_migrator;"
-                " SET app.pm_tenancy_014_apply = 'apply-dev-only';"
+                " SET app.pm_tenancy_019_apply = 'apply-dev-only';"
                 f" SET app.bootstrap_tenant_id = '{CHAIN_BOOTSTRAP_TENANT}';\n"
             )
         return preamble + (MIGRATION_DIR / filename).read_text(encoding="utf-8")
@@ -267,7 +274,12 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             )
         ).extract()
 
+    @classmethod
+    def _reset_propertymanager_schema(cls) -> None:
+        cls._psql("DROP SCHEMA IF EXISTS propertymanager CASCADE;")
+
     def test_canonical_migrations_build_expected_schema(self) -> None:
+        self._reset_propertymanager_schema()
         identity = self._psql(
             "SELECT current_database() || '|' || current_user || '|' || pg_is_in_recovery();"
         )
@@ -280,15 +292,41 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             if filename == "011_work_request_intake.sql":
                 # 002 allowed these legacy rows.  011 must retain them rather
                 # than rejecting an otherwise valid pre-intake DEV database.
+                # 017 deletes tasks without a parent asset, so give it one.
                 self._psql(
-                    """INSERT INTO propertymanager.maintenance_tasks
-                        (id, area, item, warning_days, critical_days, last_done, next_due, kind)
-                       VALUES ('00000000-0000-0000-0000-000000000099', 'Legacy', 'Work request', 0, 0, now(), now(), 'Work Request')"""
+                    f"""SET ROLE ranchos_dev_migrator;
+                       INSERT INTO propertymanager.assets (id, external_id, name, qr_token)
+                       VALUES ('{CHAIN_LEGACY_ASSET}', 'legacy-asset', 'Legacy asset', 'legacy-asset-qr');
+                       INSERT INTO propertymanager.maintenance_tasks
+                        (id, area, item, warning_days, critical_days, last_done, next_due, kind, asset_id)
+                       VALUES ('00000000-0000-0000-0000-000000000099', 'Legacy', 'Work request', 0, 0, now(), now(),
+                               'Work Request', '{CHAIN_LEGACY_ASSET}')"""
+                )
+            if filename == "019_propertymanager_tenancy.sql":
+                # The 005/006/009 rollout contract describes these migrations as
+                # idempotent for future hosts. Reapply only that promised subset,
+                # on the pre-tenancy schema it was promised for.
+                for reappliable in REAPPLICABLE_MIGRATIONS:
+                    self._psql(self._migration_sql(reappliable))
+                # Snapshots 016-018 recorded category rows from a live DEV
+                # database, so compare their structure only.
+                pre_tenancy = self._extract_contract()
+                recorded = manifest.snapshots["018"].schema_contract
+                self.assertEqual(
+                    {key: value for key, value in pre_tenancy.items() if key != "canonical_data"},
+                    {key: value for key, value in recorded.items() if key != "canonical_data"},
                 )
             self._psql(self._migration_sql(filename))
             applied.append(filename[:3])
             if filename == "009_maintenance_proposals.sql":
                 self.assertEqual(self._extract_contract(), manifest.snapshots["009"].schema_contract)
+            if filename in {
+                "012_dev_schema_forward_repair.sql",
+                "013_asset_manual_parts.sql",
+                "014_asset_placed_in_service_date.sql",
+                "015_task_schedule_bypass.sql",
+            }:
+                self.assertEqual(self._extract_contract(), manifest.snapshots[filename[:3]].schema_contract)
             if filename == "011_work_request_intake.sql":
                 self.assertEqual(
                     self._psql(
@@ -303,19 +341,15 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                             (id, area, item, warning_days, critical_days, last_done, next_due, kind)
                            VALUES ('00000000-0000-0000-0000-000000000098', 'New', 'Work request', 0, 0, now(), now(), 'Work Request')"""
                     )
-            if filename == "013_asset_placed_in_service_date.sql":
-                # The 005/006/009 rollout contract explicitly describes these
-                # migrations as idempotent for future hosts. Reapply only that
-                # promised subset, on the pre-tenancy schema it was promised for.
-                for reappliable in REAPPLICABLE_MIGRATIONS:
-                    self._psql(self._migration_sql(reappliable))
-                self.assertEqual(self._extract_contract(), manifest.snapshots["013"].schema_contract)
         self.assertEqual(
             applied,
-            ["001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014"],
+            [
+                "001", "002", "003", "004", "005", "006", "009", "010", "011", "012",
+                "013", "014", "015", "016", "017", "018", "019",
+            ],
         )
         self.assertEqual(applied[-1], EXPECTED_VERSION)
-        self.assertEqual(self._extract_contract(), manifest.snapshots["014"].schema_contract)
+        self.assertEqual(self._extract_contract(), manifest.snapshots["019"].schema_contract)
 
         tables = set(
             self._psql(
@@ -342,12 +376,17 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "maintenance_task_intake_events",
                 "maintenance_task_parts",
                 "maintenance_task_photos",
+                "maintenance_task_schedule_events",
                 "maintenance_tasks",
+                "schema_migrations",
             },
         )
 
         expected_columns = {
-            "assets": {"meter_proposed_type", "meter_proposed_unit", "meter_activated_at", "placed_in_service_date", "tenant_id"},
+            "assets": {
+                "meter_proposed_type", "meter_proposed_unit", "meter_activated_at", "placed_in_service_date",
+                "host_asset_id", "is_pseudo", "tenant_id",
+            },
             "asset_meter": {"meter_epoch", "row_version", "tenant_id"},
             "asset_meter_reading": {
                 "previous_reading_id",
@@ -376,6 +415,7 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "meter_interval_unit",
                 "last_done_meter_value",
                 "next_due_meter_value",
+                "deferred_until",
                 "intake_state",
                 "submitted_by",
                 "submitted_at",
@@ -386,12 +426,21 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "intake_idempotency_key",
                 "tenant_id",
             },
+            "maintenance_task_photos": {
+                "original_file_name",
+                "content_type",
+                "byte_size",
+                "sha256",
+                "content",
+                "sanitized_at",
+                "tenant_id",
+            },
             "maintenance_categories": {"tenant_id"},
-            "maintenance_task_photos": {"tenant_id"},
             "asset_task_mapping_proposals": {"tenant_id"},
             "maintenance_proposals": {"tenant_id"},
             "maintenance_attachment_operations": {"tenant_id"},
             "maintenance_task_intake_events": {"tenant_id"},
+            "maintenance_task_schedule_events": {"task_id", "action", "tenant_id"},
         }
         for table, columns in expected_columns.items():
             actual = set(
@@ -421,6 +470,8 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "maintenance_tasks_tenant_area_item_key",
                 "assets_tenant_external_id_key",
                 "assets_tenant_qr_token_key",
+                "assets_host_asset_id_tenant_fkey",
+                "maintenance_task_schedule_events_task_id_tenant_fkey",
                 "maintenance_tasks_kind_check",
                 "maintenance_tasks_origin_check",
                 "maintenance_tasks_schedule_kind_check",
@@ -435,8 +486,12 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
                 "ingestion_status", "review_status", "lifecycle_status", "supersedes_version_id",
                 "tenant_id",
             },
-            "asset_manual_chunk": {"manual_version_id", "chunk_ordinal", "content", "content_sha256", "search_vector", "tenant_id"},
-            "asset_manual_state_event": {"manual_version_id", "event_type", "from_state", "to_state", "actor_id", "tenant_id"},
+            "asset_manual_chunk": {
+                "manual_version_id", "chunk_ordinal", "content", "content_sha256", "search_vector", "tenant_id",
+            },
+            "asset_manual_state_event": {
+                "manual_version_id", "event_type", "from_state", "to_state", "actor_id", "tenant_id",
+            },
             "asset_manual_part": {
                 "manual_version_id", "reference_number", "oem_part_number", "name", "quantity",
                 "source_page_number", "source_excerpt", "provenance", "tenant_id",
@@ -469,6 +524,323 @@ class PropertyManagerMigrationChainTests(unittest.TestCase):
             }
             <= handbook_indexes
         )
+
+    def test_observed_009_forward_repair_preserves_legacy_requests_and_photos(self) -> None:
+        self._reset_propertymanager_schema()
+        for filename in MIGRATIONS[:7]:
+            self._psql((MIGRATION_DIR / filename).read_text())
+
+        # Reproduce the read-only DEV audit fingerprint without contacting DEV:
+        # nullable last_done, seven categories, three legacy requests, and the
+        # legacy inline-photo columns/index/constraint.
+        self._psql(
+            """
+            ALTER TABLE propertymanager.maintenance_tasks
+                ALTER COLUMN last_done DROP NOT NULL;
+            DELETE FROM propertymanager.maintenance_categories
+                WHERE id = '00000000-0000-0000-0000-000000000008';
+            ALTER TABLE propertymanager.maintenance_task_photos
+                ADD COLUMN original_file_name text,
+                ADD COLUMN content_type text,
+                ADD COLUMN byte_size bigint,
+                ADD COLUMN sha256 bytea,
+                ADD COLUMN content bytea;
+            ALTER TABLE propertymanager.maintenance_task_photos
+                ADD CONSTRAINT maintenance_task_photos_byte_size_check
+                CHECK (byte_size IS NULL OR byte_size >= 0);
+            CREATE UNIQUE INDEX maintenance_task_photos_task_file_name_uidx
+                ON propertymanager.maintenance_task_photos (task_id, file_name);
+
+            INSERT INTO propertymanager.maintenance_tasks
+                (id, area, item, warning_days, critical_days, last_done, next_due, kind)
+            VALUES
+                ('00000000-0000-0000-0000-000000000091', 'Legacy A', 'Request A', 0, 0, NULL, now(), 'Work Request'),
+                ('00000000-0000-0000-0000-000000000092', 'Legacy B', 'Request B', 1, 2, now(), now(), 'Work Request'),
+                ('00000000-0000-0000-0000-000000000093', 'Legacy C', 'Request C', 3, 4, now(), now(), 'Work Request');
+            INSERT INTO propertymanager.maintenance_task_photos
+                (id, task_id, file_name, storage_path, created_at, original_file_name,
+                 content_type, byte_size, sha256, content)
+            VALUES
+                ('00000000-0000-0000-0000-000000000094',
+                 '00000000-0000-0000-0000-000000000091',
+                 'opaque-photo-id', '/legacy/opaque.bin', '2026-08-27T12:00:00Z',
+                 'legacy.jpg', 'image/jpeg', 4,
+                 decode('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'hex'),
+                 decode('01020304', 'hex'));
+            """
+        )
+        requests_before = self._psql(
+            """
+            SELECT json_agg(row_to_json(t) ORDER BY id)::text
+            FROM (
+                SELECT id, area, item, warning_days, critical_days, last_done, next_due, kind
+                FROM propertymanager.maintenance_tasks
+                WHERE kind = 'Work Request'
+                ORDER BY id
+            ) t;
+            """
+        )
+        photo_before = self._psql(
+            """
+            SELECT row_to_json(p)::text
+            FROM (
+                SELECT id, task_id, file_name, storage_path, created_at,
+                       original_file_name, content_type, byte_size,
+                       encode(sha256, 'hex') AS sha256,
+                       encode(content, 'hex') AS content_hex
+                FROM propertymanager.maintenance_task_photos
+                WHERE id = '00000000-0000-0000-0000-000000000094'
+            ) p;
+            """
+        )
+        photo_aggregate_before = self._psql(
+            """
+            SELECT count(*) || '|' || coalesce(sum(byte_size), 0) || '|' ||
+                   md5(string_agg(
+                       id::text || '|' || task_id::text || '|' || file_name || '|' ||
+                       storage_path || '|' || created_at::text || '|' ||
+                       coalesce(original_file_name, '') || '|' || coalesce(content_type, '') || '|' ||
+                       coalesce(byte_size::text, '') || '|' || coalesce(encode(sha256, 'hex'), '') || '|' ||
+                       coalesce(encode(content, 'hex'), ''),
+                       E'\n' ORDER BY id
+                   ))
+            FROM propertymanager.maintenance_task_photos;
+            """
+        )
+
+        self._psql((MIGRATION_DIR / "012_dev_schema_forward_repair.sql").read_text())
+
+        requests_after = self._psql(
+            """
+            SELECT json_agg(row_to_json(t) ORDER BY id)::text
+            FROM (
+                SELECT id, area, item, warning_days, critical_days, last_done, next_due, kind
+                FROM propertymanager.maintenance_tasks
+                WHERE kind = 'Work Request'
+                ORDER BY id
+            ) t;
+            """
+        )
+        photo_after = self._psql(
+            """
+            SELECT row_to_json(p)::text
+            FROM (
+                SELECT id, task_id, file_name, storage_path, created_at,
+                       original_file_name, content_type, byte_size, sha256,
+                       encode(content, 'hex') AS content_hex
+                FROM propertymanager.maintenance_task_photos
+                WHERE id = '00000000-0000-0000-0000-000000000094'
+            ) p;
+            """
+        )
+        photo_aggregate_after = self._psql(
+            """
+            SELECT count(*) || '|' || coalesce(sum(byte_size), 0) || '|' ||
+                   md5(string_agg(
+                       id::text || '|' || task_id::text || '|' || file_name || '|' ||
+                       storage_path || '|' || created_at::text || '|' ||
+                       coalesce(original_file_name, '') || '|' || coalesce(content_type, '') || '|' ||
+                       coalesce(byte_size::text, '') || '|' || coalesce(sha256, '') || '|' ||
+                       coalesce(encode(content, 'hex'), ''),
+                       E'\n' ORDER BY id
+                   ))
+            FROM propertymanager.maintenance_task_photos;
+            """
+        )
+        self.assertEqual(requests_after, requests_before)
+        self.assertEqual(photo_after, photo_before)
+        self.assertEqual(photo_aggregate_after, photo_aggregate_before)
+        self.assertEqual(
+            self._psql(
+                "SELECT count(*) FROM propertymanager.maintenance_tasks "
+                "WHERE kind = 'Work Request' AND intake_state IS NULL AND submitted_by IS NULL;"
+            ),
+            "3",
+        )
+        self.assertEqual(
+            self._psql(
+                "SELECT count(*) FROM propertymanager.schema_migrations WHERE version = '012';"
+            ),
+            "1",
+        )
+        self.assertEqual(self._extract_contract(), load_manifest().snapshots["012"].schema_contract)
+
+    def test_012_rejects_malformed_binary_sha256_and_bigint_overflow_atomically(self) -> None:
+        cases = (
+            ("malformed_sha256", "4", "decode(repeat('aa', 31), 'hex')"),
+            ("byte_size_overflow", "2147483648", "decode(repeat('aa', 32), 'hex')"),
+        )
+        for name, byte_size, sha256 in cases:
+            with self.subTest(name=name):
+                self._reset_propertymanager_schema()
+                for filename in MIGRATIONS[:7]:
+                    self._psql((MIGRATION_DIR / filename).read_text())
+                self._psql(
+                    f"""
+                    ALTER TABLE propertymanager.maintenance_task_photos
+                        ADD COLUMN byte_size bigint,
+                        ADD COLUMN sha256 bytea;
+                    INSERT INTO propertymanager.maintenance_tasks
+                        (id, area, item, warning_days, critical_days, last_done, next_due, kind)
+                    VALUES
+                        ('00000000-0000-0000-0000-000000000095', 'Legacy', 'Photo', 0, 0,
+                         now(), now(), 'Scheduled');
+                    INSERT INTO propertymanager.maintenance_task_photos
+                        (id, task_id, file_name, storage_path, byte_size, sha256)
+                    VALUES
+                        ('00000000-0000-0000-0000-000000000096',
+                         '00000000-0000-0000-0000-000000000095',
+                         'opaque-photo-id', '/legacy/opaque.bin', {byte_size}, {sha256});
+                    """
+                )
+
+                with self.assertRaises(AssertionError):
+                    self._psql((MIGRATION_DIR / "012_dev_schema_forward_repair.sql").read_text())
+
+                self.assertEqual(
+                    self._psql("SELECT to_regclass('propertymanager.schema_migrations') IS NULL;"),
+                    "t",
+                )
+                self.assertEqual(
+                    self._psql(
+                        "SELECT format_type(a.atttypid, NULL) "
+                        "FROM pg_attribute a "
+                        "WHERE a.attrelid='propertymanager.maintenance_task_photos'::regclass "
+                        "AND a.attname='sha256' AND NOT a.attisdropped;"
+                    ),
+                    "bytea",
+                )
+                self.assertEqual(
+                    self._psql("SELECT count(*) FROM propertymanager.maintenance_task_photos;"),
+                    "1",
+                )
+
+    def test_012_rejects_malformed_text_sha256_atomically(self) -> None:
+        self._reset_propertymanager_schema()
+        for filename in PRE_012_MIGRATIONS:
+            self._psql((MIGRATION_DIR / filename).read_text())
+        self._psql(
+            """
+            INSERT INTO propertymanager.maintenance_tasks
+                (id, area, item, warning_days, critical_days, last_done, next_due, kind)
+            VALUES
+                ('00000000-0000-0000-0000-000000000095', 'Canonical', 'Photo', 0, 0,
+                 now(), now(), 'Scheduled');
+            INSERT INTO propertymanager.maintenance_task_photos
+                (id, task_id, file_name, storage_path, byte_size, sha256)
+            VALUES
+                ('00000000-0000-0000-0000-000000000096',
+                 '00000000-0000-0000-0000-000000000095',
+                 'opaque-photo-id', '/canonical/opaque.bin', 4,
+                 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA');
+            """
+        )
+
+        with self.assertRaises(AssertionError):
+            self._psql((MIGRATION_DIR / "012_dev_schema_forward_repair.sql").read_text())
+
+        self.assertEqual(
+            self._psql("SELECT to_regclass('propertymanager.schema_migrations') IS NULL;"),
+            "t",
+        )
+        self.assertEqual(
+            self._psql("SELECT count(*) FROM propertymanager.maintenance_task_photos;"),
+            "1",
+        )
+
+    def test_012_preserves_populated_canonical_011_handbook_and_intake(self) -> None:
+        self._reset_propertymanager_schema()
+        for filename in PRE_012_MIGRATIONS:
+            self._psql((MIGRATION_DIR / filename).read_text())
+        self._psql(
+            """
+            INSERT INTO propertymanager.assets (id, external_id, name, qr_token)
+            VALUES ('00000000-0000-0000-0000-000000000081', 'asset-81', 'Asset 81', 'qr-81');
+            INSERT INTO propertymanager.asset_manual
+                (id, asset_id, document_key, title, document_type, created_by)
+            VALUES
+                ('00000000-0000-0000-0000-000000000082',
+                 '00000000-0000-0000-0000-000000000081',
+                 'manual-82', 'Manual 82', 'operator_manual', 'fixture');
+            INSERT INTO propertymanager.asset_manual_version
+                (id, manual_id, version_number, source_kind, source_locator,
+                 source_display_name, source_sha256, mime_type, ingestion_status,
+                 review_status, lifecycle_status, created_by)
+            VALUES
+                ('00000000-0000-0000-0000-000000000083',
+                 '00000000-0000-0000-0000-000000000082',
+                 1, 'pdf', 'fixture/manual.pdf', 'manual.pdf',
+                 repeat('b', 64), 'application/pdf', 'extracted', 'pending', 'draft', 'fixture');
+            INSERT INTO propertymanager.asset_manual_chunk
+                (id, manual_version_id, chunk_ordinal, content, content_sha256)
+            VALUES
+                ('00000000-0000-0000-0000-000000000084',
+                 '00000000-0000-0000-0000-000000000083', 0, 'Fixture content', repeat('c', 64));
+            INSERT INTO propertymanager.asset_manual_state_event
+                (id, manual_version_id, event_type, to_state, actor_id)
+            VALUES
+                ('00000000-0000-0000-0000-000000000085',
+                 '00000000-0000-0000-0000-000000000083',
+                 'ingestion_extracted', '{}'::jsonb, 'fixture');
+            INSERT INTO propertymanager.maintenance_tasks
+                (id, area, item, warning_days, critical_days, last_done, next_due, kind,
+                 intake_state, submitted_by, submitted_at, intake_idempotency_key)
+            VALUES
+                ('00000000-0000-0000-0000-000000000086', 'Intake', 'Request', 0, 0,
+                 now(), now(), 'Work Request', 'submitted', 'fixture', now(), 'request-86');
+            INSERT INTO propertymanager.maintenance_attachment_operations
+                (id, created_by, content_type, max_bytes, expires_at, allocation_idempotency_key)
+            VALUES
+                ('00000000-0000-0000-0000-000000000087',
+                 'fixture', 'image/jpeg', 1024, now() + interval '1 hour', 'attachment-87');
+            INSERT INTO propertymanager.maintenance_task_intake_events
+                (id, task_id, to_state, actor)
+            VALUES
+                ('00000000-0000-0000-0000-000000000088',
+                 '00000000-0000-0000-0000-000000000086', 'submitted', 'fixture');
+            INSERT INTO propertymanager.maintenance_task_photos
+                (id, task_id, file_name, storage_path, content_type, byte_size, sha256)
+            VALUES
+                ('00000000-0000-0000-0000-000000000089',
+                 '00000000-0000-0000-0000-000000000086',
+                 'opaque-photo-id', '/canonical/opaque.bin', 'image/jpeg', 4, repeat('d', 64));
+            """
+        )
+        counts_before = self._psql(
+            """
+            SELECT concat_ws('|',
+                (SELECT count(*) FROM propertymanager.asset_manual),
+                (SELECT count(*) FROM propertymanager.asset_manual_version),
+                (SELECT count(*) FROM propertymanager.asset_manual_chunk),
+                (SELECT count(*) FROM propertymanager.asset_manual_state_event),
+                (SELECT count(*) FROM propertymanager.maintenance_attachment_operations),
+                (SELECT count(*) FROM propertymanager.maintenance_task_intake_events),
+                (SELECT count(*) FROM propertymanager.maintenance_task_photos),
+                (SELECT count(*) FROM propertymanager.maintenance_tasks WHERE kind='Work Request'));
+            """
+        )
+
+        self._psql((MIGRATION_DIR / "012_dev_schema_forward_repair.sql").read_text())
+
+        counts_after = self._psql(
+            """
+            SELECT concat_ws('|',
+                (SELECT count(*) FROM propertymanager.asset_manual),
+                (SELECT count(*) FROM propertymanager.asset_manual_version),
+                (SELECT count(*) FROM propertymanager.asset_manual_chunk),
+                (SELECT count(*) FROM propertymanager.asset_manual_state_event),
+                (SELECT count(*) FROM propertymanager.maintenance_attachment_operations),
+                (SELECT count(*) FROM propertymanager.maintenance_task_intake_events),
+                (SELECT count(*) FROM propertymanager.maintenance_task_photos),
+                (SELECT count(*) FROM propertymanager.maintenance_tasks WHERE kind='Work Request'));
+            """
+        )
+        self.assertEqual(counts_after, counts_before)
+        self.assertEqual(
+            self._psql("SELECT count(*) FROM propertymanager.schema_migrations WHERE version='012';"),
+            "1",
+        )
+        self.assertEqual(self._extract_contract(), load_manifest().snapshots["012"].schema_contract)
 
 
 class MigrationContainerCleanupTests(unittest.TestCase):

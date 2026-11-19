@@ -119,7 +119,7 @@ struct TaskCompletionSheet: View {
         NavigationStack {
             Form {
                 Section("Task") {
-                    Text(task.item)
+                    Text(TaskTitle.highlightingSafety(task.item))
                     LabeledContent("Completion time", value: "Recorded by the server")
                         .foregroundStyle(.secondary)
                 }
@@ -129,7 +129,7 @@ struct TaskCompletionSheet: View {
                 Section("Note") {
                     TextField("Completion note (optional)", text: $note, axis: .vertical)
                         .lineLimit(2...5)
-                        .appleIntelligenceDictation($note)
+                        .voiceInput($note)
                 }
 
                 if let localError {
@@ -193,7 +193,6 @@ struct TaskCompletionSheet: View {
                     if !confirmedCurrent {
                         TextField("Enter current reading (0 = no change)", text: $meterValue)
                             .keyboardType(.decimalPad)
-                            .appleIntelligenceDictation($meterValue)
                     }
                     Text("Required. Enter the reading shown on the equipment, or 0 if it has not changed.")
                         .font(.caption)
@@ -215,6 +214,7 @@ struct TaskCompletionSheet: View {
         do {
             linkedAsset = try await store.client.fetchAsset(id: assetId)
         } catch {
+            guard !error.isCancellation else { return }
             localError = error.localizedDescription
         }
     }

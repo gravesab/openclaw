@@ -47,9 +47,11 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Jarvis shows a local camera preview when you start the camera. No video is recorded or uploaded.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>RanchOS uses the microphone so you can dictate into a text field. Speech stays on this device.</string>
+	<string>RanchOS uses the microphone for dictation and for Jarvis questions you start. Speech stays on this device.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>RanchOS turns what you say into text on this device.</string>
+	<string>RanchOS turns what you say into text on this device, including Jarvis speech drafts you review before sending.</string>
 </dict>
 </plist>

@@ -34,19 +34,20 @@ class SystemHealthTests(unittest.TestCase):
         calls = {call.args[0]: call.args[1:] for call in check_service.call_args_list}
         self.assertEqual(
             calls["OpenClaw Gateway"],
-            (
-                "XDG_RUNTIME_DIR=/run/user/$(id -u) "
-                "systemctl --user is-active openclaw-gateway.service",
-                "User service",
-            ),
+            (["systemctl", "--user", "is-active", "openclaw-gateway.service"], "User service"),
         )
         self.assertEqual(
             calls["OpenClaw Listener"],
-            (
-                "systemctl is-active openclaw-listener.service",
-                "System service",
-            ),
+            (["systemctl", "is-active", "openclaw-listener.service"], "System service"),
         )
+        # The user-scope probe needs the user's runtime dir, set by run_command.
+        with mock.patch.object(dashboard.subprocess, "check_output", return_value="active") as run:
+            dashboard.run_command(calls["OpenClaw Gateway"][0])
+        self.assertEqual(
+            run.call_args.kwargs["env"]["XDG_RUNTIME_DIR"],
+            f"/run/user/{dashboard.os.getuid()}",
+        )
+        self.assertFalse(run.call_args.kwargs.get("shell", False))
         self.assertIn(
             ("oMLX API", "HTTP endpoint", "Connected", "#16a34a"),
             services,

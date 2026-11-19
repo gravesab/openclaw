@@ -22,13 +22,13 @@ CANONICAL_MIGRATION_DIR = MODULE_PATH.parent
 CANONICAL_MANIFEST = CANONICAL_MIGRATION_DIR / "migration_authority.json"
 
 # Current inputs total under 50 KiB. These leave ample growth room while bounding work.
-MAX_MANIFEST_BYTES = 1 * 1024 * 1024
+MAX_MANIFEST_BYTES = 2 * 1024 * 1024
 MAX_MIGRATION_BYTES = 2 * 1024 * 1024
 MAX_TOTAL_MIGRATION_BYTES = 8 * 1024 * 1024
 MAX_TRAVERSAL_DEPTH = 8
 MAX_DISCOVERED_ENTRIES = 512
 MAX_JSON_DEPTH = 64
-MAX_JSON_NODES = 24_000
+MAX_JSON_NODES = 40_000
 MAX_TEXT_CHARS = 16_384
 MAX_REPORT_TEXT_CHARS = 4_096
 MAX_REPORT_DIAGNOSTICS = 64
@@ -748,7 +748,11 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
         if type(raw["format_version"]) is not int or raw["format_version"] != 3 or raw["authority"] != "propertymanager":
             raise AuthorityConfigurationError("authority manifest version is invalid")
         snapshots = raw["snapshots"]
-        if type(snapshots) is not dict or list(snapshots) != ["009", "010", "011", "012", "013", "014"] or raw["current_snapshot"] != "014":
+        if (
+            type(snapshots) is not dict
+            or list(snapshots) != ["009", "010", "011", "012", "013", "014", "015", "016", "017", "018", "019"]
+            or raw["current_snapshot"] != "019"
+        ):
             raise AuthorityConfigurationError("snapshot declarations are invalid")
         expected_versions = {
             "009": ("001", "002", "003", "004", "005", "006", "009"),
@@ -757,6 +761,14 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
             "012": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012"),
             "013": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013"),
             "014": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014"),
+            "015": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015"),
+            "016": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015", "016"),
+            "017": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015", "016", "017"),
+            "018": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015", "016", "017", "018"),
+            "019": (
+                "001", "002", "003", "004", "005", "006", "009", "010", "011", "012",
+                "013", "014", "015", "016", "017", "018", "019",
+            ),
         }
         parsed_snapshots: dict[str, AuthoritySnapshot] = {}
         for terminal, expected in expected_versions.items():
@@ -790,9 +802,9 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
                 raise AuthorityConfigurationError("reserved migration entry is invalid")
             _safe_contract_text(entry["reason"], "reserved migration reason")
             reserved_versions.append(entry["version"])
-        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "015":
+        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "020":
             raise AuthorityConfigurationError("reserved or next migration version is invalid")
-        return AuthorityManifest(parsed_snapshots, "014", ("007", "008"), "015")
+        return AuthorityManifest(parsed_snapshots, "019", ("007", "008"), "020")
     except AuthorityConfigurationError:
         raise
     except (BoundedInputError, MemoryError, RecursionError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:

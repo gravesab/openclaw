@@ -2,13 +2,13 @@
 -- Never apply this file to Production. It must run only on an isolated
 -- disposable DEV database as ranchos_dev_migrator, after ranchos tenancy
 -- foundation (001_ranch_os_tenancy_foundation.sql) and PropertyManager
--- migrations 001 through 013. The PropertyManager tables must already be
+-- migrations 001 through 018. The PropertyManager tables must already be
 -- owned by ranchos_dev_migrator (in tests: apply the earlier chain with
 -- SET ROLE ranchos_dev_migrator; for any future live apply: transfer
 -- ownership explicitly first - this file never takes ownership itself).
 --
 -- Required transaction settings (plain SET by the operator, not request state):
---   SET app.pm_tenancy_014_apply = 'apply-dev-only';
+--   SET app.pm_tenancy_019_apply = 'apply-dev-only';
 --   SET app.bootstrap_tenant_id = '<bootstrap ranch uuid>';
 -- The bootstrap setting attaches pre-tenancy rows to Andrew's bootstrap ranch
 -- only. It fills rows whose tenant_id IS NULL and nothing else, so the
@@ -33,11 +33,11 @@ DECLARE
     runtime_bypasses_rls boolean;
 BEGIN
     IF current_user <> 'ranchos_dev_migrator' THEN
-        RAISE EXCEPTION 'PM tenancy migration 014 must run as ranchos_dev_migrator';
+        RAISE EXCEPTION 'PM tenancy migration 019 must run as ranchos_dev_migrator';
     END IF;
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ranchos_dev_migrator')
        OR NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ranchos_dev_runtime') THEN
-        RAISE EXCEPTION 'ranchos_dev_migrator and ranchos_dev_runtime must be provisioned before migration 014';
+        RAISE EXCEPTION 'ranchos_dev_migrator and ranchos_dev_runtime must be provisioned before migration 019';
     END IF;
     SELECT rolbypassrls INTO runtime_bypasses_rls
     FROM pg_roles
@@ -51,8 +51,8 @@ $$;
 -- Guard 2: explicit DEV-only apply setting. No default, no silent run.
 DO $$
 BEGIN
-    IF current_setting('app.pm_tenancy_014_apply', true) IS DISTINCT FROM 'apply-dev-only' THEN
-        RAISE EXCEPTION 'migration 014 refuses to run without SET app.pm_tenancy_014_apply = ''apply-dev-only''';
+    IF current_setting('app.pm_tenancy_019_apply', true) IS DISTINCT FROM 'apply-dev-only' THEN
+        RAISE EXCEPTION 'migration 019 refuses to run without SET app.pm_tenancy_019_apply = ''apply-dev-only''';
     END IF;
 END;
 $$;
@@ -62,14 +62,14 @@ $$;
 DO $$
 BEGIN
     IF to_regclass('ranchos.tenants') IS NULL THEN
-        RAISE EXCEPTION 'migration 014 requires ranchos.tenants (apply the ranchos tenancy foundation first)';
+        RAISE EXCEPTION 'migration 019 requires ranchos.tenants (apply the ranchos tenancy foundation first)';
     END IF;
     IF NOT EXISTS (
         SELECT 1 FROM pg_proc p
         JOIN pg_namespace n ON n.oid = p.pronamespace
         WHERE n.nspname = 'ranchos' AND p.proname = 'require_uuid_setting'
     ) THEN
-        RAISE EXCEPTION 'migration 014 requires ranchos.require_uuid_setting';
+        RAISE EXCEPTION 'migration 019 requires ranchos.require_uuid_setting';
     END IF;
 END;
 $$;
@@ -88,7 +88,7 @@ BEGIN
         'maintenance_proposals', 'asset_manual', 'asset_manual_version',
         'asset_manual_chunk', 'asset_manual_state_event',
         'maintenance_attachment_operations', 'maintenance_task_intake_events',
-        'asset_manual_part'
+        'asset_manual_part', 'maintenance_task_schedule_events'
     ]
     LOOP
         SELECT pg_get_userbyid(c.relowner) INTO table_owner
@@ -96,7 +96,7 @@ BEGIN
         JOIN pg_namespace n ON n.oid = c.relnamespace
         WHERE n.nspname = 'propertymanager' AND c.relkind = 'r' AND c.relname = table_name;
         IF NOT FOUND THEN
-            RAISE EXCEPTION 'migration 014 requires propertymanager.% (apply migrations 001-013 first)', table_name;
+            RAISE EXCEPTION 'migration 019 requires propertymanager.% (apply migrations 001-018 first)', table_name;
         END IF;
         IF table_owner <> 'ranchos_dev_migrator' THEN
             RAISE EXCEPTION 'propertymanager.% must be owned by ranchos_dev_migrator (transfer ownership explicitly first)', table_name;
@@ -105,7 +105,7 @@ BEGIN
 END;
 $$;
 
--- Phase A: add nullable tenant_id to all 17 tenant-owned tables.
+-- Phase A: add nullable tenant_id to all 18 tenant-owned tables.
 ALTER TABLE propertymanager.maintenance_categories ADD COLUMN IF NOT EXISTS tenant_id uuid;
 ALTER TABLE propertymanager.maintenance_tasks ADD COLUMN IF NOT EXISTS tenant_id uuid;
 ALTER TABLE propertymanager.maintenance_completions ADD COLUMN IF NOT EXISTS tenant_id uuid;
@@ -123,6 +123,7 @@ ALTER TABLE propertymanager.asset_manual_state_event ADD COLUMN IF NOT EXISTS te
 ALTER TABLE propertymanager.maintenance_attachment_operations ADD COLUMN IF NOT EXISTS tenant_id uuid;
 ALTER TABLE propertymanager.maintenance_task_intake_events ADD COLUMN IF NOT EXISTS tenant_id uuid;
 ALTER TABLE propertymanager.asset_manual_part ADD COLUMN IF NOT EXISTS tenant_id uuid;
+ALTER TABLE propertymanager.maintenance_task_schedule_events ADD COLUMN IF NOT EXISTS tenant_id uuid;
 
 -- Phase B: explicit bootstrap attach. Only rows that predate tenancy
 -- (tenant_id IS NULL) are filled, so re-running these UPDATEs is a no-op.
@@ -142,7 +143,7 @@ DECLARE
 BEGIN
     raw := current_setting('app.bootstrap_tenant_id', true);
     IF raw IS NULL OR raw = '' THEN
-        RAISE EXCEPTION 'migration 014 requires SET app.bootstrap_tenant_id to the bootstrap ranch uuid';
+        RAISE EXCEPTION 'migration 019 requires SET app.bootstrap_tenant_id to the bootstrap ranch uuid';
     END IF;
     BEGIN
         bootstrap := raw::uuid;
@@ -175,6 +176,7 @@ BEGIN
     UPDATE propertymanager.maintenance_attachment_operations SET tenant_id = bootstrap WHERE tenant_id IS NULL;
     UPDATE propertymanager.maintenance_task_intake_events SET tenant_id = bootstrap WHERE tenant_id IS NULL;
     UPDATE propertymanager.asset_manual_part SET tenant_id = bootstrap WHERE tenant_id IS NULL;
+    UPDATE propertymanager.maintenance_task_schedule_events SET tenant_id = bootstrap WHERE tenant_id IS NULL;
     SELECT count(*) INTO leftovers FROM (
         SELECT tenant_id FROM propertymanager.maintenance_categories WHERE tenant_id IS NULL
         UNION ALL SELECT tenant_id FROM propertymanager.maintenance_tasks WHERE tenant_id IS NULL
@@ -193,6 +195,7 @@ BEGIN
         UNION ALL SELECT tenant_id FROM propertymanager.maintenance_attachment_operations WHERE tenant_id IS NULL
         UNION ALL SELECT tenant_id FROM propertymanager.maintenance_task_intake_events WHERE tenant_id IS NULL
         UNION ALL SELECT tenant_id FROM propertymanager.asset_manual_part WHERE tenant_id IS NULL
+        UNION ALL SELECT tenant_id FROM propertymanager.maintenance_task_schedule_events WHERE tenant_id IS NULL
     ) still_null;
     IF leftovers <> 0 THEN
         RAISE EXCEPTION 'bootstrap backfill left % rows without tenant_id', leftovers;
@@ -229,6 +232,7 @@ ALTER TABLE propertymanager.asset_manual_state_event ALTER COLUMN tenant_id SET 
 ALTER TABLE propertymanager.maintenance_attachment_operations ALTER COLUMN tenant_id SET NOT NULL;
 ALTER TABLE propertymanager.maintenance_task_intake_events ALTER COLUMN tenant_id SET NOT NULL;
 ALTER TABLE propertymanager.asset_manual_part ALTER COLUMN tenant_id SET NOT NULL;
+ALTER TABLE propertymanager.maintenance_task_schedule_events ALTER COLUMN tenant_id SET NOT NULL;
 
 ALTER TABLE propertymanager.maintenance_categories
     ADD CONSTRAINT maintenance_categories_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES ranchos.tenants(id);
@@ -264,6 +268,8 @@ ALTER TABLE propertymanager.maintenance_task_intake_events
     ADD CONSTRAINT maintenance_task_intake_events_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES ranchos.tenants(id);
 ALTER TABLE propertymanager.asset_manual_part
     ADD CONSTRAINT asset_manual_part_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES ranchos.tenants(id);
+ALTER TABLE propertymanager.maintenance_task_schedule_events
+    ADD CONSTRAINT maintenance_task_schedule_events_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES ranchos.tenants(id);
 
 -- Composite-key targets: the five tables other tenant rows reference.
 ALTER TABLE propertymanager.assets
@@ -340,6 +346,8 @@ CREATE UNIQUE INDEX asset_manual_version_one_active_idx
 -- Phase E: every child foreign key becomes composite (tenant_id, parent_id)
 -- so a task, meter, manual, or photo cannot point at another ranch's parent.
 -- Original ON DELETE actions are preserved.
+-- SET NULL lists only the child column: a plain composite SET NULL would
+-- also null tenant_id and fail its NOT NULL when the parent is deleted.
 ALTER TABLE propertymanager.maintenance_completions
     DROP CONSTRAINT IF EXISTS maintenance_completions_task_id_fkey;
 ALTER TABLE propertymanager.maintenance_completions
@@ -349,7 +357,7 @@ ALTER TABLE propertymanager.maintenance_completions
     DROP CONSTRAINT IF EXISTS maintenance_completions_meter_reading_id_fkey;
 ALTER TABLE propertymanager.maintenance_completions
     ADD CONSTRAINT maintenance_completions_meter_reading_id_tenant_fkey
-    FOREIGN KEY (tenant_id, meter_reading_id) REFERENCES propertymanager.asset_meter_reading (tenant_id, id) ON DELETE SET NULL;
+    FOREIGN KEY (tenant_id, meter_reading_id) REFERENCES propertymanager.asset_meter_reading (tenant_id, id) ON DELETE SET NULL (meter_reading_id);
 ALTER TABLE propertymanager.maintenance_task_parts
     DROP CONSTRAINT IF EXISTS maintenance_task_parts_task_id_fkey;
 ALTER TABLE propertymanager.maintenance_task_parts
@@ -365,16 +373,28 @@ ALTER TABLE propertymanager.maintenance_task_intake_events
 ALTER TABLE propertymanager.maintenance_task_intake_events
     ADD CONSTRAINT maintenance_task_intake_events_task_id_tenant_fkey
     FOREIGN KEY (tenant_id, task_id) REFERENCES propertymanager.maintenance_tasks (tenant_id, id) ON DELETE CASCADE;
+ALTER TABLE propertymanager.maintenance_task_schedule_events
+    DROP CONSTRAINT IF EXISTS maintenance_task_schedule_events_task_id_fkey;
+ALTER TABLE propertymanager.maintenance_task_schedule_events
+    ADD CONSTRAINT maintenance_task_schedule_events_task_id_tenant_fkey
+    FOREIGN KEY (tenant_id, task_id) REFERENCES propertymanager.maintenance_tasks (tenant_id, id) ON DELETE CASCADE;
+-- 017 made asset_id NOT NULL with ON DELETE CASCADE; keep that action.
 ALTER TABLE propertymanager.maintenance_tasks
     DROP CONSTRAINT IF EXISTS maintenance_tasks_asset_id_fkey;
 ALTER TABLE propertymanager.maintenance_tasks
     ADD CONSTRAINT maintenance_tasks_asset_id_tenant_fkey
-    FOREIGN KEY (tenant_id, asset_id) REFERENCES propertymanager.assets (tenant_id, id) ON DELETE SET NULL;
+    FOREIGN KEY (tenant_id, asset_id) REFERENCES propertymanager.assets (tenant_id, id) ON DELETE CASCADE;
+-- 016 host link: deleting a host detaches its implements.
+ALTER TABLE propertymanager.assets
+    DROP CONSTRAINT IF EXISTS assets_host_asset_id_fkey;
+ALTER TABLE propertymanager.assets
+    ADD CONSTRAINT assets_host_asset_id_tenant_fkey
+    FOREIGN KEY (tenant_id, host_asset_id) REFERENCES propertymanager.assets (tenant_id, id) ON DELETE SET NULL (host_asset_id);
 ALTER TABLE propertymanager.maintenance_tasks
     DROP CONSTRAINT IF EXISTS maintenance_tasks_converted_task_fkey;
 ALTER TABLE propertymanager.maintenance_tasks
     ADD CONSTRAINT maintenance_tasks_converted_task_id_tenant_fkey
-    FOREIGN KEY (tenant_id, converted_task_id) REFERENCES propertymanager.maintenance_tasks (tenant_id, id) ON DELETE SET NULL;
+    FOREIGN KEY (tenant_id, converted_task_id) REFERENCES propertymanager.maintenance_tasks (tenant_id, id) ON DELETE SET NULL (converted_task_id);
 ALTER TABLE propertymanager.asset_meter
     DROP CONSTRAINT IF EXISTS asset_meter_asset_id_fkey;
 ALTER TABLE propertymanager.asset_meter
@@ -389,17 +409,17 @@ ALTER TABLE propertymanager.asset_meter_reading
     DROP CONSTRAINT IF EXISTS asset_meter_reading_previous_reading_id_fkey;
 ALTER TABLE propertymanager.asset_meter_reading
     ADD CONSTRAINT asset_meter_reading_previous_reading_id_tenant_fkey
-    FOREIGN KEY (tenant_id, previous_reading_id) REFERENCES propertymanager.asset_meter_reading (tenant_id, id) ON DELETE SET NULL;
+    FOREIGN KEY (tenant_id, previous_reading_id) REFERENCES propertymanager.asset_meter_reading (tenant_id, id) ON DELETE SET NULL (previous_reading_id);
 ALTER TABLE propertymanager.asset_meter_reading
     DROP CONSTRAINT IF EXISTS asset_meter_reading_corrects_reading_id_fkey;
 ALTER TABLE propertymanager.asset_meter_reading
     ADD CONSTRAINT asset_meter_reading_corrects_reading_id_tenant_fkey
-    FOREIGN KEY (tenant_id, corrects_reading_id) REFERENCES propertymanager.asset_meter_reading (tenant_id, id) ON DELETE SET NULL;
+    FOREIGN KEY (tenant_id, corrects_reading_id) REFERENCES propertymanager.asset_meter_reading (tenant_id, id) ON DELETE SET NULL (corrects_reading_id);
 ALTER TABLE propertymanager.asset_task_mapping_proposals
     DROP CONSTRAINT IF EXISTS asset_task_mapping_proposals_task_id_fkey;
 ALTER TABLE propertymanager.asset_task_mapping_proposals
     ADD CONSTRAINT asset_task_mapping_proposals_task_id_tenant_fkey
-    FOREIGN KEY (tenant_id, task_id) REFERENCES propertymanager.maintenance_tasks (tenant_id, id) ON DELETE SET NULL;
+    FOREIGN KEY (tenant_id, task_id) REFERENCES propertymanager.maintenance_tasks (tenant_id, id) ON DELETE SET NULL (task_id);
 ALTER TABLE propertymanager.asset_task_mapping_proposals
     DROP CONSTRAINT IF EXISTS asset_task_mapping_proposals_proposed_asset_id_fkey;
 ALTER TABLE propertymanager.asset_task_mapping_proposals
@@ -454,6 +474,7 @@ CREATE INDEX IF NOT EXISTS asset_manual_state_event_tenant_id_idx ON propertyman
 CREATE INDEX IF NOT EXISTS maintenance_attachment_operations_tenant_id_idx ON propertymanager.maintenance_attachment_operations (tenant_id);
 CREATE INDEX IF NOT EXISTS maintenance_task_intake_events_tenant_id_idx ON propertymanager.maintenance_task_intake_events (tenant_id);
 CREATE INDEX IF NOT EXISTS asset_manual_part_tenant_id_idx ON propertymanager.asset_manual_part (tenant_id);
+CREATE INDEX IF NOT EXISTS maintenance_task_schedule_events_tenant_id_idx ON propertymanager.maintenance_task_schedule_events (tenant_id);
 
 -- Phase G: enable and force RLS everywhere, one tenant-isolation policy per
 -- table (USING and WITH CHECK against the shared setting reader), and
@@ -493,6 +514,8 @@ ALTER TABLE propertymanager.maintenance_task_intake_events ENABLE ROW LEVEL SECU
 ALTER TABLE propertymanager.maintenance_task_intake_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE propertymanager.asset_manual_part ENABLE ROW LEVEL SECURITY;
 ALTER TABLE propertymanager.asset_manual_part FORCE ROW LEVEL SECURITY;
+ALTER TABLE propertymanager.maintenance_task_schedule_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE propertymanager.maintenance_task_schedule_events FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY maintenance_categories_tenant_isolation ON propertymanager.maintenance_categories
     USING (tenant_id = ranchos.require_uuid_setting('ranchos.tenant_id'))
@@ -545,6 +568,9 @@ CREATE POLICY maintenance_task_intake_events_tenant_isolation ON propertymanager
 CREATE POLICY asset_manual_part_tenant_isolation ON propertymanager.asset_manual_part
     USING (tenant_id = ranchos.require_uuid_setting('ranchos.tenant_id'))
     WITH CHECK (tenant_id = ranchos.require_uuid_setting('ranchos.tenant_id'));
+CREATE POLICY maintenance_task_schedule_events_tenant_isolation ON propertymanager.maintenance_task_schedule_events
+    USING (tenant_id = ranchos.require_uuid_setting('ranchos.tenant_id'))
+    WITH CHECK (tenant_id = ranchos.require_uuid_setting('ranchos.tenant_id'));
 
 GRANT USAGE ON SCHEMA propertymanager TO ranchos_dev_runtime;
 GRANT SELECT, INSERT, UPDATE, DELETE ON
@@ -564,7 +590,8 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON
     propertymanager.asset_manual_state_event,
     propertymanager.maintenance_attachment_operations,
     propertymanager.maintenance_task_intake_events,
-    propertymanager.asset_manual_part
+    propertymanager.asset_manual_part,
+    propertymanager.maintenance_task_schedule_events
     TO ranchos_dev_runtime;
 
 -- Phase H: verify everything. Any failure rolls the whole migration back.
@@ -586,7 +613,7 @@ BEGIN
         'maintenance_proposals', 'asset_manual', 'asset_manual_version',
         'asset_manual_chunk', 'asset_manual_state_event',
         'maintenance_attachment_operations', 'maintenance_task_intake_events',
-        'asset_manual_part'
+        'asset_manual_part', 'maintenance_task_schedule_events'
     ]
     LOOP
         SELECT pg_get_userbyid(c.relowner), c.relrowsecurity, c.relforcerowsecurity
@@ -628,7 +655,7 @@ BEGIN
       AND array_length(c.conkey, 1) = 1
       AND c.conname NOT LIKE '%_tenant_id_fkey';
     IF stale_fk_count <> 0 THEN
-        RAISE EXCEPTION '% single-column foreign keys survived tenancy migration 014', stale_fk_count;
+        RAISE EXCEPTION '% single-column foreign keys survived tenancy migration 019', stale_fk_count;
     END IF;
     -- The four pre-tenancy global uniqueness constraints must be gone.
     IF EXISTS (
@@ -639,7 +666,7 @@ BEGIN
             'assets_external_id_key', 'assets_qr_token_key'
         )
     ) THEN
-        RAISE EXCEPTION 'global uniqueness constraints survived tenancy migration 014';
+        RAISE EXCEPTION 'global uniqueness constraints survived tenancy migration 019';
     END IF;
     SELECT rolbypassrls INTO runtime_bypasses_rls
     FROM pg_roles
@@ -649,5 +676,11 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- Written last inside the same transaction so the ledger reports 019 only
+-- when the migration committed.
+INSERT INTO propertymanager.schema_migrations (version)
+VALUES ('019')
+ON CONFLICT (version) DO NOTHING;
 
 COMMIT;

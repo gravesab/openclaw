@@ -35,6 +35,12 @@ for file in "${files[@]}"; do
   fi
 done
 
+# Bash 3.2 treats "${empty[@]}" as unbound under `set -u`, so stop here when
+# every staged path is ignored.
+if [ "${#restage_files[@]}" -eq 0 ]; then
+  exit 0
+fi
+
 format_files=()
 while IFS= read -r -d '' file; do
   format_files+=("$file")
@@ -44,6 +50,4 @@ if [ "${#format_files[@]}" -gt 0 ]; then
   "$RUN_NODE_TOOL" oxfmt --write --no-error-on-unmatched-pattern "${format_files[@]}"
 fi
 
-if [ "${#restage_files[@]}" -gt 0 ]; then
-  git add -- "${restage_files[@]}"
-fi
+git add -- "${restage_files[@]}"

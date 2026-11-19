@@ -62,7 +62,6 @@ _MEMORY_ARGV = [
 _MEMORY_URL_ENV = ("OPENCLAW_OLLAMA_EMBEDDINGS_URL", "OPENCLAW_OLLAMA_BASE_URL")
 _MEMORY_PLAIN_ENV = (
     "OPENCLAW_MEMORY_EMBEDDING_MODEL",
-    "OPENCLAW_DB_HOST",
     "OPENCLAW_DB_PORT",
     "OPENCLAW_DB_NAME",
     "OPENCLAW_DB_USER",
@@ -110,6 +109,14 @@ def _child_env(argv: list[str], service: str) -> dict[str, str]:
         value = os.environ.get(key)
         if value and allowed_url(value, service=service):
             env[key] = value
+    # Same egress rule for the database: loopback, a local socket path, or an
+    # allowlisted host; otherwise the agent keeps its loopback default.
+    db_host = os.environ.get("OPENCLAW_DB_HOST", "").strip()
+    if db_host and (
+        db_host.startswith("/")
+        or _is_allowed_host(db_host, allow_private=False, service=service, allowlist_env="RANCH_HOST_ALLOWLIST")
+    ):
+        env["OPENCLAW_DB_HOST"] = db_host
     if not any(key in env for key in _MEMORY_URL_ENV):
         env["OPENCLAW_OLLAMA_BASE_URL"] = _MEMORY_DEFAULT_OLLAMA
     return env

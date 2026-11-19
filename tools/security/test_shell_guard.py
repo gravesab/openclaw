@@ -150,6 +150,12 @@ class ShellGuardTests(unittest.TestCase):
         env = env_for()
         self.assertEqual(env["OPENCLAW_OLLAMA_BASE_URL"], "http://127.0.0.1:11434")
 
+        os.environ["OPENCLAW_DB_HOST"] = "192.168.50.20"
+        self.assertNotIn("OPENCLAW_DB_HOST", env_for())
+        os.environ["OPENCLAW_DB_HOST"] = "/tmp/pg-socket"
+        self.assertEqual(env_for()["OPENCLAW_DB_HOST"], "/tmp/pg-socket")
+        os.environ["OPENCLAW_DB_HOST"] = "127.0.0.1"
+
         os.environ["RANCH_HOST_ALLOWLIST"] = "192.168.50.117"
         env = env_for()
         self.assertEqual(env["OPENCLAW_OLLAMA_BASE_URL"], "http://192.168.50.117:11434")

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated": "2026-07-23",
+  "updated": "2026-09-24",
   "providers": [
     "OpenAI", "Anthropic", "Google", "Moonshot AI", "xAI",
     "DeepSeek", "Mistral", "Meta", "Alibaba Qwen"
@@ -11,6 +11,33 @@
       "state": "evaluate",
       "reason": "Potential long-context and engineering value for RanchBrain.",
       "next_action": "Run the OpenClaw benchmark suite and record evidence."
+    },
+    {
+      "model_id": "meta-muse-glimmer-30b-q4-k-m",
+      "state": "evaluate",
+      "reason": "Preferred Muse candidate for a 24 GiB local host: official 16.8 GB Q4_K_M text weights; memory fit and task quality remain unverified.",
+      "next_action": "Follow the Muse evaluation plan in docs/foundational/ai/AI_INTELLIGENCE_LAYER.md. Verify capacity and llama.cpp support in isolated DEV, then run tools/ai_intelligence/run_local_candidate_eval.py against the isolated endpoint. Its five shared benchmarks and two smoke probes do not satisfy the full promotion gate. Do not assign scores or change routing before measured evidence and human review.",
+      "upstream_model": "meta-models/Muse-Glimmer-30B-GGUF",
+      "artifact": "Muse-Glimmer-30B-KQuant-17GB-Q4_K_M.gguf",
+      "evidence_status": "artifact-staged-checksum-verified-capacity-blocked-not-benchmarked",
+      "pinned_revision": "70bf1b61ac09f91b24d39038091b41c582bc5d7a",
+      "artifact_bytes": 16756683904,
+      "artifact_sha256": "4cc57c0f51040a226e5a72cc47b7613f7772950e460a665f7083de89f183f60e",
+      "verified_runtime_release": "b11160",
+      "sources": [
+        "https://research.meta.ai/blog/introducing-muse-glimmer-open-agentic-model",
+        "https://huggingface.co/meta-models/Muse-Glimmer-30B-GGUF/blob/main/README.md"
+      ]
+    },
+    {
+      "model_id": "muse-spark-1.3",
+      "state": "watch",
+      "reason": "Latest verified Muse Spark release; hosted comparator for approved nonprivate engineering tasks, not a local size option.",
+      "next_action": "Confirm API access, current pricing and data terms before any hosted evaluation; use synthetic or approved public fixtures only.",
+      "sources": [
+        "https://research.meta.ai/blog/introducing-muse-spark-1-3",
+        "https://dev.meta.ai/docs/models"
+      ]
     }
   ]
 }

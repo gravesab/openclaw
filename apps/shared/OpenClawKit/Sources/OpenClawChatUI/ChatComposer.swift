@@ -206,6 +206,7 @@ struct OpenClawChatComposer: View {
     private var editor: some View {
         VStack(alignment: .leading, spacing: 8) {
             self.editorOverlay
+                .appleIntelligenceDictation(self.$viewModel.input)
 
             if !self.isComposerCompacted {
                 Rectangle()

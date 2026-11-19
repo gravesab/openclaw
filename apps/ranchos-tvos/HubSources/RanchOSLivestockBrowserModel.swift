@@ -35,7 +35,7 @@ enum RanchOSLivestockLifecycleStatus: String, Sendable {
     var label: String { rawValue.capitalized }
 }
 
-enum RanchOSLivestockFactFreshness: String, Sendable {
+enum RanchOSLivestockFactFreshness: String, Sendable, Equatable {
     case current
     case stale
     case incomplete

@@ -3,9 +3,11 @@ import SwiftUI
 #if os(tvOS)
 struct RanchOSTVHomeView: View {
     let dashboard: RanchOSHubDashboard
+    let liveSession: RanchOSLiveSession
     let propertyStore: RanchOSPropertyLiveStore
     let livestockStore: RanchOSLivestockStore
     @Binding var appearance: RanchOSAppearance
+    @Environment(\.ranchOSRuntimeEnvironment) private var environment
 
     var body: some View {
         NavigationStack {
@@ -18,9 +20,10 @@ struct RanchOSTVHomeView: View {
 
                 VStack(alignment: .leading, spacing: 42) {
                     VStack(alignment: .leading, spacing: 8) {
+                        RanchOSDevIdentityBadge(style: .television)
                         Text(dashboard.title)
                             .font(.largeTitle.bold())
-                        Text("\(dashboard.tenantDisplayName)\n\(RanchOSBuildInfo.display)")
+                        Text("\(environment.tenantDisplayName)\n\(RanchOSBuildInfo.display(for: environment))")
                             .font(.title2)
                             .foregroundStyle(.white.opacity(0.78))
                     }
@@ -39,7 +42,13 @@ struct RanchOSTVHomeView: View {
                         }
                     }
 
+                    RanchOSForecastBriefCard()
+
                     Spacer()
+
+                    RanchOSLiveDataSourcePicker(session: liveSession)
+                        .pickerStyle(.segmented)
+                        .frame(width: 460)
 
                     Picker("Appearance", selection: $appearance) {
                         ForEach(RanchOSAppearance.allCases) { option in
@@ -49,7 +58,7 @@ struct RanchOSTVHomeView: View {
                     .pickerStyle(.segmented)
                     .frame(width: 460)
 
-                    Label(RanchOSHubDashboard.developmentFixtureBanner, systemImage: "lock.shield")
+                    Label(environment.hubBanner, systemImage: "lock.shield")
                         .font(.title3.weight(.medium))
                         .foregroundStyle(.white.opacity(0.76))
                 }
@@ -63,11 +72,12 @@ struct RanchOSTVHomeView: View {
 private struct RanchOSTVModuleCard: View {
     let module: RanchOSModule
     @Environment(\.isFocused) private var isFocused
+    @Environment(\.ranchOSRuntimeEnvironment) private var environment
 
     private var moduleConnectionLabel: String {
         switch module {
-        case .property: "Live DEV data · read only"
-        case .livestock: RanchOSLivestockConnection.pendingLabel
+        case .property: environment.propertyLiveCardLabel
+        case .livestock: environment.livestockPendingLabel
         case .finance: "Charts and reports"
         }
     }
@@ -106,6 +116,8 @@ private struct RanchOSTVModuleDetailView: View {
     let module: RanchOSModule
     let propertyStore: RanchOSPropertyLiveStore
     let livestockStore: RanchOSLivestockStore
+    @State private var selectedPropertyCategory: RanchOSPropertyDueTaskCategoryFilter = .all
+    @Environment(\.ranchOSRuntimeEnvironment) private var environment
 
     var body: some View {
         ZStack {
@@ -116,6 +128,7 @@ private struct RanchOSTVModuleDetailView: View {
             .ignoresSafeArea()
 
             VStack(alignment: .leading, spacing: 28) {
+                RanchOSDevIdentityBadge(style: .television)
                 Label("\(module.title.uppercased()) · READ ONLY", systemImage: "lock.fill")
                     .font(.title3.weight(.bold))
                     .foregroundStyle(.mint)
@@ -124,12 +137,14 @@ private struct RanchOSTVModuleDetailView: View {
                     .font(.system(size: 54, weight: .bold, design: .serif))
                     .foregroundStyle(.white)
 
-                Text("Ranch OS DEV\n\(RanchOSBuildInfo.display)")
+                Text("\(environment.tenantDisplayName)\n\(RanchOSBuildInfo.display(for: environment))")
                     .font(.title2)
                     .foregroundStyle(.white.opacity(0.74))
 
-                detailContent
-                .frame(maxWidth: 900)
+                ScrollView {
+                    detailContent
+                        .frame(maxWidth: 900, alignment: .leading)
+                }
 
                 Spacer()
 
@@ -145,11 +160,17 @@ private struct RanchOSTVModuleDetailView: View {
         .task {
             switch module {
             case .property:
+                await propertyStore.refresh()
                 await propertyStore.trackAssets()
             case .livestock:
                 await livestockStore.load()
             case .finance:
                 break
+            }
+        }
+        .onChange(of: propertyStore.state) { _, newState in
+            if case .ready(let dashboard) = newState {
+                selectedPropertyCategory = dashboard.resolvedFilter(selectedPropertyCategory)
             }
         }
     }
@@ -159,6 +180,15 @@ private struct RanchOSTVModuleDetailView: View {
         case .property: "Assets and relationships"
         case .livestock: "Herds and groups"
         case .finance: "Charts and reports"
+        }
+    }
+
+    private func propertyDueTaskSummary(filter: RanchOSPropertyDueTaskCategoryFilter, count: Int) -> String {
+        switch filter {
+        case .all:
+            "\(count) due tasks"
+        case .category(let name):
+            "\(count) due tasks in \(name)"
         }
     }
 
@@ -174,15 +204,57 @@ private struct RanchOSTVModuleDetailView: View {
         }
     }
 
-    @ViewBuilder
     private var propertyContent: some View {
+        VStack(alignment: .leading, spacing: 28) {
+            propertyAssetsContent
+            propertyDueTasksContent
+        }
+    }
+
+    @ViewBuilder
+    private var propertyAssetsContent: some View {
         switch propertyStore.assetsState {
         case .idle, .loading:
-            ProgressView("Loading PropertyManager DEV…")
+            ProgressView("Loading PropertyManager \(environment.title)…")
         case .unavailable(let message):
             Text(message).foregroundStyle(.white.opacity(0.78))
         case .ready(let assets):
             propertyAssetSummaries(RanchOSPropertyLiveAsset.relationshipSummaries(from: assets))
+        }
+    }
+
+    @ViewBuilder
+    private var propertyDueTasksContent: some View {
+        switch propertyStore.state {
+        case .loading:
+            ProgressView("Loading due tasks…")
+        case .unavailable(let message):
+            Text(message).foregroundStyle(.white.opacity(0.78))
+        case .ready(let dashboard):
+            let filter = dashboard.resolvedFilter(selectedPropertyCategory)
+            let dueTasks = dashboard.dueTasks(matching: filter)
+            VStack(alignment: .leading, spacing: 16) {
+                Text("\(dashboard.activeTaskCount) active tasks · \(dashboard.attentionCount) need attention")
+                    .font(.title3.weight(.semibold))
+                RanchOSPropertyDueTaskCategoryPicker(
+                    filters: dashboard.dueTaskCategoryFilters,
+                    selection: $selectedPropertyCategory,
+                    prominence: .television)
+                Text(propertyDueTaskSummary(filter: filter, count: dueTasks.count))
+                    .font(.title3.weight(.semibold))
+                if dueTasks.isEmpty {
+                    Text("No due tasks match this category.")
+                        .foregroundStyle(.white.opacity(0.78))
+                } else {
+                    ForEach(dueTasks) { task in
+                        RanchOSTVDetailCard(
+                            item: RanchOSTVDetailItem(
+                                title: task.title,
+                                detail: task.detail,
+                                symbolName: task.status == .needsAttention ? "exclamationmark.triangle.fill" : "calendar"))
+                    }
+                }
+            }
         }
     }
 
@@ -252,9 +324,11 @@ private struct RanchOSTVModuleDetailView: View {
     private var footerText: String {
         switch module {
         case .property:
-            "Live DEV data · read only. RanchOS cannot change PropertyManager records."
+            environment.propertyLiveFooter
         case .livestock:
-            livestockStore.presentation.banner
+            livestockStore.presentation.isLive
+                ? livestockStore.presentation.banner
+                : environment.livestockPendingLabel
         case .finance:
             "Read only. These are the finance chart reports. Statements are added on iPhone or Mac."
         }

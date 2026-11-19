@@ -1,7 +1,15 @@
 import json
-import redis
-import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
+
+import redis
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.security.shell_guard import run_checked, vet_text
 
 r = redis.Redis(
     host="127.0.0.1",
@@ -9,15 +17,13 @@ r = redis.Redis(
     decode_responses=True
 )
 
-def cmd(command):
-    try:
-        return subprocess.check_output(
-            command,
-            shell=True,
-            text=True
-        ).strip()
-    except Exception as e:
-        return str(e)
+def cmd(command, *, state_changing=False):
+    return run_checked(
+        command,
+        state_changing=state_changing,
+        timeout=30,
+        service="command_agent",
+    )
 
 def publish(event_type, message):
 
@@ -39,16 +45,15 @@ def publish(event_type, message):
 def summarize_infrastructure():
 
     docker_status = cmd(
-        "docker ps --format '{{.Names}} - {{.Status}}'"
+        ["docker", "ps", "--format", "{{.Names}} - {{.Status}}"]
     )
 
-    memory = cmd(
-        "free -h | grep Mem"
-    )
+    memory_output = cmd(["free", "-h"])
+    memory = next((line for line in memory_output.splitlines() if line.startswith("Mem")), memory_output)
 
-    disk = cmd(
-        "df -h / | tail -1"
-    )
+    disk_output = cmd(["df", "-h", "/"])
+    disk_lines = [line for line in disk_output.splitlines() if line.strip()]
+    disk = disk_lines[-1] if disk_lines else disk_output
 
     response = f'''
 INFRASTRUCTURE SUMMARY
@@ -97,8 +102,13 @@ def recent_events():
 
 def restart_container(container):
 
+    if container not in {"homeassistant", "scrypted"}:
+        publish("container_restart", f"{container}: command refused")
+        return
+
     result = cmd(
-        f"docker restart {container}"
+        ["docker", "restart", container],
+        state_changing=True,
     )
 
     publish(
@@ -109,7 +119,7 @@ def restart_container(container):
 def docker_status():
 
     result = cmd(
-        "docker ps --format '{{.Names}} - {{.Status}}'"
+        ["docker", "ps", "--format", "{{.Names}} - {{.Status}}"]
     )
 
     publish(
@@ -119,9 +129,17 @@ def docker_status():
 
 def search_memory(term):
 
-    result = cmd(
-        f"cd /home/gravesab/ai/projects/openclaw/tools/memory_context && "
-        f"/home/gravesab/ai/projects/openclaw/tools/memory_context/.venv/bin/python3 memory_context_agent.py << EOF\n{term}\nEOF"
+    verdict = vet_text(term if isinstance(term, str) else "", service="command_agent")
+    if verdict != "ok":
+        publish("memory_search", "eject" if verdict == "eject" else "command refused")
+        return
+    root = ROOT / "tools" / "memory_context"
+    result = run_checked(
+        [str(root / ".venv" / "bin" / "python3"), str(root / "memory_context_agent.py")],
+        cwd=str(root),
+        timeout=30,
+        service="command_agent",
+        input_text=term,
     )
 
     publish(
@@ -130,6 +148,11 @@ def search_memory(term):
     )
 
 def handle_command(command):
+
+    verdict = vet_text(command if isinstance(command, str) else "", service="command_agent")
+    if verdict != "ok":
+        publish("command_eject", "eject" if verdict == "eject" else "command refused")
+        return
 
     command = command.lower().strip()
 

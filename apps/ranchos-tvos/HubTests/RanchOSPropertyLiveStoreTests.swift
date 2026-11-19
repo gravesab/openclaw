@@ -11,7 +11,30 @@ final class RanchOSPropertyLiveStoreTests: XCTestCase {
         XCTAssertEqual(dashboard.activeTaskCount, 1)
         XCTAssertEqual(dashboard.tasks.first?.title, "Inspect north gate")
         XCTAssertEqual(dashboard.tasks.first?.area, "North pasture")
-        XCTAssertEqual(dashboard.tasks.first?.detail, "North pasture · Due 2026-09-18T10:00:00.000Z")
+        XCTAssertEqual(dashboard.tasks.first?.categoryName, RanchOSPropertyLiveTask.uncategorizedName)
+        XCTAssertEqual(dashboard.tasks.first?.detail, "Uncategorized · North pasture · Due 2026-09-18T10:00:00.000Z")
+    }
+
+    func testLiveTaskDecodesCategoryNameForDueTaskFilter() throws {
+        let data = try XCTUnwrap("""
+        [
+          {"id":"house-1","item":"Replace filter","area":"Main house","category_name":"House","next_due":"2026-10-09T10:00:00.000Z","is_active":true},
+          {"id":"grounds-1","item":"Mow lane","area":"Drive","category_name":"Grounds","next_due":"2026-10-09T10:00:00.000Z","is_active":true},
+          {"id":"inactive-1","item":"Retired pump","area":"Barn","category_name":"Equipment","is_active":false},
+          {"id":"blank-1","item":"Check gate","area":"North","category_name":"  ","is_active":true}
+        ]
+        """.data(using: .utf8))
+
+        let dashboard = try RanchOSPropertyLiveDashboard.decode(from: data)
+
+        XCTAssertEqual(
+            dashboard.dueTaskCategoryFilters.map(\.label),
+            ["All categories", "Grounds", "House", "Uncategorized"])
+        XCTAssertEqual(dashboard.dueTasks(matching: .all).map(\.id), ["house-1", "grounds-1", "blank-1"])
+        XCTAssertEqual(dashboard.dueTasks(matching: .category("House")).map(\.id), ["house-1"])
+        XCTAssertEqual(dashboard.dueTasks(matching: .category("Equipment")), [])
+        XCTAssertEqual(dashboard.resolvedFilter(.category("Tractor")), .all)
+        XCTAssertEqual(dashboard.resolvedFilter(.category("House")), .category("House"))
     }
 
     func testMalformedLiveTaskIsExcludedRatherThanInvented() throws {
@@ -75,14 +98,16 @@ final class RanchOSPropertyLiveStoreTests: XCTestCase {
     }
 
     @MainActor
-    func testStandardInitializationImportsEnvironmentCredentialThroughTheBoundary() {
+    func testStandardInitializationImportsEnvironmentCredentialThroughTheBoundary() async {
         let spy = PropertyBoundarySpy()
         spy.environmentValue = "test-token-not-a-credential"
-        _ = RanchOSPropertyLiveStore(
+        let store = RanchOSPropertyLiveStore(
             mode: .standard,
             credentials: spy.access,
             transport: spy.transport,
             startsAutomaticRefresh: false)
+        // The Keychain write runs off the main actor.
+        await store.finishLaunchImport()
 
         XCTAssertEqual(spy.environmentReads, 1)
         XCTAssertEqual(spy.keychainWrites, 1)

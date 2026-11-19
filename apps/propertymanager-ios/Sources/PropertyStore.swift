@@ -4,10 +4,16 @@ import SwiftUI
 enum PropertyManagerBuildEnvironment {
 #if DEBUG
     static let isDevelopment = true
-    static let apiBaseURLKey = "propertyManager.dev.v3.apiBaseURL"
-    static let apiBaseURL = "http://100.85.188.74:5062"
-    static let manualLibraryBaseURLKey = "propertyManager.dev.manualLibraryBaseURL"
-    static let manualLibraryBaseURL = "http://100.85.188.74:5051"
+    // The DEV host binds its API and Dashboard to loopback; the M4 Max relays them over Tailscale.
+    // New keys replace URLs saved for the old direct addresses, which no longer answer.
+    static let apiBaseURLKey = "propertyManager.dev.v4.apiBaseURL"
+    static let apiBaseURL = "http://100.104.100.96:15062"
+    static let manualLibraryBaseURLKey = "propertyManager.dev.v2.manualLibraryBaseURL"
+    static let manualLibraryBaseURL = "http://100.104.100.96:15051"
+    /// Other addresses of the same servers; a saved one is replaced by the Tailscale address.
+    /// The Mac's Wi-Fi name is listed so builds that saved it move back to Tailscale.
+    static let apiOtherAddresses = ["http://andrew-m4-pro-2.local:5062"]
+    static let manualLibraryOtherAddresses: [String] = []
     static let apiKeyKey = "propertyManager.dev.apiKey"
     static let operatorPINKey = "propertyManager.dev.operatorPIN"
     static let operatorIdentityKey = "propertyManager.dev.operatorIdentity"
@@ -19,6 +25,10 @@ enum PropertyManagerBuildEnvironment {
     static let apiBaseURL = "http://100.85.36.72:5062"
     static let manualLibraryBaseURLKey = "propertyManager.manualLibraryBaseURL"
     static let manualLibraryBaseURL = "http://100.85.36.72:5051"
+    /// Other addresses of the Intel Mini. Older builds saved its Wi-Fi IP or .local name, which
+    /// fail off the ranch and send credentials in cleartext; a saved one is replaced by Tailscale.
+    static let apiOtherAddresses = ["http://192.168.50.104:5062", "http://intelmini.local:5062"]
+    static let manualLibraryOtherAddresses = ["http://192.168.50.104:5051", "http://intelmini.local:5051"]
     static let apiKeyKey = "propertyManager.apiKey"
     static let operatorPINKey = "propertyManager.operatorPIN"
     static let operatorIdentityKey = "propertyManager.operatorIdentity"
@@ -60,10 +70,29 @@ final class PropertyStore: ObservableObject {
     @Published private(set) var recentlyClearedTaskIDs: Set<UUID> = []
     @Published var errorMessage: String?
     @Published var statusMessage: String?
+    /// The API address requests use: the Tailscale address for any address of the built-in
+    /// server, otherwise the address as typed. Credentials only go to the server over Tailscale.
+    var activeAPIBaseURL: String {
+        Self.baseURL(
+            stored: apiBaseURL,
+            builtIn: PropertyManagerBuildEnvironment.apiBaseURL,
+            otherAddresses: PropertyManagerBuildEnvironment.apiOtherAddresses
+        )
+    }
+
+    /// The Dashboard address library requests use, mapped the same way: these requests carry
+    /// the API key and PIN too, so a saved Wi-Fi or .local alias must not be used as stored.
+    var activeManualLibraryBaseURL: String {
+        Self.baseURL(
+            stored: manualLibraryBaseURL,
+            builtIn: PropertyManagerBuildEnvironment.manualLibraryBaseURL,
+            otherAddresses: PropertyManagerBuildEnvironment.manualLibraryOtherAddresses
+        )
+    }
 
     var client: PropertyAPIClient {
         PropertyAPIClient(
-            baseURLString: apiBaseURL,
+            baseURLString: activeAPIBaseURL,
             apiKey: apiKey.isEmpty ? nil : apiKey,
             operatorPIN: operatorPIN.isEmpty ? nil : operatorPIN,
             operatorIdentity: operatorIdentity.isEmpty ? nil : operatorIdentity
@@ -208,9 +237,38 @@ final class PropertyStore: ObservableObject {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
+    /// True when a saved address is one of the built-in server's own addresses.
+    static func isBuiltInServer(stored: String, builtIn: String, otherAddresses: [String] = []) -> Bool {
+        let typed = trimmedAddress(stored)
+        return typed == builtIn || otherAddresses.contains(typed)
+    }
+
+    /// The built-in server always means its Tailscale address; any other address is used as typed.
+    static func baseURL(stored: String, builtIn: String, otherAddresses: [String] = []) -> String {
+        isBuiltInServer(stored: stored, builtIn: builtIn, otherAddresses: otherAddresses) ? builtIn : trimmedAddress(stored)
+    }
+
+    private static func trimmedAddress(_ stored: String) -> String {
+        stored.trimmingCharacters(in: .whitespacesAndNewlines).trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    }
+
+    /// Shows the built-in address in Settings when a saved address is another address of the same server.
+    private func showBuiltInAddressesInSettings() {
+        typealias Env = PropertyManagerBuildEnvironment
+        if apiBaseURL != Env.apiBaseURL,
+           Self.isBuiltInServer(stored: apiBaseURL, builtIn: Env.apiBaseURL, otherAddresses: Env.apiOtherAddresses) {
+            apiBaseURL = Env.apiBaseURL
+        }
+        if manualLibraryBaseURL != Env.manualLibraryBaseURL,
+           Self.isBuiltInServer(stored: manualLibraryBaseURL, builtIn: Env.manualLibraryBaseURL, otherAddresses: Env.manualLibraryOtherAddresses) {
+            manualLibraryBaseURL = Env.manualLibraryBaseURL
+        }
+    }
+
     func testConnection() async {
         errorMessage = nil
         statusMessage = "Testing connection…"
+        showBuiltInAddressesInSettings()
         do {
             try await client.authCheck()
             let health = try await client.health()
@@ -242,16 +300,21 @@ final class PropertyStore: ObservableObject {
         }
         defer { isLoading = false }
 
+        showBuiltInAddressesInSettings()
         do {
-            async let fetchedCategories = client.fetchCategories()
-            async let fetchedTasks = client.fetchTasks()
-            categories = try await fetchedCategories
-            tasks = try await fetchedTasks
-            statusMessage = "Updated \(tasks.count) tasks"
+            try await loadTasksAndCategories()
         } catch {
             guard !error.isCancellation else { return }
             errorMessage = error.localizedDescription
         }
+    }
+
+    private func loadTasksAndCategories() async throws {
+        async let fetchedCategories = client.fetchCategories()
+        async let fetchedTasks = client.fetchTasks()
+        categories = try await fetchedCategories
+        tasks = try await fetchedTasks
+        statusMessage = "Updated \(tasks.count) tasks"
     }
 
     func refreshAssets(clearStatus: Bool = true) async {
@@ -260,6 +323,7 @@ final class PropertyStore: ObservableObject {
             errorMessage = nil
         }
         defer { isLoadingAssets = false }
+        showBuiltInAddressesInSettings()
         do {
             assets = try await client.fetchAssets()
             if statusMessage == nil

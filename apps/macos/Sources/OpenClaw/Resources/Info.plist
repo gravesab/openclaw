@@ -56,9 +56,9 @@
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>OpenClaw uses the local network to connect to your remote OpenClaw gateway over LAN, Tailnet, or SSH.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>OpenClaw needs the mic for Voice Wake tests and agent audio capture.</string>
+	<string>OpenClaw uses the microphone for Voice Wake and to dictate into text fields. Speech stays on this device.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
-    <string>OpenClaw uses speech recognition to detect your Voice Wake trigger phrase.</string>
+    <string>OpenClaw uses on-device speech recognition for Voice Wake and Apple Intelligence dictation in text fields.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>OpenClaw needs Automation (AppleScript) permission to drive Terminal and other apps for agent actions.</string>
     <key>NSRemindersUsageDescription</key>

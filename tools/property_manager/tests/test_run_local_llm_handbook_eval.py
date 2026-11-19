@@ -21,6 +21,21 @@ class LocalLlmHandbookEvalRunnerTests(unittest.TestCase):
     def test_rejects_public_ollama_endpoint(self) -> None:
         with self.assertRaisesRegex(EvaluationError, "non-private"):
             is_private_ollama_url("http://8.8.8.8:11434")
+        with self.assertRaisesRegex(EvaluationError, "non-private"):
+            is_private_ollama_url("http://attacker.com:11434")
+        with self.assertRaisesRegex(EvaluationError, "non-private"):
+            is_private_ollama_url("http://10.0.0.1:11434")
+        with self.assertRaisesRegex(EvaluationError, "non-private"):
+            is_private_ollama_url("http://0.0.0.0:11434")
+        self.assertEqual(
+            is_private_ollama_url("http://127.0.0.1:11434"),
+            "http://127.0.0.1:11434",
+        )
+        with mock.patch.dict("os.environ", {"RANCH_ALLOW_PRIVATE_LAN": "1"}, clear=False):
+            self.assertEqual(
+                is_private_ollama_url("http://10.0.0.1:11434"),
+                "http://10.0.0.1:11434",
+            )
 
     def test_handbook_evaluation_route_is_local_and_ordered(self) -> None:
         route = resolve_dev_local_route("property_manager_handbook_evaluation")

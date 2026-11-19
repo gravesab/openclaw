@@ -1,0 +1,9 @@
+[Unit]
+Description=Collect system health without AI
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/bin/system_health.py
+ExecStartPost=-/usr/bin/python3 %h/bin/publish_dev_health.py
+TimeoutStartSec=60

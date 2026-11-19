@@ -1,4 +1,5 @@
 import Combine
+import OpenClawChatUI
 import SwiftUI
 
 struct VoiceWakeWordsSettingsView: View {
@@ -18,6 +19,7 @@ struct VoiceWakeWordsSettingsView: View {
                         .onSubmit {
                             self.commitTriggerWords()
                         }
+                        .appleIntelligenceDictation(self.binding(for: index))
                 }
                 .onDelete(perform: self.removeWords)
 

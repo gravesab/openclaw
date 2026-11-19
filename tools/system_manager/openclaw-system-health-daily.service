@@ -1,0 +1,8 @@
+[Unit]
+Description=Send one daily DEV system health message
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 %h/bin/system_health.py --send --chat-id 8256152845
+TimeoutStartSec=90

@@ -26,7 +26,8 @@ class DashboardWsgiConfigurationTests(unittest.TestCase):
     def test_reliable_default_worker_configuration(self):
         config = load_config()
 
-        self.assertEqual(config.bind, "0.0.0.0:5051")
+        # DEV binds loopback by default; reach it through a tunnel.
+        self.assertEqual(config.bind, "127.0.0.1:5051")
         self.assertEqual(config.workers, 2)
         self.assertEqual(config.threads, 4)
         self.assertEqual(config.worker_class, "gthread")

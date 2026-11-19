@@ -601,6 +601,53 @@ enum LivestockCareEventType: String, CaseIterable, Identifiable, Sendable {
         case .observation, .treatment: false
         }
     }
+
+    /// Observation may be recorded at average cost zero. Every other care type needs a cost.
+    var requiresCost: Bool {
+        switch self {
+        case .observation: false
+        case .treatment, .surgery, .vaccination, .medicationAdministration: true
+        }
+    }
+
+    var costRequirementNote: String {
+        if requiresCost {
+            return "Cost is required for \(label). This does not post to Finance."
+        }
+        return "Average cost can be zero. This does not post to Finance."
+    }
+
+    func costProblem(_ text: String) -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return requiresCost ? "\(label) cost is required." : nil
+        }
+        return LivestockMoney.requirement(text, label: "\(label) cost", allowZero: true, allowNegative: true)
+    }
+
+    /// Vaccination and medication need the amount given. Observation, treatment, and surgery do not.
+    var requiresDosage: Bool {
+        switch self {
+        case .vaccination, .medicationAdministration: true
+        case .observation, .treatment, .surgery: false
+        }
+    }
+
+    var dosageRequirementNote: String {
+        "Dosage is required for \(label). Record how much was given, such as 5 mL or 2 cc."
+    }
+
+    func dosageProblem(_ text: String) -> String? {
+        guard requiresDosage else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return "\(label) dosage is required."
+        }
+        if trimmed.count > 80 {
+            return "\(label) dosage is too long."
+        }
+        return nil
+    }
 }
 
 struct LivestockCareEvent: Identifiable, Equatable, Sendable {
@@ -609,6 +656,7 @@ struct LivestockCareEvent: Identifiable, Equatable, Sendable {
     let occurredAt: Date
     var itemName: String? = nil
     var itemKind: String? = nil
+    var dosage: String? = nil
     var supersedesID: UUID? = nil
     var correctionReason: LivestockLifecycleCorrectionReason? = nil
     var isCurrent: Bool = true
@@ -617,6 +665,7 @@ struct LivestockCareEvent: Identifiable, Equatable, Sendable {
         var parts = [type.label]
         if let itemName, !itemName.isEmpty { parts.append(itemName) }
         if let itemKind, !itemKind.isEmpty { parts.append(itemKind) }
+        if let dosage, !dosage.isEmpty { parts.append(dosage) }
         return parts.joined(separator: " · ")
     }
 
@@ -653,7 +702,7 @@ enum LivestockCorrectionTitle {
     }
 }
 
-enum LivestockInputType: String, CaseIterable, Identifiable, Sendable {
+enum LivestockInputType: String, CaseIterable, Identifiable, Codable, Sendable {
     case feed, hay, mineral, supplement
     case dryFood = "dry_food"
     case wetFood = "wet_food"
@@ -749,10 +798,20 @@ struct LivestockFeedEntry: Identifiable, Equatable, Sendable {
         return LivestockMoney.requirement(cost, label: "\(feed) cost", allowZero: false)
     }
 
+    static func canSave(_ lines: [LivestockFeedEntry]) -> Bool {
+        let filled = lines.filter {
+            $0.hasQuantity || !$0.cost.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !filled.isEmpty else { return false }
+        return filled.allSatisfy { problem(quantity: $0.quantity, cost: $0.cost, feed: $0.inputType.label) == nil }
+    }
+
     /// Quantity times the cost of one feeding times how often that feeding happens in a year.
     var annualFeedCost: Decimal {
-        let count = hasQuantity ? LivestockMoney.signed(quantity) : 1
-        return count * LivestockMoney.signed(cost) * Decimal(frequency.timesPerYear)
+        guard let count = Int(quantity.trimmingCharacters(in: .whitespacesAndNewlines)), count > 0 else {
+            return 0
+        }
+        return Decimal(count) * LivestockMoney.signed(cost) * Decimal(frequency.timesPerYear)
     }
 }
 
@@ -835,9 +894,15 @@ struct LivestockConsumption: Identifiable, Equatable, Sendable {
     var isCurrent: Bool = true
 
     var summary: String {
-        let base = "\(inputType.label) \(quantity) \(unit.label)"
-        guard let frequency else { return base }
-        return "\(base) · \(frequency.label)"
+        var parts = ["\(inputType.label) \(quantity) \(unit.label)"]
+        if let frequency {
+            parts.append(frequency.label)
+        }
+        let named = LivestockSupplierDirectory.cleaned(supplier ?? "")
+        if !named.isEmpty {
+            parts.append(named)
+        }
+        return parts.joined(separator: " · ")
     }
 
     var isActive: Bool { isCurrent && correctionReason != .duplicateEntry }
@@ -864,22 +929,30 @@ struct LivestockSupplierDirectory: Equatable, Codable, Sendable {
         last = name
     }
 
-    func merging(animals: [Animal]) -> LivestockSupplierDirectory {
+    func merging(animals: [Animal], herds: [LivestockHerd] = []) -> LivestockSupplierDirectory {
         var copy = self
-        let recorded = animals.flatMap(\.consumptions).compactMap { item -> (Date, String)? in
-            guard let supplier = item.supplier else { return nil }
-            let name = Self.cleaned(supplier)
-            guard !name.isEmpty else { return nil }
-            return (item.observedAt, name)
-        }.sorted { $0.0 < $1.0 }
+        let recorded = Self.recordedNames(
+            from: animals.flatMap(\.consumptions) + herds.flatMap(\.consumptions)
+        )
         let keptLast = copy.last
-        for (_, name) in recorded {
+        for name in recorded {
             copy.remember(name)
         }
         if !keptLast.isEmpty {
             copy.last = Self.cleaned(keptLast)
         }
         return copy
+    }
+
+    private static func recordedNames(from items: [LivestockConsumption]) -> [String] {
+        items.compactMap { item -> (Date, String)? in
+            guard let supplier = item.supplier else { return nil }
+            let name = cleaned(supplier)
+            guard !name.isEmpty else { return nil }
+            return (item.observedAt, name)
+        }
+        .sorted { $0.0 < $1.0 }
+        .map(\.1)
     }
 
     static func load(defaults: UserDefaults = .standard) -> LivestockSupplierDirectory {
@@ -896,6 +969,136 @@ struct LivestockSupplierDirectory: Equatable, Codable, Sendable {
     }
 
     static let storageKey = "RanchOSLivestock.feedSuppliers"
+}
+
+enum LivestockProductCategory: String, Codable, CaseIterable, Sendable {
+    case feed
+    case vaccination
+    case medication
+
+    var pickerTitle: String {
+        switch self {
+        case .feed: "Scanned feed"
+        case .vaccination: "Shots"
+        case .medication: "Medicines"
+        }
+    }
+
+    var emptyPickerLabel: String {
+        switch self {
+        case .feed: "Choose a scanned feed"
+        case .vaccination: "Choose a shot"
+        case .medication: "Choose a medicine"
+        }
+    }
+
+    var scanLabel: String {
+        switch self {
+        case .feed: "Scan feed package"
+        case .vaccination: "Scan shot package"
+        case .medication: "Scan medicine package"
+        }
+    }
+}
+
+struct LivestockProduct: Identifiable, Equatable, Codable, Sendable {
+    var id: UUID = UUID()
+    var category: LivestockProductCategory
+    var name: String
+    var kind: String = ""
+    var barcode: String? = nil
+    var feedType: LivestockInputType? = nil
+}
+
+struct LivestockProductDirectory: Equatable, Codable, Sendable {
+    var products: [LivestockProduct] = []
+
+    static func cleanedName(_ raw: String) -> String {
+        String(raw.split(whereSeparator: \.isWhitespace).joined(separator: " ").prefix(80))
+    }
+
+    static func cleanedBarcode(_ raw: String) -> String {
+        let allowed = raw.uppercased().filter { $0.isNumber || ("A"..."Z").contains($0) }
+        return String(allowed.prefix(32))
+    }
+
+    func products(in category: LivestockProductCategory) -> [LivestockProduct] {
+        products.filter { $0.category == category }
+    }
+
+    func product(barcode: String, in category: LivestockProductCategory) -> LivestockProduct? {
+        let code = Self.cleanedBarcode(barcode)
+        guard !code.isEmpty else { return nil }
+        return products.first { $0.category == category && $0.barcode == code }
+    }
+
+    mutating func remember(_ incoming: LivestockProduct) {
+        let name = Self.cleanedName(incoming.name)
+        guard !name.isEmpty else { return }
+        let barcode = Self.cleanedBarcode(incoming.barcode ?? "")
+        let kind = Self.cleanedName(incoming.kind)
+        if let index = products.firstIndex(where: { product in
+            if !barcode.isEmpty, product.category == incoming.category, product.barcode == barcode {
+                return true
+            }
+            return product.category == incoming.category && product.name.caseInsensitiveCompare(name) == .orderedSame
+        }) {
+            products[index].name = name
+            if !kind.isEmpty { products[index].kind = kind }
+            if !barcode.isEmpty { products[index].barcode = barcode }
+            if incoming.feedType != nil { products[index].feedType = incoming.feedType }
+        } else {
+            products.append(
+                LivestockProduct(
+                    category: incoming.category,
+                    name: name,
+                    kind: kind,
+                    barcode: barcode.isEmpty ? nil : barcode,
+                    feedType: incoming.feedType
+                )
+            )
+        }
+        products.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    func merging(animals: [Animal], herds: [LivestockHerd] = []) -> LivestockProductDirectory {
+        var copy = self
+        let events = animals.flatMap(\.careEvents) + herds.flatMap(\.careEvents)
+        for event in events where event.isActive {
+            let name = Self.cleanedName(event.itemName ?? "")
+            guard !name.isEmpty else { continue }
+            switch event.type {
+            case .vaccination:
+                copy.remember(LivestockProduct(category: .vaccination, name: name))
+            case .medicationAdministration:
+                copy.remember(
+                    LivestockProduct(
+                        category: .medication,
+                        name: name,
+                        kind: Self.cleanedName(event.itemKind ?? "")
+                    )
+                )
+            case .observation, .treatment, .surgery:
+                continue
+            }
+        }
+        return copy
+    }
+
+    static func load(defaults: UserDefaults = .standard) -> LivestockProductDirectory {
+        guard let data = defaults.data(forKey: storageKey),
+              let stored = try? JSONDecoder().decode(LivestockProductDirectory.self, from: data) else {
+            return LivestockProductDirectory()
+        }
+        return stored
+    }
+
+    func save(defaults: UserDefaults = .standard) {
+        guard let data = try? JSONEncoder().encode(self) else { return }
+        defaults.set(data, forKey: Self.storageKey)
+    }
+
+    static let storageKey = "RanchOSLivestock.scannedProducts"
 }
 
 enum LivestockWeight {
@@ -1279,6 +1482,9 @@ struct Animal: Identifiable, Equatable, Sendable {
     let retiredAt: Date?
     let saleAmount: Decimal?
     let saleOn: Date?
+    let sireID: UUID?
+    let damID: UUID?
+    let bredWithID: UUID?
     let status: String
 
     init(
@@ -1304,6 +1510,9 @@ struct Animal: Identifiable, Equatable, Sendable {
         retiredAt: Date? = nil,
         saleAmount: Decimal? = nil,
         saleOn: Date? = nil,
+        sireID: UUID? = nil,
+        damID: UUID? = nil,
+        bredWithID: UUID? = nil,
         status: String
     ) {
         self.id = id
@@ -1328,6 +1537,9 @@ struct Animal: Identifiable, Equatable, Sendable {
         self.retiredAt = retiredAt
         self.saleAmount = saleAmount
         self.saleOn = saleOn
+        self.sireID = sireID
+        self.damID = damID
+        self.bredWithID = bredWithID
         self.status = status
     }
 
@@ -1410,6 +1622,9 @@ struct Animal: Identifiable, Equatable, Sendable {
             retiredAt: date,
             saleAmount: saleAmount,
             saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
             status: status
         )
     }
@@ -1438,6 +1653,9 @@ struct Animal: Identifiable, Equatable, Sendable {
             retiredAt: retiredAt,
             saleAmount: saleAmount,
             saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
             status: status
         )
     }
@@ -1466,6 +1684,9 @@ struct Animal: Identifiable, Equatable, Sendable {
             retiredAt: retiredAt,
             saleAmount: saleAmount,
             saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
             status: status
         )
     }
@@ -1494,6 +1715,9 @@ struct Animal: Identifiable, Equatable, Sendable {
             retiredAt: retiredAt,
             saleAmount: saleAmount,
             saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
             status: status
         )
     }
@@ -1522,6 +1746,40 @@ struct Animal: Identifiable, Equatable, Sendable {
             retiredAt: retiredAt,
             saleAmount: saleAmount,
             saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
+            status: status
+        )
+    }
+
+    func replacingBreeding(sireID: UUID?, damID: UUID?, bredWithID: UUID?) -> Animal {
+        Animal(
+            id: id,
+            displayName: displayName,
+            species: species,
+            productionType: productionType,
+            breed: breed,
+            identifiers: identifiers,
+            lifecycleEvents: lifecycleEvents,
+            careEvents: careEvents,
+            consumptions: consumptions,
+            costs: costs,
+            recordedBreed: recordedBreed,
+            mixBreedOne: mixBreedOne,
+            mixBreedTwo: mixBreedTwo,
+            petKind: petKind,
+            petSpeciesOther: petSpeciesOther,
+            herdID: herdID,
+            herdName: herdName,
+            herdStartedAt: herdStartedAt,
+            retirementReason: retirementReason,
+            retiredAt: retiredAt,
+            saleAmount: saleAmount,
+            saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
             status: status
         )
     }
@@ -1550,6 +1808,9 @@ struct Animal: Identifiable, Equatable, Sendable {
             retiredAt: retiredAt,
             saleAmount: saleAmount,
             saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
             status: status
         )
     }
@@ -1578,6 +1839,9 @@ struct Animal: Identifiable, Equatable, Sendable {
             retiredAt: retiredAt,
             saleAmount: saleAmount,
             saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
             status: status
         )
     }
@@ -1606,6 +1870,9 @@ struct Animal: Identifiable, Equatable, Sendable {
             retiredAt: retiredAt,
             saleAmount: saleAmount,
             saleOn: saleOn,
+            sireID: sireID,
+            damID: damID,
+            bredWithID: bredWithID,
             status: status
         )
     }
@@ -1935,6 +2202,7 @@ enum FixturePresentationBoundary {
     static var databaseWriteBoundary: String { "Saved in the \(LivestockBuildStamp.current.databaseLabel)." }
     static let saveConfirmsBoundary = "Save writes what you entered. Saving confirms surgery, vaccination, medication, and cost."
     static let saveNeedsEntryBoundary = "Enter an identifier, lifecycle event, care record, feed quantity, or cost, then save."
+    static let retiredCorrectionBoundary = "Retirement is locked. You can correct existing care, feed, and cost. You cannot add new records."
     static let classificationStoredBoundary = "Species stays as recorded. Production type and breed can be changed."
     static let rejectedSpeciesBoundary = "Rabbit and other descriptions are not accepted by the durable catalog."
 }

@@ -1,4 +1,5 @@
 import SwiftUI
+import OpenClawChatUI
 
 private enum GatewayTailscaleMode: String, CaseIterable, Identifiable {
     case off
@@ -273,6 +274,7 @@ struct TailscaleIntegrationSection: View {
             .textFieldStyle(.roundedBorder)
             .frame(maxWidth: 240)
             .onSubmit { Task { await self.applySettings() } }
+            .appleIntelligenceDictation(self.$password)
         Text("Stored in ~/.openclaw/openclaw.json. Prefer OPENCLAW_GATEWAY_PASSWORD for production.")
             .font(.caption)
             .foregroundStyle(.secondary)

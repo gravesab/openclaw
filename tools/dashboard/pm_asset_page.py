@@ -8,6 +8,7 @@ import json
 import os
 import urllib.error
 import urllib.request
+from urllib.parse import urlparse
 
 from flask import request, session
 
@@ -24,6 +25,27 @@ API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "")
 
 def pin_unlock_configured() -> bool:
     return bool(OPERATOR_PIN and DASHBOARD_SECRET)
+
+
+def _notify_sentinel(event: dict) -> None:
+    if os.environ.get("RANCH_SENTINEL_ENABLED", "0") != "1":
+        return
+    url = os.environ.get("RANCH_SENTINEL_URL", "http://127.0.0.1:8001/sense")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return
+    payload = json.dumps(event).encode("utf-8")
+    outgoing = urllib.request.Request(
+        url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(outgoing, timeout=0.5):
+            return
+    except (OSError, urllib.error.URLError, TimeoutError):
+        return
 
 
 def _auth_headers(*, pin: str | None = None) -> dict[str, str]:
@@ -105,6 +127,13 @@ def register_pm_asset_routes(app) -> None:
                     authenticated = True
                     message = "Authenticated. You may submit meter readings."
                 else:
+                    if pin:
+                        _notify_sentinel({
+                            "type": "prop.pin_bruteforce",
+                            "service": "propertymanager",
+                            "score": 1.0,
+                            "payload": {},
+                        })
                     message = "Invalid operator PIN."
 
             elif action in {"submit", "confirm_lower"}:

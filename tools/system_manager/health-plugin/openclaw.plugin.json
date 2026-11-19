@@ -1,0 +1,10 @@
+{
+  "id": "system-health",
+  "name": "System Health",
+  "description": "Deterministic health and backup commands",
+  "activation": { "onStartup": true },
+  "commandAliases": [
+    { "name": "health", "kind": "runtime-slash" }
+  ],
+  "configSchema": { "type": "object", "additionalProperties": false, "properties": {} }
+}

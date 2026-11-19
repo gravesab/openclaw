@@ -42,7 +42,7 @@ enum RanchOSLivestockSession: Equatable, Sendable {
 
 /// Read-only Livestock DEV connection. No endpoint, credentials, or mutation surface.
 struct RanchOSLivestockConnection: Sendable {
-    static let pendingLabel = "Live Livestock summary is not connected."
+    static let pendingLabel = "DEV fixture — live Livestock connection pending."
     static let liveReadOnlyLabel = "Live DEV data · read only. RanchOS cannot change Livestock records."
     static let authorizedReadUnavailableMessage = "The authorized Livestock read API is not available."
     static let writeRequestMethods: [String] = []

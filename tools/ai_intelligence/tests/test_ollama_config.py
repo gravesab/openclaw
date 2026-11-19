@@ -9,6 +9,7 @@ from unittest.mock import patch
 from tools.ai_intelligence.ollama_config import (
     OllamaConfig,
     OllamaConfigurationError,
+    _is_allowed_host,
     is_ollama_model_id,
     to_ollama_model_name,
 )
@@ -50,25 +51,25 @@ class OllamaModelTranslationTests(unittest.TestCase):
 class OllamaConfigTests(unittest.TestCase):
     def test_normalizes_base_url(self) -> None:
         config = OllamaConfig(
-            base_url="http://192.168.50.117:11434/",
+            base_url="http://127.0.0.1:11434/",
             default_timeout_seconds=30,
         )
 
         self.assertEqual(
             config.base_url,
-            "http://192.168.50.117:11434",
+            "http://127.0.0.1:11434",
         )
 
     def test_rejects_invalid_url_scheme(self) -> None:
         with self.assertRaises(OllamaConfigurationError):
             OllamaConfig(
-                base_url="ftp://192.168.50.117:11434"
+                base_url="ftp://127.0.0.1:11434"
             )
 
     def test_rejects_invalid_timeout(self) -> None:
         with self.assertRaises(OllamaConfigurationError):
             OllamaConfig(
-                base_url="http://192.168.50.117:11434",
+                base_url="http://127.0.0.1:11434",
                 default_timeout_seconds=0,
             )
 
@@ -111,6 +112,55 @@ class OllamaConfigTests(unittest.TestCase):
                 OllamaConfigurationError
             ):
                 OllamaConfig.from_env()
+
+
+class OllamaHostAllowlistTests(unittest.TestCase):
+    def _closed(self):
+        return patch.dict(
+            os.environ,
+            {
+                "RANCH_ALLOW_PRIVATE_LAN": "0",
+                "OLLAMA_HOST_ALLOWLIST": "",
+                "ENVIRONMENT": "",
+            },
+            clear=False,
+        )
+
+    def test_loopback_passes_and_public_private_and_unspecified_are_blocked(self) -> None:
+        with self._closed(), patch(
+            "tools.security.allowlist._note_private_lan"
+        ) as note:
+            self.assertTrue(_is_allowed_host("127.0.0.1"))
+            self.assertTrue(_is_allowed_host("::1"))
+            self.assertTrue(_is_allowed_host("localhost"))
+            self.assertFalse(_is_allowed_host("attacker.com"))
+            self.assertFalse(_is_allowed_host("10.0.0.1"))
+            self.assertFalse(_is_allowed_host("0.0.0.0"))
+            note.assert_not_called()
+
+    def test_private_passes_only_with_opt_in(self) -> None:
+        with self._closed(), patch.dict(
+            os.environ, {"RANCH_ALLOW_PRIVATE_LAN": "1"}, clear=False
+        ), patch(
+            "tools.security.allowlist._note_private_lan"
+        ) as note:
+            self.assertTrue(_is_allowed_host("10.0.0.1"))
+            self.assertFalse(_is_allowed_host("0.0.0.0"))
+            self.assertFalse(_is_allowed_host("attacker.com"))
+            note.assert_called()
+
+    def test_explicit_allowlist_rejects_wildcard_and_unspecified(self) -> None:
+        with self._closed(), patch.dict(
+            os.environ,
+            {"OLLAMA_HOST_ALLOWLIST": "192.168.50.117,*,0.0.0.0,10.0.0.0/8"},
+            clear=False,
+        ), patch(
+            "tools.security.allowlist._note_private_lan"
+        ):
+            self.assertTrue(_is_allowed_host("192.168.50.117"))
+            self.assertFalse(_is_allowed_host("10.0.0.1"))
+            self.assertFalse(_is_allowed_host("0.0.0.0"))
+            self.assertFalse(_is_allowed_host("attacker.com"))
 
 
 if __name__ == "__main__":

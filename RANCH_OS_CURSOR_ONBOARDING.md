@@ -35,7 +35,8 @@ below or establish that an integration has shipped.
 
 | Checkout | Intended use | Not authority for |
 | --- | --- | --- |
-| `/Users/andrewgraves/Documents/OpenClaw-DEV` | Canonical active DEV discovery checkout on the `development` branch. It is not blanket implementation, migration, runtime, or device approval. | Clean baseline, Production state, or implicit permission to include unrelated WIP. |
+| `/Users/andrewgraves/Developer/OpenClaw-DEV` | Canonical active DEV discovery checkout on the `development` branch, outside iCloud since 2026-10-02. It is not blanket implementation, migration, runtime, or device approval. | Clean baseline, Production state, or implicit permission to include unrelated WIP. |
+| `/Users/andrewgraves/Documents/OpenClaw-DEV` | Retired iCloud copy, kept read-only until the iCloud exit is confirmed. | Any new work or commits. |
 | `/Users/andrewgraves/Documents/OpenClaw-DEV-2026.8.1-reconcile` | Historical reconciled branch evidence. | A second active implementation source. |
 | `/Users/andrewgraves/Documents/OpenClaw-DEV-pr35-repair-20260827` | Separate clone of the reconciled branch for repair/PR evidence. | A competing canonical checkout. |
 | `/Users/andrewgraves/Documents/OpenClaw-DEV-ranchos-tvos-20260828-shallow` | Isolated Ranch OS tvOS DEV fixture work. | Full Git history or Production authority. |

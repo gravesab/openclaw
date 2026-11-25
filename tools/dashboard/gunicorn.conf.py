@@ -3,7 +3,7 @@
 import os
 
 
-bind = os.environ.get("OPENCLAW_DASHBOARD_BIND", "0.0.0.0:5051")
+bind = os.environ.get("OPENCLAW_DASHBOARD_BIND", "127.0.0.1:5051")
 workers = int(os.environ.get("OPENCLAW_DASHBOARD_WORKERS", "2"))
 threads = int(os.environ.get("OPENCLAW_DASHBOARD_THREADS", "4"))
 worker_class = "gthread"

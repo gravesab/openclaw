@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import hmac
+import json
 import os
 from functools import wraps
 from typing import Callable
+from urllib.error import URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 from flask import g, request
 
@@ -15,11 +19,47 @@ API_KEY = os.environ.get("PROPERTYMANAGER_API_KEY", "").strip()
 REVIEW_API_KEY = os.environ.get("PROPERTYMANAGER_REVIEW_API_KEY", "").strip()
 # No default: an unset PIN disables PIN auth instead of accepting a well-known value.
 OPERATOR_PIN = os.environ.get("PROPERTYMANAGER_OPERATOR_PIN", "").strip()
-AUTH_DISABLED = os.environ.get("PROPERTYMANAGER_AUTH_DISABLED", "").strip().lower() in {
+_AUTH_DISABLED_REQUESTED = os.environ.get("PROPERTYMANAGER_AUTH_DISABLED", "").strip().lower() in {
     "1",
     "true",
     "yes",
 }
+
+
+def _notify_sentinel(event: dict) -> None:
+    if os.environ.get("RANCH_SENTINEL_ENABLED", "0") != "1":
+        return
+    url = os.environ.get("RANCH_SENTINEL_URL", "http://127.0.0.1:8001/sense")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return
+    payload = json.dumps(event).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("RANCH_SENTINEL_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    outgoing = Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urlopen(outgoing, timeout=0.5):
+            return
+    except (OSError, URLError, TimeoutError):
+        return
+
+
+if _AUTH_DISABLED_REQUESTED and os.environ.get("ENVIRONMENT") != "development":
+    _notify_sentinel({
+        "type": "prop.auth_disabled_prod",
+        "service": "propertymanager",
+        "score": 1.0,
+        "payload": {"environment": os.environ.get("ENVIRONMENT")},
+    })
+    raise RuntimeError(
+        "PROPERTYMANAGER_AUTH_DISABLED is refused unless ENVIRONMENT=development"
+    )
+
+AUTH_DISABLED = _AUTH_DISABLED_REQUESTED
+
+
 
 
 def auth_required(*, allow_pin: bool = False) -> Callable:
@@ -108,6 +148,13 @@ def _resolve_identity(*, allow_pin: bool) -> dict[str, str | None] | None:
                 "operator": request.headers.get("X-Operator-Identity", "qr-operator"),
                 "integration": "dashboard-qr",
             }
+        if pin:
+            _notify_sentinel({
+                "type": "prop.pin_bruteforce",
+                "service": "propertymanager",
+                "score": 1.0,
+                "payload": {},
+            })
 
     return None
 

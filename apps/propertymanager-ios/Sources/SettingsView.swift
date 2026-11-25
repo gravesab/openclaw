@@ -27,7 +27,7 @@ struct SettingsView: View {
                     .textContentType(.URL)
                     .noWritingTools()
 
-                Text("Use your Intel Mini Tailscale or LAN address, for example http://100.85.36.72:5062")
+                Text("The built-in address connects over Tailscale, at home and away. Any other address is used as typed.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {
@@ -41,7 +41,7 @@ struct SettingsView: View {
                     .autocorrectionDisabled()
                     .textContentType(.URL)
                     .noWritingTools()
-                Text("Stores uploaded manuals and serves them for Extract, for example http://100.85.188.74:5051")
+                Text("Stores uploaded manuals and serves them for Extract. The built-in address switches between Ranch Wi-Fi and Tailscale automatically.")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
             } header: {

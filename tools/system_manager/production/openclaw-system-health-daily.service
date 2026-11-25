@@ -1,0 +1,9 @@
+[Unit]
+Description=Send one daily Production system health message
+After=network-online.target
+
+[Service]
+Type=oneshot
+Environment=OPENCLAW_HEALTH_ENV=prod
+ExecStart=/usr/bin/python3 %h/bin/system_health.py --send --chat-id 8256152845
+TimeoutStartSec=90

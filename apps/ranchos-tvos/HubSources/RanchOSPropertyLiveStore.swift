@@ -18,12 +18,18 @@ struct RanchOSPropertyCredentialAccess: Sendable {
     var readKeychain: @Sendable () -> String?
     var writeKeychain: @Sendable (String) -> Void
 
-    static let system = RanchOSPropertyCredentialAccess(
-        readEnvironment: {
-            ProcessInfo.processInfo.environment[RanchOSPropertyLiveStore.launchKeyEnvironment]
-        },
-        readKeychain: ranchOSReadPropertyKeychain,
-        writeKeychain: ranchOSWritePropertyKeychain)
+    static let system = system(for: .development)
+
+    /// DEV and Production never share a launch key or a Keychain item.
+    static func system(for environment: RanchOSRuntimeEnvironment) -> RanchOSPropertyCredentialAccess {
+        let launchKey = environment.propertyLaunchKeyEnvironment
+        let service = environment.propertyKeychainService
+        let account = environment.propertyKeychainAccount
+        return RanchOSPropertyCredentialAccess(
+            readEnvironment: { ProcessInfo.processInfo.environment[launchKey] },
+            readKeychain: { ranchOSReadPropertyKeychain(service: service, account: account) },
+            writeKeychain: { ranchOSWritePropertyKeychain($0, service: service, account: account) })
+    }
 }
 
 struct RanchOSPropertyTransport: Sendable {
@@ -34,7 +40,7 @@ struct RanchOSPropertyTransport: Sendable {
     }
 }
 
-/// The PropertyManager DEV surface intentionally has no mutation operations.
+/// The PropertyManager surface intentionally has no mutation operations.
 @MainActor
 @Observable
 final class RanchOSPropertyLiveStore {
@@ -53,37 +59,55 @@ final class RanchOSPropertyLiveStore {
     private(set) var assetsState: AssetsState = .idle
 
     static let offlineUnavailableMessage = "Unavailable during offline verification."
-    nonisolated static let launchKeyEnvironment = "RANCHOS_PROPERTYMANAGER_DEV_API_KEY"
-
-    #if os(tvOS)
-    // Apple TV is not on the tailnet; the M4's LaunchAgent
-    // ai.openclaw.propertymanager-dev-lan-relay forwards this port to the same DEV API.
-    nonisolated private static let endpoint = URL(string: "http://andrew-m4-pro.local:15063")!
-    #else
-    nonisolated private static let endpoint = URL(string: "http://100.85.188.74:5062")!
-    #endif
 
     private let mode: RanchOSLaunchMode
-    private let credentials: RanchOSPropertyCredentialAccess
+    private let credentialsFor: (RanchOSRuntimeEnvironment) -> RanchOSPropertyCredentialAccess
+    private var credentials: RanchOSPropertyCredentialAccess
     private let transport: RanchOSPropertyTransport
+    private var launchImport: Task<Void, Never>?
+    private(set) var environment: RanchOSRuntimeEnvironment
     private(set) var state: State = .loading
 
-    convenience init(mode: RanchOSLaunchMode = .standard, startsAutomaticRefresh: Bool = true) {
+    convenience init(
+        mode: RanchOSLaunchMode = .standard,
+        environment: RanchOSRuntimeEnvironment = RanchOSLiveSession.persistedEnvironment(),
+        startsAutomaticRefresh: Bool = true
+    ) {
         self.init(
             mode: mode,
-            credentials: .system,
+            environment: environment,
+            credentialsFor: { .system(for: $0) },
             transport: .system,
             startsAutomaticRefresh: startsAutomaticRefresh)
     }
 
-    init(
+    /// Injected credentials serve every environment (tests and previews).
+    convenience init(
         mode: RanchOSLaunchMode,
+        environment: RanchOSRuntimeEnvironment = .development,
         credentials: RanchOSPropertyCredentialAccess,
         transport: RanchOSPropertyTransport,
         startsAutomaticRefresh: Bool
     ) {
+        self.init(
+            mode: mode,
+            environment: environment,
+            credentialsFor: { _ in credentials },
+            transport: transport,
+            startsAutomaticRefresh: startsAutomaticRefresh)
+    }
+
+    private init(
+        mode: RanchOSLaunchMode,
+        environment: RanchOSRuntimeEnvironment,
+        credentialsFor: @escaping (RanchOSRuntimeEnvironment) -> RanchOSPropertyCredentialAccess,
+        transport: RanchOSPropertyTransport,
+        startsAutomaticRefresh: Bool
+    ) {
         self.mode = mode
-        self.credentials = credentials
+        self.environment = environment
+        self.credentialsFor = credentialsFor
+        self.credentials = credentialsFor(environment)
         self.transport = transport
         if mode == .offlineVerification {
             state = .unavailable(Self.offlineUnavailableMessage)
@@ -97,19 +121,51 @@ final class RanchOSPropertyLiveStore {
         }
     }
 
+    /// Switches DEV/Production. Each environment keeps its own key and endpoint.
+    func useEnvironment(_ environment: RanchOSRuntimeEnvironment) async {
+        guard mode != .offlineVerification else { return }
+        self.environment = environment
+        credentials = credentialsFor(environment)
+        assetsState = .idle
+        importLaunchCredentialIfPresent()
+        await refresh()
+    }
+
+    /// Finishes any launch-key import before the first read uses the Keychain.
+    func finishLaunchImport() async {
+        await launchImport?.value
+    }
+
+    private var unavailableConnectionMessage: String {
+        "The \(environment.title) Property connection is not available on this device."
+    }
+
+    private func failureMessage(_ error: Error) -> String {
+        (error as? PropertyError)?.message(for: environment) ?? error.localizedDescription
+    }
+
+    // Security.framework calls can block on a prompt or daemon round-trip and must
+    // never run on the main actor: a blocked main thread stops all app input.
+    private func readCredential() async -> String? {
+        await finishLaunchImport()
+        let access = credentials
+        return await Task.detached { access.readKeychain() }.value
+    }
+
     func refresh() async {
         guard mode != .offlineVerification else {
             state = .unavailable(Self.offlineUnavailableMessage)
             return
         }
-        guard let apiKey = credentials.readKeychain(), !apiKey.isEmpty else {
-            state = .unavailable("The DEV Property connection is not available on this device.")
+        let endpoint = environment.propertyBaseURL
+        guard let apiKey = await readCredential(), !apiKey.isEmpty else {
+            state = .unavailable(unavailableConnectionMessage)
             return
         }
 
         state = .loading
         do {
-            var request = URLRequest(url: Self.endpoint.appending(path: "tasks"))
+            var request = URLRequest(url: endpoint.appending(path: "tasks"))
             request.httpMethod = "GET"
             request.timeoutInterval = 45
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -125,7 +181,7 @@ final class RanchOSPropertyLiveStore {
 
             state = .ready(try RanchOSPropertyLiveDashboard.decode(from: data))
         } catch {
-            state = .unavailable(error.localizedDescription)
+            state = .unavailable(failureMessage(error))
         }
     }
 
@@ -153,8 +209,9 @@ final class RanchOSPropertyLiveStore {
             return
         }
         guard assetsState != .loading, !Task.isCancelled else { return }
-        guard let apiKey = credentials.readKeychain(), !apiKey.isEmpty else {
-            assetsState = .unavailable("The DEV Property connection is not available on this device.")
+        let endpoint = environment.propertyBaseURL
+        guard let apiKey = await readCredential(), !apiKey.isEmpty else {
+            assetsState = .unavailable(unavailableConnectionMessage)
             return
         }
         let previous = assetsState
@@ -166,7 +223,7 @@ final class RanchOSPropertyLiveStore {
             assetsState = .loading
         }
         do {
-            var request = URLRequest(url: Self.endpoint.appending(path: "v1/assets"))
+            var request = URLRequest(url: endpoint.appending(path: "v1/assets"))
             request.httpMethod = "GET"
             request.timeoutInterval = 45
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
@@ -181,26 +238,29 @@ final class RanchOSPropertyLiveStore {
                 if case .loading = assetsState { assetsState = previous }
                 return
             }
-            assetsState = .unavailable(error.localizedDescription)
+            assetsState = .unavailable(failureMessage(error))
         }
     }
 
+    /// Reads the launch key now; the Keychain write runs off the main actor.
     private func importLaunchCredentialIfPresent() {
         guard let credential = credentials.readEnvironment(), !credential.isEmpty else {
             return
         }
-        credentials.writeKeychain(credential)
+        let access = credentials
+        let previous = launchImport
+        launchImport = Task.detached {
+            await previous?.value
+            access.writeKeychain(credential)
+        }
     }
 }
 
-private let ranchOSPropertyKeychainService = "ai.openclaw.ranchos.dev.property"
-private let ranchOSPropertyKeychainAccount = "propertymanager-dev-api-key"
-
-private func ranchOSReadPropertyKeychain() -> String? {
+private func ranchOSReadPropertyKeychain(service: String, account: String) -> String? {
     let query: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: ranchOSPropertyKeychainService,
-        kSecAttrAccount as String: ranchOSPropertyKeychainAccount,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
         kSecReturnData as String: true,
         kSecMatchLimit as String: kSecMatchLimitOne,
     ]
@@ -212,12 +272,12 @@ private func ranchOSReadPropertyKeychain() -> String? {
     return String(data: data, encoding: .utf8)
 }
 
-private func ranchOSWritePropertyKeychain(_ credential: String) {
+private func ranchOSWritePropertyKeychain(_ credential: String, service: String, account: String) {
     let data = Data(credential.utf8)
     let identity: [String: Any] = [
         kSecClass as String: kSecClassGenericPassword,
-        kSecAttrService as String: ranchOSPropertyKeychainService,
-        kSecAttrAccount as String: ranchOSPropertyKeychainAccount,
+        kSecAttrService as String: service,
+        kSecAttrAccount as String: account,
     ]
     let attributes: [String: Any] = [
         kSecValueData as String: data,
@@ -235,13 +295,16 @@ enum PropertyError: LocalizedError {
     case invalidResponse
     case httpStatus(Int)
 
-    var errorDescription: String? {
+    func message(for environment: RanchOSRuntimeEnvironment) -> String {
+        let name = "PropertyManager \(environment.title)"
         switch self {
-        case .invalidResponse: "PropertyManager DEV returned an invalid response."
-        case .httpStatus(401), .httpStatus(403): "PropertyManager DEV did not authorize this device."
-        case .httpStatus(let code): "PropertyManager DEV is unavailable (HTTP \(code))."
+        case .invalidResponse: return "\(name) returned an invalid response."
+        case .httpStatus(401), .httpStatus(403): return "\(name) did not authorize this device."
+        case .httpStatus(let code): return "\(name) is unavailable (HTTP \(code))."
         }
     }
+
+    var errorDescription: String? { message(for: .development) }
 }
 
 struct RanchOSPropertyLiveDashboard: Equatable {
@@ -249,6 +312,30 @@ struct RanchOSPropertyLiveDashboard: Equatable {
 
     var activeTaskCount: Int { tasks.filter(\.isActive).count }
     var attentionCount: Int { tasks.filter { $0.status == .needsAttention }.count }
+    var dueTasks: [RanchOSPropertyLiveTask] { tasks.filter(\.isActive) }
+
+    var dueTaskCategoryFilters: [RanchOSPropertyDueTaskCategoryFilter] {
+        let names = Set(dueTasks.map(\.categoryName)).sorted()
+        return [.all] + names.map(RanchOSPropertyDueTaskCategoryFilter.category)
+    }
+
+    func dueTasks(matching filter: RanchOSPropertyDueTaskCategoryFilter) -> [RanchOSPropertyLiveTask] {
+        switch filter {
+        case .all:
+            dueTasks
+        case .category(let name):
+            dueTasks.filter { $0.categoryName == name }
+        }
+    }
+
+    func resolvedFilter(_ current: RanchOSPropertyDueTaskCategoryFilter) -> RanchOSPropertyDueTaskCategoryFilter {
+        switch current {
+        case .all:
+            .all
+        case .category:
+            dueTaskCategoryFilters.contains(current) ? current : .all
+        }
+    }
 
     static func decode(from data: Data) throws -> RanchOSPropertyLiveDashboard {
         let object = try JSONSerialization.jsonObject(with: data)
@@ -274,6 +361,7 @@ struct RanchOSPropertyLiveTask: Identifiable, Equatable {
     let id: String
     let title: String
     let area: String
+    let categoryName: String
     let nextDue: String?
     let isActive: Bool
     let priority: String?
@@ -300,6 +388,8 @@ struct RanchOSPropertyLiveTask: Identifiable, Equatable {
         self.id = id
         self.title = title
         self.area = (payload["area"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "Property"
+        let rawCategory = (payload["category_name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.categoryName = rawCategory.isEmpty ? Self.uncategorizedName : rawCategory
         self.nextDue = payload["next_due"] as? String
         self.isActive = payload["is_active"] as? Bool ?? true
         self.priority = payload["priority"] as? String
@@ -321,6 +411,8 @@ struct RanchOSPropertyLiveTask: Identifiable, Equatable {
         self.scheduleKind = payload["schedule_kind"] as? String
         self.kind = payload["kind"] as? String
     }
+
+    static let uncategorizedName = "Uncategorized"
 
     var isWorkRequest: Bool {
         let normalized = (kind ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -355,7 +447,7 @@ struct RanchOSPropertyLiveTask: Identifiable, Equatable {
 
     var detail: String {
         let due = nextDue.map { "Due \($0)" } ?? "No date scheduled"
-        return "\(area) · \(due)"
+        return "\(categoryName) · \(area) · \(due)"
     }
 
     private static func parseDate(_ value: String) -> Date? {
@@ -676,4 +768,23 @@ struct RanchOSPropertyLivePart: Equatable {
         notes = text("notes")
     }
     var hasDetails: Bool { [name, number, oemNumber, vendor, quantity, cost, buyURL, notes].contains { $0 != nil } }
+}
+
+enum RanchOSPropertyDueTaskCategoryFilter: Hashable, Sendable, Identifiable {
+    case all
+    case category(String)
+
+    var id: String {
+        switch self {
+        case .all: "all"
+        case .category(let name): "category:\(name)"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .all: "All categories"
+        case .category(let name): name
+        }
+    }
 }

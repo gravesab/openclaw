@@ -750,8 +750,8 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
         snapshots = raw["snapshots"]
         if (
             type(snapshots) is not dict
-            or list(snapshots) != ["009", "010", "011", "012", "013", "014", "015", "016", "017", "018"]
-            or raw["current_snapshot"] != "018"
+            or list(snapshots) != ["009", "010", "011", "012", "013", "014", "015", "016", "017", "018", "019"]
+            or raw["current_snapshot"] != "019"
         ):
             raise AuthorityConfigurationError("snapshot declarations are invalid")
         expected_versions = {
@@ -765,6 +765,10 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
             "016": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015", "016"),
             "017": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015", "016", "017"),
             "018": ("001", "002", "003", "004", "005", "006", "009", "010", "011", "012", "013", "014", "015", "016", "017", "018"),
+            "019": (
+                "001", "002", "003", "004", "005", "006", "009", "010", "011", "012",
+                "013", "014", "015", "016", "017", "018", "019",
+            ),
         }
         parsed_snapshots: dict[str, AuthoritySnapshot] = {}
         for terminal, expected in expected_versions.items():
@@ -798,9 +802,9 @@ def _parse_manifest(data: bytes) -> AuthorityManifest:
                 raise AuthorityConfigurationError("reserved migration entry is invalid")
             _safe_contract_text(entry["reason"], "reserved migration reason")
             reserved_versions.append(entry["version"])
-        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "019":
+        if reserved_versions != ["007", "008"] or raw["next_canonical_version"] != "020":
             raise AuthorityConfigurationError("reserved or next migration version is invalid")
-        return AuthorityManifest(parsed_snapshots, "018", ("007", "008"), "019")
+        return AuthorityManifest(parsed_snapshots, "019", ("007", "008"), "020")
     except AuthorityConfigurationError:
         raise
     except (BoundedInputError, MemoryError, RecursionError, TypeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:

@@ -32,6 +32,7 @@ struct VoiceMeterEntrySheet: View {
                 TextEditor(text: $transcript)
                     .frame(minHeight: 100)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.3)))
+                    .voiceInput($transcript)
 
                 Button {
                     Task { await toggleListening() }

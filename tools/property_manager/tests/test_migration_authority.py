@@ -41,8 +41,11 @@ APPROVED_HASHES = {
     "016_asset_host.sql": "b905e096e4ce2da8a86d751fba14de649e58d3de1531ff4757ec6628196c904e",
     "017_task_require_parent_asset.sql": "26b4d7bd70b9954b201078b0179b1846f487486404ec1f508303788cf79fddd2",
     "018_asset_is_pseudo.sql": "ef7b21de38fe920b7907279f434d8575cf908daa31e0fbafbc74566b5441de93",
+    "019_propertymanager_tenancy.sql": "38e7e962932492d58a12bfab3b7aefdc57c5b37754485df2bd4e97143404d50b",
 }
+# Pre-tenancy oracle (snapshot 018) and the current tenancy snapshot (019).
 APPROVED_CONTRACT_HASH = "9633cd1bb160f456edce456e929457c76728c66c329c0646f5224a995d0d3ebf"
+APPROVED_CONTRACT_HASH_019 = "5700d083b826719b5d3a9ed957fbb4b87e04cf64da25a3d1825a49ba0e96a218"
 APPROVED_EMPTY_SHA256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 APPROVED_RESOURCE_LIMITS = {
     "MAX_MANIFEST_BYTES": 2 * 1024 * 1024,
@@ -556,7 +559,7 @@ class ManifestFingerprintTests(AuthorityFixture):
             APPROVED_REAPPLICATION,
         )
         self.assertEqual(self.manifest.reserved_versions, ("007", "008"))
-        self.assertEqual(self.manifest.next_canonical_version, "019")
+        self.assertEqual(self.manifest.next_canonical_version, "020")
         self.assertNotIn("007", {spec.version for spec in self.manifest.canonical})
         self.assertNotIn("008", {spec.version for spec in self.manifest.canonical})
 
@@ -609,18 +612,23 @@ class ManifestFingerprintTests(AuthorityFixture):
 
     def test_manifest_has_independently_pinned_contract_and_migrations(self):
         raw = json.loads(MANIFEST_PATH.read_text(encoding="utf-8"))
-        current = raw["snapshots"]["018"]
+        current = raw["snapshots"]["019"]
+        self.assertEqual(raw["current_snapshot"], "019")
         encoded = json.dumps(current["schema_contract"], sort_keys=True, separators=(",", ":")).encode()
-        self.assertEqual(hashlib.sha256(encoded).hexdigest(), APPROVED_CONTRACT_HASH)
+        self.assertEqual(hashlib.sha256(encoded).hexdigest(), APPROVED_CONTRACT_HASH_019)
         self.assertEqual(
             {item["filename"]: item["sha256"] for item in current["canonical_migrations"]},
             APPROVED_HASHES,
         )
+        self.assertEqual(
+            {item["version"]: item["reapplication_permitted"] for item in current["canonical_migrations"]},
+            {**APPROVED_REAPPLICATION, "019": False},
+        )
         contract = current["schema_contract"]
         self.assertEqual(tuple(contract["tables"]), APPROVED_TABLES)
-        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 260)
-        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 106)
-        self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 56)
+        self.assertEqual(sum(len(item["columns"]) for item in contract["tables"].values()), 279)
+        self.assertEqual(sum(len(item["constraints"]) for item in contract["tables"].values()), 130)
+        self.assertEqual(sum(len(item["indexes"]) for item in contract["tables"].values()), 79)
         migration_created_indexes = {
             "maintenance_task_parts_task_id_idx", "maintenance_task_photos_task_id_idx",
             "assets_external_id_idx", "assets_qr_token_idx", "assets_name_lower_idx", "assets_host_asset_id_idx",
@@ -1764,7 +1772,11 @@ class IntegrationSafetyTests(unittest.TestCase):
             sys.path.insert(0, str(API_DIR))
             with tempfile.TemporaryDirectory(prefix="pm-import-") as temp, mock.patch.dict(
                 os.environ,
-                {"PROPERTYMANAGER_DB_ENV_FILE": str(Path(temp) / "missing.env"), "PROPERTYMANAGER_AUTH_DISABLED": "1"},
+                {
+                    "PROPERTYMANAGER_DB_ENV_FILE": str(Path(temp) / "missing.env"),
+                    "PROPERTYMANAGER_AUTH_DISABLED": "1",
+                    "ENVIRONMENT": "development",
+                },
                 clear=False,
             ), mock.patch.object(authority, "main", dangerous), mock.patch.object(
                 authority, "audit_canonical_migration_files", dangerous

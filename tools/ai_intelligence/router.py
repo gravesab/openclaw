@@ -7,7 +7,7 @@ a validated RoutingDecision. It does not invoke model providers.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, Sequence
+from typing import Callable, Protocol, Sequence
 
 from tools.ai_intelligence.database import (
     AIIntelligenceDatabase,
@@ -64,11 +64,20 @@ class RoutingDatabase(Protocol):
         ...
 
 
+RuntimeSelector = Callable[..., tuple[ModelAssignment, ...]]
+"""Reorder configured assignments for privacy tier and task.
+
+Receives (assignments, privacy_tier=..., task_type=...) and returns the
+eligible assignments with primary/fallback roles reassigned.
+"""
+
+
 @dataclass(frozen=True)
 class AIRouter:
     """Build validated runtime routing decisions."""
 
     database: RoutingDatabase
+    runtime_selector: RuntimeSelector | None = None
 
     def route(self, request: RoutingRequest) -> RoutingDecision:
         """Return the active routing decision for a component."""
@@ -111,7 +120,6 @@ class AIRouter:
                 ModelAssignment.from_database_record(record)
                 for record in records
             )
-            chain = FallbackChain.from_assignments(assignments)
         except RoutingModelError as exc:
             raise RoutingConfigurationError(
                 f"Invalid routing configuration for "
@@ -127,6 +135,27 @@ class AIRouter:
             request=request,
             component=component,
         )
+
+        if self.runtime_selector is not None:
+            try:
+                assignments = self.runtime_selector(
+                    assignments,
+                    privacy_tier=PrivacyTier(component.privacy_tier),
+                    task_type=component.task_type,
+                )
+            except RoutingModelError as exc:
+                raise RoutingConfigurationError(
+                    f"No eligible runtime for "
+                    f"{request.component_id}: {exc}"
+                ) from exc
+
+        try:
+            chain = FallbackChain.from_assignments(assignments)
+        except RoutingModelError as exc:
+            raise RoutingConfigurationError(
+                f"Invalid routing configuration for "
+                f"{request.component_id}: {exc}"
+            ) from exc
 
         return RoutingDecision(
             request=request,
@@ -197,12 +226,24 @@ class AIRouter:
 
 
 def build_router_from_environment() -> AIRouter:
-    """Create the runtime router from database environment variables."""
+    """Create the runtime router from database environment variables.
+
+    Environment-built routers always apply runtime selection, so live
+    decisions order runtimes local-first (Apple, llama.cpp, MLX, Ollama)
+    and keep cloud for large problems whose privacy tier allows it.
+    Availability-aware Apple filtering stays available through explicit
+    AIRouter construction with an AppleLayerHook; the engine already
+    skips unavailable providers at execution time.
+    """
 
     from tools.ai_intelligence.database import DatabaseConfig
+    from tools.ai_intelligence.runtime_selection import (
+        select_runtime_assignments,
+    )
 
     return AIRouter(
         database=AIIntelligenceDatabase(
             DatabaseConfig.from_env()
-        )
+        ),
+        runtime_selector=select_runtime_assignments,
     )

@@ -138,6 +138,15 @@ def test_dual_member_can_explicitly_select_either_authorized_tenant(selected_ten
         (Role.VIEWER, Capability.FINANCE_SOURCE_WRITE, False),
         (Role.VIEWER, Capability.FINANCE_INTERPRETATION_WRITE, False),
         (Role.VIEWER, Capability.FINANCE_INTERPRETATION_CORRECT, False),
+        (Role.OWNER, Capability.PROPERTY_READ, True),
+        (Role.OWNER, Capability.PROPERTY_WRITE, True),
+        (Role.OWNER, Capability.PROPERTY_ADMIN, True),
+        (Role.MANAGER, Capability.PROPERTY_READ, True),
+        (Role.MANAGER, Capability.PROPERTY_WRITE, True),
+        (Role.MANAGER, Capability.PROPERTY_ADMIN, False),
+        (Role.VIEWER, Capability.PROPERTY_READ, True),
+        (Role.VIEWER, Capability.PROPERTY_WRITE, False),
+        (Role.VIEWER, Capability.PROPERTY_ADMIN, False),
     ],
 )
 def test_livestock_write_capability_matrix_is_enforced_on_tenant_context(role, capability, allowed):
@@ -172,6 +181,9 @@ def test_owner_capability_set_is_explicit_and_matches_approved_matrix():
             Capability.FINANCE_SOURCE_WRITE,
             Capability.FINANCE_INTERPRETATION_WRITE,
             Capability.FINANCE_INTERPRETATION_CORRECT,
+            Capability.PROPERTY_READ,
+            Capability.PROPERTY_WRITE,
+            Capability.PROPERTY_ADMIN,
         }
     )
 

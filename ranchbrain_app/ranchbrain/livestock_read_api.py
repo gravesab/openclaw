@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Literal, Mapping, Protocol, assert_never
+from typing import Literal, Mapping, Protocol, Sequence, assert_never
 
 from ranchbrain.tenancy import (
     Capability,
@@ -489,6 +489,76 @@ def build_herd_dashboard(
     return HubLivestockDashboardV1(ranch_name, len(animals), summaries, DataOrigin.LIVE)
 
 
+def build_hub_dashboard_from_live_records(
+    ranch_name: str,
+    animals: Sequence[Mapping[str, object]],
+    herds: Sequence[Mapping[str, object]] | None = None,
+) -> HubLivestockDashboardV1:
+    """Herd cards for RanchOS TV/iPhone, prepared from Livestock DEV records.
+
+    Apple clients do not summarize these rows and do not open Postgres. Care due
+    is not invented; missing identifier, care, or feed records are review only.
+    """
+
+    current_animals = [animal for animal in animals if _is_open_animal(animal)]
+    open_herds = [herd for herd in (herds or ()) if _is_open_herd(herd)]
+    missing_identifier = sum(1 for animal in current_animals if not _has_active_identifier(animal))
+    missing_care = sum(1 for animal in current_animals if not _current_rows(animal.get("care_events")))
+    missing_feed = sum(1 for animal in current_animals if not _current_rows(animal.get("consumptions")))
+    herd_word = "herd/group" if len(open_herds) == 1 else "herds/groups"
+    records_parts: list[str] = []
+    if missing_identifier:
+        records_parts.append(f"{missing_identifier} animals have no active identifier")
+    if missing_care:
+        records_parts.append(f"{missing_care} animals have no care record")
+    if missing_feed:
+        records_parts.append(f"{missing_feed} animals have no feed record")
+    if records_parts:
+        records_detail = "; ".join(records_parts)
+        records_status = HubSummaryStatus.REVIEW
+    else:
+        records_detail = "Every current animal has an identifier, care record, and feed record"
+        records_status = HubSummaryStatus.CURRENT
+    summaries = (
+        HubLivestockSummaryCardV1(
+            "herd-count",
+            "Herd",
+            f"{len(current_animals)} current animals in {len(open_herds)} open {herd_word}",
+            HubSummaryStatus.CURRENT,
+        ),
+        HubLivestockSummaryCardV1(
+            "fact-freshness",
+            "Fact freshness",
+            "Current animal facts are current",
+            HubSummaryStatus.CURRENT,
+        ),
+        HubLivestockSummaryCardV1(
+            "records-review",
+            "Records review",
+            records_detail,
+            records_status,
+        ),
+    )
+    return HubLivestockDashboardV1(ranch_name, len(current_animals), summaries, DataOrigin.LIVE)
+
+
+def herd_summary_payload(dashboard: HubLivestockDashboardV1) -> dict[str, object]:
+    """Loopback GET /herd body consumed by ``readDashboard()``."""
+
+    require_origin_label(dashboard.origin, DataOrigin.LIVE)
+    return {
+        "api_version": API_VERSION,
+        "operation": "herd_summary",
+        "origin": DataOrigin.LIVE.value,
+        "body": {
+            "ranch_name": dashboard.ranch_name,
+            "herd_count": dashboard.herd_count,
+            "summaries": [_summary_body(card) for card in dashboard.summaries],
+            "hub": _hub_envelope(dashboard),
+        },
+    }
+
+
 def hub_read_dashboard_projection(dashboard: HubLivestockDashboardV1) -> dict[str, object]:
     """CamelCase payload a future ``readDashboard()`` decoder can use without changing Swift."""
 
@@ -609,6 +679,35 @@ def _records_need_review(animals: tuple[LivestockAnimalReadFactV1, ...]) -> bool
         or animal.identifier_kind is None
         for animal in animals
     )
+
+
+def _is_open_animal(animal: Mapping[str, object]) -> bool:
+    return not animal.get("retirement_reason") and not animal.get("retired_at")
+
+
+def _is_open_herd(herd: Mapping[str, object]) -> bool:
+    return not herd.get("retired_at")
+
+
+def _current_rows(rows: object) -> list[Mapping[str, object]]:
+    if not isinstance(rows, list):
+        return []
+    current: list[Mapping[str, object]] = []
+    for row in rows:
+        if not isinstance(row, Mapping) or row.get("current") is False:
+            continue
+        current.append(row)
+    return current
+
+
+def _has_active_identifier(animal: Mapping[str, object]) -> bool:
+    for identifier in _current_rows(animal.get("identifiers")):
+        if identifier.get("retirement_reason") or identifier.get("retired_at"):
+            continue
+        value = identifier.get("value")
+        if isinstance(value, str) and value.strip():
+            return True
+    return False
 
 
 def _match_route(method: str, path: str) -> tuple[_ReadOperation, str | None]:

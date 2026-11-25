@@ -122,7 +122,7 @@ enum RanchOSFinanceCSV {
         }
         if let mapping = genericMapping(headers: headers) {
             let rows = joinContinuations(body)
-            return parseGeneric(mapping: mapping, rows: rows, sha: sha)
+            return parseGeneric(mapping: mapping, rows: rows, sha: sha, now: now)
         }
         return ParsedFile(
             kind: .unrecognized, sha256Hex: sha, rowCount: 0, charges: [],
@@ -356,7 +356,9 @@ enum RanchOSFinanceCSV {
 
     // MARK: - Generic rows
 
-    static func parseGeneric(mapping: GenericMapping, rows: [[String]], sha: String) -> ParsedFile {
+    static func parseGeneric(mapping: GenericMapping, rows: [[String]], sha: String, now: Date) -> ParsedFile {
+        // Same window as Apple Card rows: a future row is neither a charge nor a loan balance.
+        let limit = Calendar.current.date(byAdding: .day, value: 2, to: startOfDay(now)) ?? now
         var charges: [Charge] = []
         var errors: [ParseError] = []
         var seenCanonical: Set<String> = []
@@ -379,6 +381,10 @@ enum RanchOSFinanceCSV {
             }
             guard let date = parseDate(dateText) else {
                 errors.append(ParseError(row: row, code: codeInvalid, message: "transaction date is invalid"))
+                continue
+            }
+            if date > limit {
+                errors.append(ParseError(row: row, code: codeFutureDate, message: "transaction date is in the future"))
                 continue
             }
             dated.append((

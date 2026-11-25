@@ -73,6 +73,31 @@ final class RanchOSFinanceLoanBalanceTests: XCTestCase {
         XCTAssertNil(parsed.principal)
     }
 
+    func testFutureBankRowIsRejected() throws {
+        let now = try XCTUnwrap(RanchOSFinanceCSV.parseDate("10/01/2026"))
+        let csv = """
+        Posted Date,Memo,Amount
+        09/30/2026,COFFEE,-4.50
+        12/31/2026,LATER,-9.00
+        """
+        let parsed = RanchOSFinanceCSV.parse(bytes: Data(csv.utf8), now: now)
+        XCTAssertEqual(parsed.charges.map(\.merchantText), ["COFFEE"])
+        XCTAssertEqual(parsed.errors.map(\.code), [RanchOSFinanceCSV.codeFutureDate])
+        XCTAssertEqual(parsed.errors.first?.row, 2)
+    }
+
+    func testFuturePayoffIsNotTheBalance() throws {
+        let now = try XCTUnwrap(RanchOSFinanceCSV.parseDate("10/01/2026"))
+        let csv = """
+        Posted Date,Memo,Amount,Payoff Balance
+        09/30/2026,PAYMENT,-500.00,12000.00
+        12/31/2026,PAYMENT,-500.00,11000.00
+        """
+        let parsed = RanchOSFinanceCSV.parse(bytes: Data(csv.utf8), now: now)
+        XCTAssertEqual(parsed.principal?.amountText, "12000.00")
+        XCTAssertEqual(parsed.principal?.dateText, "09/30/2026")
+    }
+
     func testPrincipalPaymentHeadersAreNotTheBalance() {
         for header in ["Principal Payment", "Principal Paid"] {
             let csv = "Posted Date,Memo,Amount,\(header)\n09/30/2026,PAYMENT,-500.00,400.00\n"

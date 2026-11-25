@@ -54,7 +54,10 @@ enum AppEnvironment {
     }
 
     static var defaultAPIBaseURL: String {
-        isDevelopment ? "http://100.85.188.74:5062" : "http://100.85.36.72:5062"
+        // DEV API binds 127.0.0.1:5062 on SSH-Dev; Mac reaches it via the
+        // persistent ssh relay *:5062 (ai.openclaw.propertymanager-dev-5062-relay).
+        // Tailscale 100.85.188.74:5062 is connection-refused by design.
+        isDevelopment ? "http://127.0.0.1:5062" : "http://100.85.36.72:5062"
     }
 
     /// Dashboard that serves the shared manual PDF library.

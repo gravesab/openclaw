@@ -491,10 +491,12 @@ def register_work_request_routes(app: Flask) -> None:
             "SELECT a.id, r.id, '', a.storage_path, a.content_type, a.byte_size, a.sha256, now() "
             "FROM created_request r JOIN locked_attachments a ON true JOIN attached_operations u ON u.id = a.id"
             ")",
-            "SELECT row_to_json(created_request) FROM created_request",
         ])
         try:
-            created = pm_db.execute_top_level_one_json("WITH " + ",\n".join(statements), tuple(params))
+            created = pm_db.execute_top_level_one_json(
+                "WITH " + ",\n".join(statements) + "\nSELECT row_to_json(created_request) FROM created_request",
+                tuple(params),
+            )
         except Exception:
             existing = pm_db.execute_one_json(
                 """SELECT id, area, item, task_description, asset_id, intake_state, submitted_by, submitted_at,

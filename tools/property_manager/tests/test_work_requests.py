@@ -77,8 +77,8 @@ class WorkRequestTests(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
-        self.assertEqual(body["schema_version"], "017")
-        self.assertEqual(body["schema_contract_status"], "migration_017_applied")
+        self.assertEqual(body["schema_version"], "018")
+        self.assertEqual(body["schema_contract_status"], "migration_018_applied")
         self.assertNotIn("attachments_root", body)
         self.assertNotIn("storage_path", body)
 
@@ -107,7 +107,7 @@ class WorkRequestTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         body = response.get_json()
         self.assertIsNone(body["schema_version"])
-        self.assertEqual(body["schema_contract_status"], "migration_017_not_verified")
+        self.assertEqual(body["schema_contract_status"], "migration_018_not_verified")
 
     def test_health_marker_is_read_only_and_parameterized(self):
         complete_objects = {
@@ -130,7 +130,7 @@ class WorkRequestTests(unittest.TestCase):
         marker_sql, marker_params = query.call_args_list[1].args
         self.assertIn("SELECT EXISTS", marker_sql)
         self.assertNotIn("INSERT", marker_sql)
-        self.assertEqual(marker_params, ("017",))
+        self.assertEqual(marker_params, ("018",))
 
     def test_submission_requires_authentication_before_validation(self):
         response = self.client.post("/v1/work-requests", json=self.payload(), headers={"Idempotency-Key": "x"})
@@ -145,7 +145,11 @@ class WorkRequestTests(unittest.TestCase):
         execute.assert_not_called()
 
     def test_submission_is_one_atomic_write_with_draft_provenance(self):
-        with mock.patch.object(self.api.pm_db, "execute_one_json", side_effect=[None, stored_request()]) as query, \
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[None, {"is_pseudo": False}, stored_request()],
+        ) as query, \
              mock.patch.object(self.api.pm_db, "execute_top_level_one_json", return_value={"id": "created"}) as mutation, \
              mock.patch.object(self.api.pm_db, "execute") as execute:
             response = self.client.post("/v1/work-requests", json=self.payload(), headers=self.headers())
@@ -155,6 +159,8 @@ class WorkRequestTests(unittest.TestCase):
         for token in ("created_request", "intake_event", "draft_material_0", "'request_draft'"):
             self.assertIn(token, sql)
         self.assertIn("SELECT row_to_json(created_request)", sql)
+        self.assertIn("\nSELECT row_to_json(created_request)", sql)
+        self.assertNotIn("),\nSELECT", sql)
         self.assertNotIn("1 / 0", sql)
         self.assertNotIn("maintenance_completions", sql)
         params = mutation.call_args.args[1]
@@ -192,26 +198,31 @@ class WorkRequestTests(unittest.TestCase):
                 headers=self.headers(),
             )
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(query.call_count, 1)
+        self.assertEqual(query.call_count, 2)
+        self.assertIn("intake_idempotency_key", query.call_args_list[0].args[0])
+        self.assertIn("is_pseudo", query.call_args_list[1].args[0])
         execute.assert_not_called()
 
     def test_attachment_count_and_malformed_ids_are_rejected_before_database_use(self):
         too_many = [f"00000000-0000-0000-0000-{index:012d}" for index in range(1, 7)]
-        for payload, field in (
-            (self.payload(attachment_ids=too_many), "attachment_ids"),
-            (self.payload(attachment_ids=["not-a-uuid"]), "attachment_ids"),
-            (self.payload(asset_id="not-a-uuid"), "asset_id"),
-        ):
-            with self.subTest(field=field), \
+        cases = (
+            ("too-many", self.payload(attachment_ids=too_many), "attachment_ids", 2),
+            ("malformed-attachment", self.payload(attachment_ids=["not-a-uuid"]), "attachment_ids", 2),
+            ("malformed-asset", self.payload(asset_id="not-a-uuid"), "asset_id", 1),
+        )
+        for name, payload, field, reads in cases:
+            with self.subTest(name=name), \
                  mock.patch.object(self.api.pm_db, "execute_one_json", return_value=None) as query, \
                  mock.patch.object(self.api.pm_db, "execute_top_level_one_json") as mutation:
                 response = self.client.post(
-                    "/v1/work-requests", json=payload, headers=self.headers(idem=f"invalid-{field}")
+                    "/v1/work-requests", json=payload, headers=self.headers(idem=f"invalid-{name}")
                 )
-            self.assertEqual(response.status_code, 400)
-            self.assertEqual(response.get_json().get("field"), field)
-            self.assertEqual(query.call_count, 1)
-            mutation.assert_not_called()
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.get_json().get("field"), field)
+                self.assertEqual(query.call_count, reads)
+                if reads == 2:
+                    self.assertIn("is_pseudo", query.call_args_list[1].args[0])
+                mutation.assert_not_called()
 
     def test_attachment_allocation_limit_is_claimed_atomically(self):
         with mock.patch.object(self.api.pm_db, "execute_one_json", side_effect=[None, None]), \
@@ -417,7 +428,8 @@ class WorkRequestTests(unittest.TestCase):
                 "id": "asset", "current_value": "0", "latest_reading_at": None, "meter_type": "none",
                 "unit": "", "meter_epoch": 1, "row_version": 1, "meter_activated_at": None,
             })
-        self.assertIn("kind <> 'Work Request' AND intake_state IS NULL", query.call_args.args[0])
+        sql = " ".join(query.call_args.args[0].split())
+        self.assertIn("kind <> 'Work Request' AND intake_state IS NULL", sql)
 
         if str(REPO_ROOT) not in sys.path:
             sys.path.insert(0, str(REPO_ROOT))
@@ -483,11 +495,22 @@ class WorkRequestTests(unittest.TestCase):
         with mock.patch.object(
             self.api.pm_db,
             "execute_one_json",
-            side_effect=[{"last_done": "2026-01-01T00:00:00+00:00", "next_due": "2026-02-01T00:00:00+00:00"}, None],
+            side_effect=[
+                {"is_pseudo": False},
+                {"name": "North barn"},
+                {"last_done": "2026-01-01T00:00:00+00:00", "next_due": "2026-02-01T00:00:00+00:00"},
+                None,
+            ],
         ), mock.patch.object(self.api.pm_db, "execute", return_value=0) as execute:
             response = self.client.post(
                 "/tasks",
-                json={"id": task_id, "kind": "Scheduled", "area": "North barn", "item": "Inspect fence"},
+                json={
+                    "id": task_id,
+                    "kind": "Scheduled",
+                    "area": "North barn",
+                    "item": "Inspect fence",
+                    "asset_id": "00000000-0000-0000-0000-000000000030",
+                },
                 headers=self.headers(),
             )
         self.assertEqual(response.status_code, 409)
@@ -500,7 +523,11 @@ class WorkRequestTests(unittest.TestCase):
     def test_forged_review_header_never_becomes_triage_or_conversion_actor(self):
         asset_id = "00000000-0000-0000-0000-000000000030"
         triaged = stored_request(intake_state="triaged", asset_id=asset_id, category_name="Property", priority="High")
-        with mock.patch.object(self.api.pm_db, "execute_one_json", side_effect=[stored_request(), triaged]), \
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[stored_request(), {"is_pseudo": False}, triaged],
+        ), \
              mock.patch.object(self.api.pm_db, "execute_top_level_one_json", return_value={"id": "r"}) as mutation:
             response = self.client.post("/v1/work-requests/r/triage", json={"area": "North barn", "asset_id": asset_id,
                                         "category_name": "Property", "priority": "High", "reason": "Verified"},
@@ -525,7 +552,17 @@ class WorkRequestTests(unittest.TestCase):
     def test_concurrent_triage_claim_creates_one_state_event(self):
         triaged = stored_request(intake_state="triaged")
         asset_id = "00000000-0000-0000-0000-000000000030"
-        with mock.patch.object(self.api.pm_db, "execute_one_json", side_effect=[stored_request(), triaged, stored_request()]), \
+        with mock.patch.object(
+            self.api.pm_db,
+            "execute_one_json",
+            side_effect=[
+                stored_request(),
+                {"is_pseudo": False},
+                triaged,
+                stored_request(),
+                {"is_pseudo": False},
+            ],
+        ), \
              mock.patch.object(self.api.pm_db, "execute_top_level_one_json", side_effect=[{"id": "r"}, None]) as mutation:
             first = self.client.post("/v1/work-requests/r/triage", json={"area": "North barn", "asset_id": asset_id,
                                      "category_name": "Property", "priority": "High", "reason": "Verified"},

@@ -271,6 +271,16 @@ targets:
       - path: HubSources/Jarvis/RanchVADEVQuery.swift
       - path: HubSources/Jarvis/RanchVAWeather.swift
       - path: HubSources/Jarvis/VoiceInput.swift
+      - path: HubSources/RanchOSFinanceCSV.swift
+      - path: HubSources/RanchOSFinanceStore.swift
+      - path: HubSources/RanchOSFinanceCategorizer.swift
+      - path: HubSources/RanchOSFinanceView.swift
+      - path: HubSources/RanchOSFinanceCost.swift
+      - path: HubSources/RanchOSFinanceCostView.swift
+      - path: HubSources/RanchOSFinanceReport.swift
+      - path: HubSources/RanchOSFinanceReportView.swift
+      - path: HubSources/RanchOSFinanceEntry.swift
+      - path: HubSources/RanchOSFinanceStatementWatch.swift
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.ranchos.hub.dev.tests

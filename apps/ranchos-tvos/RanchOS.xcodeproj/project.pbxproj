@@ -11,6 +11,8 @@
 		01F6B3950B372786480C9AA7 /* RanchVADEVQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402E268F0E0033791191C654 /* RanchVADEVQuery.swift */; };
 		02A7DE82849C359EA47671C6 /* RanchVAAssetGraphTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 59F729E99881C1B5C531D476 /* RanchVAAssetGraphTests.swift */; };
 		04A13C24328A7A5F8126E1FD /* RanchPeopleOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1C120CCDE086A6F84DADA3BA /* RanchPeopleOS-Info.plist */; };
+		0552E8767A62E4C3851ED3D5 /* RanchOSFinanceCSV.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB9EAF977C61BC9BAA4D5A4 /* RanchOSFinanceCSV.swift */; };
+		068EF1F23CDF692E7F1B1293 /* RanchOSFinanceReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B8A9136A6169C711EDC465 /* RanchOSFinanceReportView.swift */; };
 		087367DA585A8B4722940C7A /* DataIsolationVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0142BE0205891E514977F19B /* DataIsolationVerifier.swift */; };
 		0B4422A6A9E8E84CCCC89635 /* RanchOSJarvisLivestock.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2962AD6B9F4D3AC54EB892FF /* RanchOSJarvisLivestock.swift */; };
 		0B6CAAC6A5D932783108710F /* RanchOSLivestockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF5F2E1A92B231CAA8FBBFC /* RanchOSLivestockStore.swift */; };
@@ -24,6 +26,7 @@
 		1698AE32912119E8C95119AB /* RanchSaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F92C20E69DA47B25043E260 /* RanchSaveView.swift */; };
 		199C61B5FA2E765569FA51FA /* RanchOSPeopleClientTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9804E8E7FABF639FA278256B /* RanchOSPeopleClientTests.swift */; };
 		1E2B2EF5981FD925233B9006 /* RanchPeopleOSAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 879F16470DEA5D158E6B0FA0 /* RanchPeopleOSAssets.xcassets */; };
+		1E8446E228DC8CE4EE169846 /* RanchOSFinanceEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3003EA886A27D564871AA1C /* RanchOSFinanceEntry.swift */; };
 		214F84FCC1AD061B3662107D /* RanchOSJarvisStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B9CDBA01B947F2BDBB096ED7 /* RanchOSJarvisStore.swift */; };
 		215C01A218F7309D37E74CB1 /* RanchOSRuntimeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84773B0A9E3F7BDEC09BF607 /* RanchOSRuntimeEnvironment.swift */; };
 		2255A6A92EE782D2BAAE3D91 /* RanchOSForecastStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BF347F1BB5DD467D837961C /* RanchOSForecastStore.swift */; };
@@ -34,13 +37,19 @@
 		26F886BA855795AA9A236346 /* RanchVAWeatherTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25F96BB70E3F765675708CAA /* RanchVAWeatherTests.swift */; };
 		2729D7D47C0507C4724862B4 /* RanchOSPeopleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCDF1F05E44B8DC6E5AD44B /* RanchOSPeopleStore.swift */; };
 		2852F2D28EF91E72439C652B /* RanchPeopleOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3AB6BD935FC4CB433FD534 /* RanchPeopleOSApp.swift */; };
+		2C3D86094C929009F9E42FC5 /* RanchOSFinanceLoanBalanceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B31D20BD1A9C4592DBC2DEB4 /* RanchOSFinanceLoanBalanceTests.swift */; };
+		2C65E53089395036F092C89B /* RanchOSFinanceCostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1547459DCEE58595B0A3D6D /* RanchOSFinanceCostView.swift */; };
 		2D49929CC65EC53BB97D0F8B /* RanchOSPropertyDueTaskCategoryPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB00C5BDA9CEC0DE67C61C80 /* RanchOSPropertyDueTaskCategoryPicker.swift */; };
+		2D77A498B9F69F750008F196 /* RanchOSFinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CAF4956A3CCA014E019216 /* RanchOSFinanceView.swift */; };
 		2EABE5443CA7F12354D12DC9 /* RanchPeopleOSProd-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = EEC24ED96C4EA4623F7C3085 /* RanchPeopleOSProd-Info.plist */; };
 		2F5C0B89EE1128E13A14F7A4 /* RanchOSLivestockStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5DF5F2E1A92B231CAA8FBBFC /* RanchOSLivestockStore.swift */; };
 		2F77DC137208C1748A31D250 /* RanchOSMac-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C84C41D7E31B417C8395EF48 /* RanchOSMac-Info.plist */; };
+		306460C8AB2B2A1F69941E8F /* RanchOSFinanceCost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45B9E255E0AD692B20722102 /* RanchOSFinanceCost.swift */; };
 		33B4743560336C4616C3BC3E /* RanchOSJarvisSessionProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D986C8C6FB0A5B62858A430 /* RanchOSJarvisSessionProvider.swift */; };
 		378C82C36B94615DB6B5FB2D /* RanchOSFinanceImportResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F46AED77EEB8366BA0AA9A7 /* RanchOSFinanceImportResult.swift */; };
 		37B2FB76EC4C2819D2969DBA /* RanchOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */; };
+		37BD36805EF8AB0017E030C7 /* RanchOSFinanceCategorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A406FEC6CD35B245385A73C2 /* RanchOSFinanceCategorizer.swift */; };
+		39584908E5384DBCAEA959C8 /* RanchOSFinanceReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B8A9136A6169C711EDC465 /* RanchOSFinanceReportView.swift */; };
 		3B5AA78E6FE421DFA8C9ECB6 /* DataIsolationVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0142BE0205891E514977F19B /* DataIsolationVerifier.swift */; };
 		3B728F49A30FE30A559943EB /* RanchOSFinanceImportResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6D958D1D62A4E5DEACD23F /* RanchOSFinanceImportResultView.swift */; };
 		3C4264FFF4E111C2A08BECB1 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
@@ -65,10 +74,13 @@
 		4B54B580B6F189F70F61473E /* RanchOSLivestockConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */; };
 		4C0974AC205C0DDADD391729 /* RanchOSForecastStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BF347F1BB5DD467D837961C /* RanchOSForecastStore.swift */; };
 		4C48FB828E29D734168B2364 /* FixtureDetailBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */; };
+		4CD09A270C13FBEFF535BF44 /* RanchOSFinanceCategorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A406FEC6CD35B245385A73C2 /* RanchOSFinanceCategorizer.swift */; };
 		4EF439A7DC80B927321B61C9 /* RanchOSJarvisTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CD1F48C6AF0878CB0BCA846A /* RanchOSJarvisTests.swift */; };
 		4F3D2CA55D7EE997530AE0AB /* RanchOSPeopleDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A3997333558E1B6A507135 /* RanchOSPeopleDirectory.swift */; };
 		5029F0FA723EED3FBF4A36D6 /* RanchVAAssetGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */; };
+		5177F693DA972978C713D40D /* RanchOSFinanceReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B8A9136A6169C711EDC465 /* RanchOSFinanceReportView.swift */; };
 		517EC06CF4DBA324AB942CA4 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
+		51AD625090DBBB9A7824C685 /* RanchOSFinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4976BA277D6CC9BE9EDCAF /* RanchOSFinanceStore.swift */; };
 		51E31BAA0B7652C85040680C /* RanchSaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F92C20E69DA47B25043E260 /* RanchSaveView.swift */; };
 		530C33FFC31CBB8D9A6F6441 /* RanchPeopleOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1C120CCDE086A6F84DADA3BA /* RanchPeopleOS-Info.plist */; };
 		53B5820CF13D08C27E6866BC /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
@@ -77,17 +89,26 @@
 		56A52414493ABE3645D78A07 /* RanchOSRuntimeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84773B0A9E3F7BDEC09BF607 /* RanchOSRuntimeEnvironment.swift */; };
 		57C20A08EEF094408DC60703 /* RanchVADEVQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402E268F0E0033791191C654 /* RanchVADEVQuery.swift */; };
 		58B7E0FDE1127934536490DE /* RanchVADEVQueryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E551E91162E7243C1548AA07 /* RanchVADEVQueryTests.swift */; };
+		59BEC48E0384D9DB32DB3515 /* RanchOSFinanceStatementWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733E3319BDEBD15F487B97F7 /* RanchOSFinanceStatementWatch.swift */; };
 		5B02AAEECC4C6332FDC94B30 /* RanchOSPeopleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCDF1F05E44B8DC6E5AD44B /* RanchOSPeopleStore.swift */; };
+		5B08986A5869B4801AF44523 /* RanchOSFinanceCostTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82A491F327912A78A316A3AE /* RanchOSFinanceCostTests.swift */; };
 		5B11DAE14A7B9B8F4C62C0B6 /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
+		5BCA3325CE373DC282240216 /* RanchOSFinanceEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3003EA886A27D564871AA1C /* RanchOSFinanceEntry.swift */; };
+		5C12CF4A6F124CF42FDF5EFF /* RanchOSFinanceCategorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A406FEC6CD35B245385A73C2 /* RanchOSFinanceCategorizer.swift */; };
 		5CA09C188841F4AB4B1BB4DC /* RanchOSForecastStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BF347F1BB5DD467D837961C /* RanchOSForecastStore.swift */; };
 		5DC2F10A00BBDF08BB0884B6 /* RanchOSLivestockConnectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20B13B702C280E25102FA85 /* RanchOSLivestockConnectionTests.swift */; };
+		5DFDB79337141D72066275B0 /* RanchOSFinanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DFA276D6FFA4AF909A85D5 /* RanchOSFinanceReport.swift */; };
 		5E49256CA0A994D9E07CE57E /* RanchOSLivestockBrowserModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */; };
+		5EF1C52FFE2B06B3D54F0E06 /* RanchOSFinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CAF4956A3CCA014E019216 /* RanchOSFinanceView.swift */; };
 		6100BD294ACE07247478E096 /* RanchPeopleOSAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 879F16470DEA5D158E6B0FA0 /* RanchPeopleOSAssets.xcassets */; };
 		614731D418DADEB29A3BB13D /* RanchOSDevIdentityBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF3310061AD730EE6DC7FB5 /* RanchOSDevIdentityBadge.swift */; };
 		616DD5B346FB9D0476E3086E /* RanchVAAssetGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */; };
 		618564DE5DE8C8842183C933 /* RanchOSiOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */; };
+		631C631679DA7765FB4C89CE /* RanchOSFinanceCSV.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB9EAF977C61BC9BAA4D5A4 /* RanchOSFinanceCSV.swift */; };
+		64238914A78D5416767C1C13 /* RanchOSFinanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DFA276D6FFA4AF909A85D5 /* RanchOSFinanceReport.swift */; };
 		6486FF9FD91B789D5F2AC3A4 /* RanchOSPeopleDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A3997333558E1B6A507135 /* RanchOSPeopleDirectory.swift */; };
 		66CEEE588A1E147372575423 /* LogitechCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */; };
+		67316394079AEF5224C986E9 /* RanchOSFinanceStatementWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733E3319BDEBD15F487B97F7 /* RanchOSFinanceStatementWatch.swift */; };
 		67920FB205E08F09F89BAC60 /* RanchOSRuntimeEnvironmentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F0DF6441E7CF5C295B1A1112 /* RanchOSRuntimeEnvironmentTests.swift */; };
 		67B6CACAF25F9D74EE550C78 /* RanchSaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F92C20E69DA47B25043E260 /* RanchSaveView.swift */; };
 		697F5EDED8E4DC8BE31F4545 /* RanchPeopleOSAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 879F16470DEA5D158E6B0FA0 /* RanchPeopleOSAssets.xcassets */; };
@@ -95,9 +116,11 @@
 		6E9CEF09CB648E6D0BCB4A41 /* RanchOSLivestockConnection.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */; };
 		6EE77312CE3C24F56F03D3F1 /* RanchVADEVQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402E268F0E0033791191C654 /* RanchVADEVQuery.swift */; };
 		6FA76541BD209C8FE7602891 /* RanchVAAssetGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B4314CD7041D120B94607E2 /* RanchVAAssetGraph.swift */; };
+		706AFEC795AAADEC44F9D2AB /* RanchOSFinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CAF4956A3CCA014E019216 /* RanchOSFinanceView.swift */; };
 		70EDAAC167A0DD8CC1D641A6 /* RanchOSPeopleDirectoryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E49DB489523359A9ADD18A16 /* RanchOSPeopleDirectoryTests.swift */; };
 		72653610B4D37B03A33090F6 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
 		73B900C8C3E8840EC43C4DBE /* RanchVADEVWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A800F8592481015682150AE /* RanchVADEVWorkspace.swift */; };
+		752BF11DEECF83BFAE20D12F /* RanchOSFinanceReportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34662045481432DF094F19DD /* RanchOSFinanceReportTests.swift */; };
 		768EDEF0BC5439F343613E0D /* LogitechCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */; };
 		76CA03ADA0845A503440D341 /* RanchOSTV-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 4E1EAD2BBD7236536AED4D8E /* RanchOSTV-Info.plist */; };
 		79263FB86B58A10AFF45ABFB /* RanchOSPeopleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCDF1F05E44B8DC6E5AD44B /* RanchOSPeopleStore.swift */; };
@@ -110,15 +133,19 @@
 		80FE8C6F51791808A3AE4AC2 /* DataIsolationVerifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0142BE0205891E514977F19B /* DataIsolationVerifier.swift */; };
 		8386D555B63F1D5C5FB785F4 /* RanchOSRuntimeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84773B0A9E3F7BDEC09BF607 /* RanchOSRuntimeEnvironment.swift */; };
 		850CAA7FC10084CA2D54C502 /* RanchOSLivestockBrowserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C94A9740AE1C2B41C8AD8A3B /* RanchOSLivestockBrowserTests.swift */; };
+		8537D945719C09C18486BC93 /* RanchOSFinanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DFA276D6FFA4AF909A85D5 /* RanchOSFinanceReport.swift */; };
 		864EAD5B4CDDC35E588B92E1 /* RanchPeopleOS-AppIcon-1024.png in Resources */ = {isa = PBXBuildFile; fileRef = 6E4107E35B962EAA0A0BB4B2 /* RanchPeopleOS-AppIcon-1024.png */; };
 		866EF7430D89934BA0F9B45A /* FixtureDetailBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */; };
+		875FEDE0DF883C4E123683F9 /* RanchOSFinanceReportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B8A9136A6169C711EDC465 /* RanchOSFinanceReportView.swift */; };
 		87FAB9F233E0F980AAB95595 /* RanchVADEVQuery.swift in Sources */ = {isa = PBXBuildFile; fileRef = 402E268F0E0033791191C654 /* RanchVADEVQuery.swift */; };
 		8900E7B2ED14FD58D8E4710A /* FixtureDetailBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */; };
+		8A4D3989BE8B6E08969E5C51 /* RanchOSFinanceCategoriesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84BB17DD5FF18D3AA7C0E58B /* RanchOSFinanceCategoriesTests.swift */; };
 		8A7EBE108BF376552C68B654 /* RanchOSHubModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */; };
 		8AF17A99B07B4D8E547B8E0E /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
 		8B91D6F7E2B6AA9D91FAC095 /* RanchSaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F92C20E69DA47B25043E260 /* RanchSaveView.swift */; };
 		8D90E0F461C923DC591CDA2B /* RanchOSFinanceImportResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F46AED77EEB8366BA0AA9A7 /* RanchOSFinanceImportResult.swift */; };
 		8E54AF45129A1650DA2EADAE /* RanchBrainRetrievalTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A77DAB7AA2D86A484C59994F /* RanchBrainRetrievalTests.swift */; };
+		8E915D3CCD3CF500B016C1BF /* RanchOSFinanceCostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1547459DCEE58595B0A3D6D /* RanchOSFinanceCostView.swift */; };
 		8F624DC859A59696959F6829 /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
 		90B85C4C63C4EEDC77607EE4 /* RanchOSPropertyDueTaskCategoryPicker.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB00C5BDA9CEC0DE67C61C80 /* RanchOSPropertyDueTaskCategoryPicker.swift */; };
 		90C3BCFA7E0C18A55B992430 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
@@ -126,6 +153,7 @@
 		91936F92A0928385E668024E /* RanchVADEVWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A800F8592481015682150AE /* RanchVADEVWorkspace.swift */; };
 		937DF538CC533E1890E13CEA /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
 		9499C316C9F3C1F528B1B11B /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
+		979D3819C3A9C417ECCC6F7D /* RanchOSFinanceCost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45B9E255E0AD692B20722102 /* RanchOSFinanceCost.swift */; };
 		9A18EAC476B6CD6C902CB4BF /* RanchSaveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F92C20E69DA47B25043E260 /* RanchSaveView.swift */; };
 		9AE7598486EABA8DACB763D3 /* RanchOSPeopleDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A3997333558E1B6A507135 /* RanchOSPeopleDirectory.swift */; };
 		9E07C3032BED00091BEAE81B /* LogitechCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */; };
@@ -134,18 +162,25 @@
 		A15D64C9F11BB89AAB079C21 /* RanchOSPropertyLiveStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DDDEBB618C5264B8A47AE065 /* RanchOSPropertyLiveStore.swift */; };
 		A1DD078470FECEB4C0AFB727 /* RanchOSFinanceImportResultTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6541B172237E6B75B7AB0226 /* RanchOSFinanceImportResultTests.swift */; };
 		A380297C016D2E0E83A77304 /* FixtureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCCBAB1AFB59D5343A55BC7 /* FixtureSession.swift */; };
+		A42815CBF6A16B024FA03ABC /* RanchOSFinanceCategorizer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A406FEC6CD35B245385A73C2 /* RanchOSFinanceCategorizer.swift */; };
 		A446D6882B315ECAF659BC84 /* WeekHorizonPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 219A95C7F2CBD182A9ABA2B8 /* WeekHorizonPlanning.swift */; };
+		A454D0FFD3BDAA0046FCA73A /* RanchOSFinanceCost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45B9E255E0AD692B20722102 /* RanchOSFinanceCost.swift */; };
+		A61923E7F3E1AA5483DE40D8 /* RanchOSFinanceCostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1547459DCEE58595B0A3D6D /* RanchOSFinanceCostView.swift */; };
+		A7506C01C334F20D0B03FB2B /* RanchOSFinanceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 80CAF4956A3CCA014E019216 /* RanchOSFinanceView.swift */; };
+		A7D425F902811147A17AA721 /* RanchOSFinanceCSV.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB9EAF977C61BC9BAA4D5A4 /* RanchOSFinanceCSV.swift */; };
 		A92A47220911F8E684428E05 /* RanchBrainFacts.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F85DCC3C1FECE5540C6CB8E /* RanchBrainFacts.swift */; };
 		A9DDC06099C50446F2C87CFD /* RanchOSPeopleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCDF1F05E44B8DC6E5AD44B /* RanchOSPeopleStore.swift */; };
 		ABD0006DA9297148C764BC84 /* RanchOSHubModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */; };
 		ACA938EE9AA8E54C66DF81F0 /* RanchOSPropertyLiveStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1397792AF9996A42ECCF0EF7 /* RanchOSPropertyLiveStoreTests.swift */; };
 		AFF3654148BF7F66F132A37E /* RanchOSPeopleStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8777800009F3A4F72E39A456 /* RanchOSPeopleStoreTests.swift */; };
 		B044C5897E79B35501517554 /* RanchOSWeekHorizonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B916620A5D1DB6B1D3C2988 /* RanchOSWeekHorizonView.swift */; };
+		B14334F6E2A3CDDAE747C82A /* RanchOSFinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4976BA277D6CC9BE9EDCAF /* RanchOSFinanceStore.swift */; };
 		B8C2194551BE95B875B4B4B0 /* RanchOSPeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62942A1FF56A810AC3525C42 /* RanchOSPeopleView.swift */; };
 		B9C43C787D9B71C2FB170A59 /* RanchPeopleOSAssets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 879F16470DEA5D158E6B0FA0 /* RanchPeopleOSAssets.xcassets */; };
 		B9DDCF4A4C68DEEF967F8BED /* FixtureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCCBAB1AFB59D5343A55BC7 /* FixtureSession.swift */; };
 		BB1531544C13F5621C5ADE3C /* RanchPeopleOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD3AB6BD935FC4CB433FD534 /* RanchPeopleOSApp.swift */; };
 		BB5F168B30B765E58AEFB853 /* RanchVAWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E195EE535962477DB2A48E5C /* RanchVAWorkspace.swift */; };
+		BBFDD860C96340FCF7B04774 /* RanchOSFinanceCostView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E1547459DCEE58595B0A3D6D /* RanchOSFinanceCostView.swift */; };
 		C04AA63ACF40404740FA2356 /* RanchOSMac-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = C84C41D7E31B417C8395EF48 /* RanchOSMac-Info.plist */; };
 		C0F62D84439578DFABE610E5 /* RanchOSWeekHorizonView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3B916620A5D1DB6B1D3C2988 /* RanchOSWeekHorizonView.swift */; };
 		C2D7ED34823DF4947649E0D7 /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
@@ -153,8 +188,12 @@
 		C6657E06195C2E952E9F8AB8 /* RanchOSiOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */; };
 		C6A90ECD9259FD6E454C75E0 /* RanchOSPeopleStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FCDF1F05E44B8DC6E5AD44B /* RanchOSPeopleStore.swift */; };
 		C9BC451E0F0DF462E9FA3876 /* RanchOSPeopleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 62942A1FF56A810AC3525C42 /* RanchOSPeopleView.swift */; };
+		CB1B2E69A2CA6D94B6082B4E /* RanchOSFinanceCSV.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB9EAF977C61BC9BAA4D5A4 /* RanchOSFinanceCSV.swift */; };
+		CB2EA9D9E8233519DAEDCE92 /* RanchOSFinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4976BA277D6CC9BE9EDCAF /* RanchOSFinanceStore.swift */; };
 		CC5196ACE4FE0D288B2604CD /* RanchOSLivestockStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A19114E28316BE53FC523170 /* RanchOSLivestockStoreTests.swift */; };
+		CC9034A5AA5B85F9FCBFA7C3 /* RanchOSFinanceStatementWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733E3319BDEBD15F487B97F7 /* RanchOSFinanceStatementWatch.swift */; };
 		CCE4D5204E8B36DC18E485B3 /* FinanceImportResultSample.csv in Resources */ = {isa = PBXBuildFile; fileRef = 693305EF4032C1197F279595 /* FinanceImportResultSample.csv */; };
+		CD88B17D23CB6292F92560A3 /* RanchOSFinanceStatementWatchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D2C9BC47C2741FFA288FCE4E /* RanchOSFinanceStatementWatchTests.swift */; };
 		CE96420C7ECF357890C358F6 /* RanchOSFinanceImportResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6D958D1D62A4E5DEACD23F /* RanchOSFinanceImportResultView.swift */; };
 		D00953C51EDEBF52F2238640 /* RanchVAWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D559F660DC862C2FC22205E /* RanchVAWeather.swift */; };
 		D1FA60F4906023ED8FEC59B4 /* RanchPeopleOS-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 1C120CCDE086A6F84DADA3BA /* RanchPeopleOS-Info.plist */; };
@@ -164,6 +203,7 @@
 		D97D53071E2F8208919DF02E /* WeekHorizonPlanning.swift in Sources */ = {isa = PBXBuildFile; fileRef = 219A95C7F2CBD182A9ABA2B8 /* WeekHorizonPlanning.swift */; };
 		DA23CF9BC5EC48B28D174E49 /* RanchOSRuntimeEnvironment.swift in Sources */ = {isa = PBXBuildFile; fileRef = 84773B0A9E3F7BDEC09BF607 /* RanchOSRuntimeEnvironment.swift */; };
 		DD470DE88A673C132C1C29E2 /* RanchOSLivestockBrowserView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 87911BB80FEF3B27AB49E918 /* RanchOSLivestockBrowserView.swift */; };
+		DD8C79E8B3F86BA08EFF9CB5 /* FinanceSampleBank.csv in Resources */ = {isa = PBXBuildFile; fileRef = 1E836A3D05F3F9E1FC1CED60 /* FinanceSampleBank.csv */; };
 		DEFDE9802034BCAC2720FA29 /* RanchOSHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */; };
 		E03214C1AC2BC782C220DDF8 /* RanchOSLivestockBrowserModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */; };
 		E24311C43D3A1AD7B4E3D40C /* RanchOSLivestockBrowserModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */; };
@@ -171,11 +211,18 @@
 		E3FBE2995E50C5092F3B7770 /* RanchOSPeopleDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A3997333558E1B6A507135 /* RanchOSPeopleDirectory.swift */; };
 		E46D06871CFD5585132A8D69 /* RanchOSDevIdentityBadge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AF3310061AD730EE6DC7FB5 /* RanchOSDevIdentityBadge.swift */; };
 		E7D93F1519F956B3A930837F /* RanchOSFinanceImportResultView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F6D958D1D62A4E5DEACD23F /* RanchOSFinanceImportResultView.swift */; };
+		EA86B807D39E40EF757EDA43 /* RanchOSFinanceCost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45B9E255E0AD692B20722102 /* RanchOSFinanceCost.swift */; };
+		EAB3FC372BD82D999F5CB022 /* RanchOSFinanceStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = CF4976BA277D6CC9BE9EDCAF /* RanchOSFinanceStore.swift */; };
 		EB1D547DF7FF9A59AAD954A2 /* RanchPeopleOSProd-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = EEC24ED96C4EA4623F7C3085 /* RanchPeopleOSProd-Info.plist */; };
+		EB3BC4DC6651DAB5F936307C /* RanchOSFinanceStatementWatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = 733E3319BDEBD15F487B97F7 /* RanchOSFinanceStatementWatch.swift */; };
+		ECE2310358AD8E6472CC926D /* RanchOSFinanceEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3003EA886A27D564871AA1C /* RanchOSFinanceEntry.swift */; };
+		ED431A644A1F2AEE02E564FA /* RanchOSFinanceEntry.swift in Sources */ = {isa = PBXBuildFile; fileRef = A3003EA886A27D564871AA1C /* RanchOSFinanceEntry.swift */; };
 		F07CC56BAF84A10D250A7DAC /* RanchOSForecastStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0BF347F1BB5DD467D837961C /* RanchOSForecastStore.swift */; };
 		F1A3BB6F2590F679408E6C14 /* RanchVAWeather.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D559F660DC862C2FC22205E /* RanchVAWeather.swift */; };
 		F1A931E3124E9E048688CF3A /* RanchModelRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCB817FF2E26A9427C30A75A /* RanchModelRouterTests.swift */; };
+		F7A0F3AE0314F5FEFB01268E /* RanchOSFinanceReport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64DFA276D6FFA4AF909A85D5 /* RanchOSFinanceReport.swift */; };
 		FAC1E6222B6CC22541580297 /* FixtureSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BCCBAB1AFB59D5343A55BC7 /* FixtureSession.swift */; };
+		FE5A66AD893F34288DADD682 /* FinanceSampleAppleCard.csv in Resources */ = {isa = PBXBuildFile; fileRef = 804D71F8215CE139C9A667B1 /* FinanceSampleAppleCard.csv */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -185,6 +232,7 @@
 		1397792AF9996A42ECCF0EF7 /* RanchOSPropertyLiveStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPropertyLiveStoreTests.swift; sourceTree = "<group>"; };
 		1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSTVHomeView.swift; sourceTree = "<group>"; };
 		1C120CCDE086A6F84DADA3BA /* RanchPeopleOS-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "RanchPeopleOS-Info.plist"; sourceTree = "<group>"; };
+		1E836A3D05F3F9E1FC1CED60 /* FinanceSampleBank.csv */ = {isa = PBXFileReference; path = FinanceSampleBank.csv; sourceTree = "<group>"; };
 		1F46AED77EEB8366BA0AA9A7 /* RanchOSFinanceImportResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceImportResult.swift; sourceTree = "<group>"; };
 		1F92C20E69DA47B25043E260 /* RanchSaveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchSaveView.swift; sourceTree = "<group>"; };
 		219A95C7F2CBD182A9ABA2B8 /* WeekHorizonPlanning.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WeekHorizonPlanning.swift; sourceTree = "<group>"; };
@@ -193,10 +241,12 @@
 		2B6B6B00F723CBC55517FDAF /* RanchOSLivestockConnection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockConnection.swift; sourceTree = "<group>"; };
 		2D986C8C6FB0A5B62858A430 /* RanchOSJarvisSessionProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSJarvisSessionProvider.swift; sourceTree = "<group>"; };
 		2F6D958D1D62A4E5DEACD23F /* RanchOSFinanceImportResultView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceImportResultView.swift; sourceTree = "<group>"; };
+		34662045481432DF094F19DD /* RanchOSFinanceReportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceReportTests.swift; sourceTree = "<group>"; };
 		3B916620A5D1DB6B1D3C2988 /* RanchOSWeekHorizonView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSWeekHorizonView.swift; sourceTree = "<group>"; };
 		3E9CC12C08B54889205A309F /* ModelRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelRouter.swift; sourceTree = "<group>"; };
 		402E268F0E0033791191C654 /* RanchVADEVQuery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVADEVQuery.swift; sourceTree = "<group>"; };
 		454C7A8A973451ABCEB01A80 /* RanchOSiOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSiOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		45B9E255E0AD692B20722102 /* RanchOSFinanceCost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceCost.swift; sourceTree = "<group>"; };
 		4E1EAD2BBD7236536AED4D8E /* RanchOSTV-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "RanchOSTV-Info.plist"; sourceTree = "<group>"; };
 		571843A754007CC43A96B1D2 /* RanchOSTV.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = RanchOSTV.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		59F729E99881C1B5C531D476 /* RanchVAAssetGraphTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVAAssetGraphTests.swift; sourceTree = "<group>"; };
@@ -204,6 +254,7 @@
 		5F3BD88B0A8C184C93FEEBDD /* RanchOSiOS-Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = "RanchOSiOS-Info.plist"; sourceTree = "<group>"; };
 		613AA46701E775DD8BDC30A4 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		62942A1FF56A810AC3525C42 /* RanchOSPeopleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPeopleView.swift; sourceTree = "<group>"; };
+		64DFA276D6FFA4AF909A85D5 /* RanchOSFinanceReport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceReport.swift; sourceTree = "<group>"; };
 		6541B172237E6B75B7AB0226 /* RanchOSFinanceImportResultTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceImportResultTests.swift; sourceTree = "<group>"; };
 		6600C1B2A9A817CA139D0993 /* RanchOSPeopleClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPeopleClient.swift; sourceTree = "<group>"; };
 		693305EF4032C1197F279595 /* FinanceImportResultSample.csv */ = {isa = PBXFileReference; path = FinanceImportResultSample.csv; sourceTree = "<group>"; };
@@ -212,10 +263,15 @@
 		6E4107E35B962EAA0A0BB4B2 /* RanchPeopleOS-AppIcon-1024.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "RanchPeopleOS-AppIcon-1024.png"; sourceTree = "<group>"; };
 		6FCDF1F05E44B8DC6E5AD44B /* RanchOSPeopleStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPeopleStore.swift; sourceTree = "<group>"; };
 		72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSHomeView.swift; sourceTree = "<group>"; };
+		733E3319BDEBD15F487B97F7 /* RanchOSFinanceStatementWatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceStatementWatch.swift; sourceTree = "<group>"; };
 		7652F1BA3E7FFFE294ED64F7 /* RanchOSJarvisM3Tests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSJarvisM3Tests.swift; sourceTree = "<group>"; };
 		7D559F660DC862C2FC22205E /* RanchVAWeather.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVAWeather.swift; sourceTree = "<group>"; };
+		804D71F8215CE139C9A667B1 /* FinanceSampleAppleCard.csv */ = {isa = PBXFileReference; path = FinanceSampleAppleCard.csv; sourceTree = "<group>"; };
+		80CAF4956A3CCA014E019216 /* RanchOSFinanceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceView.swift; sourceTree = "<group>"; };
+		82A491F327912A78A316A3AE /* RanchOSFinanceCostTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceCostTests.swift; sourceTree = "<group>"; };
 		843C963EDC18422541A9AF00 /* RanchOSForecastStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSForecastStoreTests.swift; sourceTree = "<group>"; };
 		84773B0A9E3F7BDEC09BF607 /* RanchOSRuntimeEnvironment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSRuntimeEnvironment.swift; sourceTree = "<group>"; };
+		84BB17DD5FF18D3AA7C0E58B /* RanchOSFinanceCategoriesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceCategoriesTests.swift; sourceTree = "<group>"; };
 		8777800009F3A4F72E39A456 /* RanchOSPeopleStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPeopleStoreTests.swift; sourceTree = "<group>"; };
 		87911BB80FEF3B27AB49E918 /* RanchOSLivestockBrowserView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockBrowserView.swift; sourceTree = "<group>"; };
 		879F16470DEA5D158E6B0FA0 /* RanchPeopleOSAssets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = RanchPeopleOSAssets.xcassets; sourceTree = "<group>"; };
@@ -225,10 +281,15 @@
 		9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VoiceInput.swift; sourceTree = "<group>"; };
 		9F85DCC3C1FECE5540C6CB8E /* RanchBrainFacts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchBrainFacts.swift; sourceTree = "<group>"; };
 		A19114E28316BE53FC523170 /* RanchOSLivestockStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockStoreTests.swift; sourceTree = "<group>"; };
+		A1B8A9136A6169C711EDC465 /* RanchOSFinanceReportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceReportView.swift; sourceTree = "<group>"; };
 		A20B13B702C280E25102FA85 /* RanchOSLivestockConnectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockConnectionTests.swift; sourceTree = "<group>"; };
+		A3003EA886A27D564871AA1C /* RanchOSFinanceEntry.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceEntry.swift; sourceTree = "<group>"; };
+		A406FEC6CD35B245385A73C2 /* RanchOSFinanceCategorizer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceCategorizer.swift; sourceTree = "<group>"; };
 		A77DAB7AA2D86A484C59994F /* RanchBrainRetrievalTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchBrainRetrievalTests.swift; sourceTree = "<group>"; };
 		A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSHubModelTests.swift; sourceTree = "<group>"; };
+		ACB9EAF977C61BC9BAA4D5A4 /* RanchOSFinanceCSV.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceCSV.swift; sourceTree = "<group>"; };
 		AE1A6843BA52192829BC0BCC /* RanchOSLivestockBrowserModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSLivestockBrowserModel.swift; sourceTree = "<group>"; };
+		B31D20BD1A9C4592DBC2DEB4 /* RanchOSFinanceLoanBalanceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceLoanBalanceTests.swift; sourceTree = "<group>"; };
 		B7A3997333558E1B6A507135 /* RanchOSPeopleDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPeopleDirectory.swift; sourceTree = "<group>"; };
 		B980AF6909E06E60BF84C096 /* RanchOSHubTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = RanchOSHubTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		B9CDBA01B947F2BDBB096ED7 /* RanchOSJarvisStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSJarvisStore.swift; sourceTree = "<group>"; };
@@ -238,11 +299,14 @@
 		CAF02F5C00C3DF293BD58C32 /* FixtureDetailBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixtureDetailBrowser.swift; sourceTree = "<group>"; };
 		CB00C5BDA9CEC0DE67C61C80 /* RanchOSPropertyDueTaskCategoryPicker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPropertyDueTaskCategoryPicker.swift; sourceTree = "<group>"; };
 		CD1F48C6AF0878CB0BCA846A /* RanchOSJarvisTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSJarvisTests.swift; sourceTree = "<group>"; };
+		CF4976BA277D6CC9BE9EDCAF /* RanchOSFinanceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceStore.swift; sourceTree = "<group>"; };
 		D0C916BBFB3EBE2CD88B8600 /* RanchPeopleOSProd.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchPeopleOSProd.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D2C9BC47C2741FFA288FCE4E /* RanchOSFinanceStatementWatchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceStatementWatchTests.swift; sourceTree = "<group>"; };
 		D31F2FCE43BAC02536B4B94F /* RanchBrainClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchBrainClient.swift; sourceTree = "<group>"; };
 		DCB817FF2E26A9427C30A75A /* RanchModelRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchModelRouterTests.swift; sourceTree = "<group>"; };
 		DD3AB6BD935FC4CB433FD534 /* RanchPeopleOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchPeopleOSApp.swift; sourceTree = "<group>"; };
 		DDDEBB618C5264B8A47AE065 /* RanchOSPropertyLiveStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPropertyLiveStore.swift; sourceTree = "<group>"; };
+		E1547459DCEE58595B0A3D6D /* RanchOSFinanceCostView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSFinanceCostView.swift; sourceTree = "<group>"; };
 		E195EE535962477DB2A48E5C /* RanchVAWorkspace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchVAWorkspace.swift; sourceTree = "<group>"; };
 		E3DF17BA2671A6FD27E981E9 /* RanchPeopleOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = RanchPeopleOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		E49DB489523359A9ADD18A16 /* RanchOSPeopleDirectoryTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RanchOSPeopleDirectoryTests.swift; sourceTree = "<group>"; };
@@ -265,8 +329,18 @@
 				9F85DCC3C1FECE5540C6CB8E /* RanchBrainFacts.swift */,
 				6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */,
 				6AF3310061AD730EE6DC7FB5 /* RanchOSDevIdentityBadge.swift */,
+				A406FEC6CD35B245385A73C2 /* RanchOSFinanceCategorizer.swift */,
+				45B9E255E0AD692B20722102 /* RanchOSFinanceCost.swift */,
+				E1547459DCEE58595B0A3D6D /* RanchOSFinanceCostView.swift */,
+				ACB9EAF977C61BC9BAA4D5A4 /* RanchOSFinanceCSV.swift */,
+				A3003EA886A27D564871AA1C /* RanchOSFinanceEntry.swift */,
 				1F46AED77EEB8366BA0AA9A7 /* RanchOSFinanceImportResult.swift */,
 				2F6D958D1D62A4E5DEACD23F /* RanchOSFinanceImportResultView.swift */,
+				64DFA276D6FFA4AF909A85D5 /* RanchOSFinanceReport.swift */,
+				A1B8A9136A6169C711EDC465 /* RanchOSFinanceReportView.swift */,
+				733E3319BDEBD15F487B97F7 /* RanchOSFinanceStatementWatch.swift */,
+				CF4976BA277D6CC9BE9EDCAF /* RanchOSFinanceStore.swift */,
+				80CAF4956A3CCA014E019216 /* RanchOSFinanceView.swift */,
 				0BF347F1BB5DD467D837961C /* RanchOSForecastStore.swift */,
 				72B4D5FC76FFFCDAB2D39D7E /* RanchOSHomeView.swift */,
 				FA4B50CCAC6463D5838CB2C2 /* RanchOSHubModel.swift */,
@@ -330,9 +404,16 @@
 			isa = PBXGroup;
 			children = (
 				693305EF4032C1197F279595 /* FinanceImportResultSample.csv */,
+				804D71F8215CE139C9A667B1 /* FinanceSampleAppleCard.csv */,
+				1E836A3D05F3F9E1FC1CED60 /* FinanceSampleBank.csv */,
 				A77DAB7AA2D86A484C59994F /* RanchBrainRetrievalTests.swift */,
 				DCB817FF2E26A9427C30A75A /* RanchModelRouterTests.swift */,
+				84BB17DD5FF18D3AA7C0E58B /* RanchOSFinanceCategoriesTests.swift */,
+				82A491F327912A78A316A3AE /* RanchOSFinanceCostTests.swift */,
 				6541B172237E6B75B7AB0226 /* RanchOSFinanceImportResultTests.swift */,
+				B31D20BD1A9C4592DBC2DEB4 /* RanchOSFinanceLoanBalanceTests.swift */,
+				34662045481432DF094F19DD /* RanchOSFinanceReportTests.swift */,
+				D2C9BC47C2741FFA288FCE4E /* RanchOSFinanceStatementWatchTests.swift */,
 				843C963EDC18422541A9AF00 /* RanchOSForecastStoreTests.swift */,
 				A9CC0F7474342DE5D818EA6B /* RanchOSHubModelTests.swift */,
 				F546E822CA9293977CF5A9E2 /* RanchOSJarvisDevSessionTests.swift */,
@@ -600,6 +681,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				CCE4D5204E8B36DC18E485B3 /* FinanceImportResultSample.csv in Resources */,
+				FE5A66AD893F34288DADD682 /* FinanceSampleAppleCard.csv in Resources */,
+				DD8C79E8B3F86BA08EFF9CB5 /* FinanceSampleBank.csv in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -616,8 +699,18 @@
 				768EDEF0BC5439F343613E0D /* LogitechCamera.swift in Sources */,
 				9499C316C9F3C1F528B1B11B /* RanchOSApp.swift in Sources */,
 				809A17F11D1F7F81734C5D40 /* RanchOSDevIdentityBadge.swift in Sources */,
+				0552E8767A62E4C3851ED3D5 /* RanchOSFinanceCSV.swift in Sources */,
+				4CD09A270C13FBEFF535BF44 /* RanchOSFinanceCategorizer.swift in Sources */,
+				306460C8AB2B2A1F69941E8F /* RanchOSFinanceCost.swift in Sources */,
+				BBFDD860C96340FCF7B04774 /* RanchOSFinanceCostView.swift in Sources */,
+				ECE2310358AD8E6472CC926D /* RanchOSFinanceEntry.swift in Sources */,
 				378C82C36B94615DB6B5FB2D /* RanchOSFinanceImportResult.swift in Sources */,
 				3B728F49A30FE30A559943EB /* RanchOSFinanceImportResultView.swift in Sources */,
+				F7A0F3AE0314F5FEFB01268E /* RanchOSFinanceReport.swift in Sources */,
+				5177F693DA972978C713D40D /* RanchOSFinanceReportView.swift in Sources */,
+				CC9034A5AA5B85F9FCBFA7C3 /* RanchOSFinanceStatementWatch.swift in Sources */,
+				B14334F6E2A3CDDAE747C82A /* RanchOSFinanceStore.swift in Sources */,
+				A7506C01C334F20D0B03FB2B /* RanchOSFinanceView.swift in Sources */,
 				5CA09C188841F4AB4B1BB4DC /* RanchOSForecastStore.swift in Sources */,
 				37B2FB76EC4C2819D2969DBA /* RanchOSHomeView.swift in Sources */,
 				53B5820CF13D08C27E6866BC /* RanchOSHubModel.swift in Sources */,
@@ -666,8 +759,18 @@
 				66CEEE588A1E147372575423 /* LogitechCamera.swift in Sources */,
 				470C65898CA093AE5DA8A254 /* RanchOSApp.swift in Sources */,
 				E46D06871CFD5585132A8D69 /* RanchOSDevIdentityBadge.swift in Sources */,
+				631C631679DA7765FB4C89CE /* RanchOSFinanceCSV.swift in Sources */,
+				A42815CBF6A16B024FA03ABC /* RanchOSFinanceCategorizer.swift in Sources */,
+				A454D0FFD3BDAA0046FCA73A /* RanchOSFinanceCost.swift in Sources */,
+				A61923E7F3E1AA5483DE40D8 /* RanchOSFinanceCostView.swift in Sources */,
+				ED431A644A1F2AEE02E564FA /* RanchOSFinanceEntry.swift in Sources */,
 				8D90E0F461C923DC591CDA2B /* RanchOSFinanceImportResult.swift in Sources */,
 				E7D93F1519F956B3A930837F /* RanchOSFinanceImportResultView.swift in Sources */,
+				64238914A78D5416767C1C13 /* RanchOSFinanceReport.swift in Sources */,
+				068EF1F23CDF692E7F1B1293 /* RanchOSFinanceReportView.swift in Sources */,
+				59BEC48E0384D9DB32DB3515 /* RanchOSFinanceStatementWatch.swift in Sources */,
+				51AD625090DBBB9A7824C685 /* RanchOSFinanceStore.swift in Sources */,
+				706AFEC795AAADEC44F9D2AB /* RanchOSFinanceView.swift in Sources */,
 				4C0974AC205C0DDADD391729 /* RanchOSForecastStore.swift in Sources */,
 				7ABE342D35D442172B63444C /* RanchOSHomeView.swift in Sources */,
 				232C0D73D888423130882D6B /* RanchOSHubModel.swift in Sources */,
@@ -717,8 +820,23 @@
 				A92A47220911F8E684428E05 /* RanchBrainFacts.swift in Sources */,
 				8E54AF45129A1650DA2EADAE /* RanchBrainRetrievalTests.swift in Sources */,
 				F1A931E3124E9E048688CF3A /* RanchModelRouterTests.swift in Sources */,
+				A7D425F902811147A17AA721 /* RanchOSFinanceCSV.swift in Sources */,
+				8A4D3989BE8B6E08969E5C51 /* RanchOSFinanceCategoriesTests.swift in Sources */,
+				37BD36805EF8AB0017E030C7 /* RanchOSFinanceCategorizer.swift in Sources */,
+				979D3819C3A9C417ECCC6F7D /* RanchOSFinanceCost.swift in Sources */,
+				5B08986A5869B4801AF44523 /* RanchOSFinanceCostTests.swift in Sources */,
+				2C65E53089395036F092C89B /* RanchOSFinanceCostView.swift in Sources */,
+				1E8446E228DC8CE4EE169846 /* RanchOSFinanceEntry.swift in Sources */,
 				3FAFF2B31A99B62BD775ED0B /* RanchOSFinanceImportResult.swift in Sources */,
 				A1DD078470FECEB4C0AFB727 /* RanchOSFinanceImportResultTests.swift in Sources */,
+				2C3D86094C929009F9E42FC5 /* RanchOSFinanceLoanBalanceTests.swift in Sources */,
+				8537D945719C09C18486BC93 /* RanchOSFinanceReport.swift in Sources */,
+				752BF11DEECF83BFAE20D12F /* RanchOSFinanceReportTests.swift in Sources */,
+				875FEDE0DF883C4E123683F9 /* RanchOSFinanceReportView.swift in Sources */,
+				EB3BC4DC6651DAB5F936307C /* RanchOSFinanceStatementWatch.swift in Sources */,
+				CD88B17D23CB6292F92560A3 /* RanchOSFinanceStatementWatchTests.swift in Sources */,
+				EAB3FC372BD82D999F5CB022 /* RanchOSFinanceStore.swift in Sources */,
+				5EF1C52FFE2B06B3D54F0E06 /* RanchOSFinanceView.swift in Sources */,
 				2255A6A92EE782D2BAAE3D91 /* RanchOSForecastStore.swift in Sources */,
 				24EE2EAD6D87D145964136B8 /* RanchOSForecastStoreTests.swift in Sources */,
 				C63530FD2A422C672ACB6D8A /* RanchOSHubModel.swift in Sources */,
@@ -765,8 +883,18 @@
 				9E07C3032BED00091BEAE81B /* LogitechCamera.swift in Sources */,
 				5B11DAE14A7B9B8F4C62C0B6 /* RanchOSApp.swift in Sources */,
 				614731D418DADEB29A3BB13D /* RanchOSDevIdentityBadge.swift in Sources */,
+				CB1B2E69A2CA6D94B6082B4E /* RanchOSFinanceCSV.swift in Sources */,
+				5C12CF4A6F124CF42FDF5EFF /* RanchOSFinanceCategorizer.swift in Sources */,
+				EA86B807D39E40EF757EDA43 /* RanchOSFinanceCost.swift in Sources */,
+				8E915D3CCD3CF500B016C1BF /* RanchOSFinanceCostView.swift in Sources */,
+				5BCA3325CE373DC282240216 /* RanchOSFinanceEntry.swift in Sources */,
 				79DA1B9BBE727F020DBBC7D2 /* RanchOSFinanceImportResult.swift in Sources */,
 				CE96420C7ECF357890C358F6 /* RanchOSFinanceImportResultView.swift in Sources */,
+				5DFDB79337141D72066275B0 /* RanchOSFinanceReport.swift in Sources */,
+				39584908E5384DBCAEA959C8 /* RanchOSFinanceReportView.swift in Sources */,
+				67316394079AEF5224C986E9 /* RanchOSFinanceStatementWatch.swift in Sources */,
+				CB2EA9D9E8233519DAEDCE92 /* RanchOSFinanceStore.swift in Sources */,
+				2D77A498B9F69F750008F196 /* RanchOSFinanceView.swift in Sources */,
 				F07CC56BAF84A10D250A7DAC /* RanchOSForecastStore.swift in Sources */,
 				DEFDE9802034BCAC2720FA29 /* RanchOSHomeView.swift in Sources */,
 				8A7EBE108BF376552C68B654 /* RanchOSHubModel.swift in Sources */,

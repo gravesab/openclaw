@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from tools.security.shell_guard import allowed_url, run_checked
+from tools.security.allowlist import _is_allowed_host
+from tools.security.shell_guard import allowed_url, enforce_dev, run_checked
 
 import psycopg2
 import redis
@@ -44,9 +45,11 @@ REQUIRED_CONTAINERS = [
 ]
 
 def run_cmd(command):
+    enforce_dev()
     return run_checked(command, state_changing=False, timeout=30, service="recovery")
 
 def publish(event_type, message):
+    enforce_dev()
     event = {
         "timestamp": datetime.now().isoformat(),
         "agent": "RecoveryAgent",
@@ -54,30 +57,40 @@ def publish(event_type, message):
         "message": message,
     }
 
-    r = redis.Redis(
-        host=REDIS_HOST,
-        port=6379,
-        decode_responses=True
-    )
-
-    r.lpush("openclaw:events", json.dumps(event))
-
     print(json.dumps(event, indent=2))
+    if not _is_loopback_only(REDIS_HOST):
+        print("redis refused: OPENCLAW_REDIS_HOST is not loopback", file=sys.stderr)
+        return
+    try:
+        r = redis.Redis(
+            host=REDIS_HOST,
+            port=6379,
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
+        )
+        r.lpush("openclaw:events", json.dumps(event))
+    except Exception as exc:
+        print(f"[recovery] redis dry-run: {type(exc).__name__}", file=sys.stderr)
 
 def check_redis():
+    enforce_dev()
     if not _is_loopback_only(REDIS_HOST):
         return False, "Redis host is not loopback"
     try:
         r = redis.Redis(
             host=REDIS_HOST,
             port=6379,
-            decode_responses=True
+            decode_responses=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
         )
         return r.ping(), "Redis reachable"
     except Exception as e:
         return False, f"Redis failed: {e}"
 
 def check_postgres():
+    enforce_dev()
     if not _is_loopback_only(POSTGRES_DB["host"]):
         return False, "PostgreSQL host is not loopback"
     try:
@@ -92,10 +105,11 @@ def check_postgres():
         return False, f"PostgreSQL failed: {e}"
 
 def check_http(name, url):
+    enforce_dev()
     if _loopback_http_url(url) is None or not allowed_url(url, service="recovery"):
         return False, f"{name} URL is not loopback"
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=10, allow_redirects=False)
         if response.status_code < 500:
             return True, f"{name} reachable: HTTP {response.status_code}"
         return False, f"{name} unhealthy: HTTP {response.status_code}"
@@ -103,7 +117,10 @@ def check_http(name, url):
         return False, f"{name} failed: {e}"
 
 def _is_loopback_only(hostname):
-    return hostname in {"127.0.0.1", "::1"}
+    # Recovery stays stricter than the shared list: 127.0.0.1 and ::1 only.
+    if hostname not in {"127.0.0.1", "::1"}:
+        return False
+    return _is_allowed_host(hostname, service="recovery")
 
 def _loopback_http_url(url):
     parsed = urlparse(url)
@@ -114,10 +131,11 @@ def _loopback_http_url(url):
     return url
 
 def check_ollama():
+    enforce_dev()
     if _loopback_http_url(OLLAMA_URL) is None or not allowed_url(OLLAMA_URL, service="recovery"):
         return False, "Ollama URL is not loopback"
     try:
-        response = requests.get(OLLAMA_URL, timeout=10)
+        response = requests.get(OLLAMA_URL, timeout=10, allow_redirects=False)
         if "Ollama is running" in response.text:
             return True, "Ollama reachable"
         return False, f"Ollama unexpected response: {response.text[:120]}"
@@ -125,10 +143,11 @@ def check_ollama():
         return False, f"Ollama failed: {e}"
 
 def check_voice():
+    enforce_dev()
     if _loopback_http_url(VOICE_HEALTH_URL) is None or not allowed_url(VOICE_HEALTH_URL, service="recovery"):
         return False, "Voice URL is not loopback"
     try:
-        response = requests.get(VOICE_HEALTH_URL, timeout=10)
+        response = requests.get(VOICE_HEALTH_URL, timeout=10, allow_redirects=False)
         data = response.json()
         if data.get("ok") is True:
             return True, f"Voice service healthy: {data.get('status')}"
@@ -157,6 +176,7 @@ def check_systemd_service(service_name):
     return False, f"{service_name} not active: {result}"
 
 def main():
+    enforce_dev()
     checks = [
         ("Redis", check_redis),
         ("PostgreSQL", check_postgres),

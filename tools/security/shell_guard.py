@@ -73,7 +73,8 @@ class _Refused(Exception):
     pass
 
 
-def _enforce_dev() -> None:
+def enforce_dev() -> None:
+    """Abort unless this is DEV (ranch-redteam HardRules). Agents call it at entry."""
     global _GUARDS
     if _GUARDS is None:
         path = REPO_ROOT / "ranch-redteam" / "ranch_redteam_guards.py"
@@ -310,7 +311,7 @@ def _maybe_model_score(text: str) -> float:
 
 def vet_text(text: str, *, service: str) -> str:
     """Eject hostile free text before it can be turned into argv."""
-    _enforce_dev()
+    enforce_dev()
     if not isinstance(text, str) or not text.strip():
         _audit(service, str(text), decision="refused", score=0.95, cwd=None, timeout=DEFAULT_TIMEOUT, exit_code=None, allowlist="refused", dry_run=False)
         return "refused"
@@ -325,7 +326,7 @@ def vet_text(text: str, *, service: str) -> str:
 
 def allowed_url(url: str, *, service: str = "shell") -> bool:
     """True when the URL host passes the shared loopback allowlist."""
-    _enforce_dev()
+    enforce_dev()
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password:
         return False
@@ -352,7 +353,7 @@ def run_checked(
 
     input_text goes to stdin and must already pass vet_text.
     """
-    _enforce_dev()
+    enforce_dev()
     bounded = _timeout(timeout)
     if input_text is not None and _hostile(input_text, allow_newlines=False):
         _audit(service, input_text, decision="eject", score=0.95, cwd=None, timeout=bounded, exit_code=None, allowlist="eject", dry_run=False)

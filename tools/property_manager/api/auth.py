@@ -34,7 +34,11 @@ def _notify_sentinel(event: dict) -> None:
     if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
         return
     payload = json.dumps(event).encode("utf-8")
-    outgoing = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("RANCH_SENTINEL_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    outgoing = Request(url, data=payload, headers=headers, method="POST")
     try:
         with urlopen(outgoing, timeout=0.5):
             return

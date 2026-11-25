@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import socket
@@ -16,7 +17,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 import redis
-from fastapi import FastAPI
+from fastapi import FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 import tools.security.actuator as actuator
@@ -166,8 +167,18 @@ def _should_isolate(event: SecurityEvent) -> bool:
         }
 
 
+def _authorize_sense(authorization: str | None) -> None:
+    expected = os.environ.get("RANCH_SENTINEL_TOKEN") or ""
+    if not expected:
+        raise HTTPException(status_code=503, detail="sentinel token unconfigured")
+    scheme, _, presented = (authorization or "").partition(" ")
+    if scheme != "Bearer" or not presented or not hmac.compare_digest(presented, expected):
+        raise HTTPException(status_code=401, detail="invalid sentinel token")
+
+
 @app.post("/sense")
-def sense(event: SecurityEvent) -> dict:
+def sense(event: SecurityEvent, authorization: str | None = Header(default=None)) -> dict:
+    _authorize_sense(authorization)
     if os.environ.get("ENVIRONMENT") != "development":
         return {"status": "refused"}
     started = perf_counter()

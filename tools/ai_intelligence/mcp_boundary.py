@@ -34,7 +34,11 @@ def _notify_sentinel(event: dict) -> None:
     if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
         return
     payload = json.dumps(event).encode("utf-8")
-    outgoing = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+    headers = {"Content-Type": "application/json"}
+    token = environ.get("RANCH_SENTINEL_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    outgoing = Request(url, data=payload, headers=headers, method="POST")
     try:
         with urlopen(outgoing, timeout=0.5):
             return
@@ -46,8 +50,9 @@ def _service_quarantined(service: str) -> bool:
     if environ.get("RANCH_SENTINEL_ENABLED", "0") != "1":
         return False
     base = urlparse(environ.get("RANCH_SENTINEL_URL", "http://127.0.0.1:8001/sense"))
+    # Enabled lookups fail closed: a missed or non-loopback check is quarantined.
     if base.scheme not in {"http", "https"} or base.hostname not in {"127.0.0.1", "localhost", "::1"}:
-        return False
+        return True
     port = base.port or (443 if base.scheme == "https" else 80)
     status_url = f"{base.scheme}://{base.hostname}:{port}/quarantine/{service}"
     try:
@@ -55,7 +60,7 @@ def _service_quarantined(service: str) -> bool:
             body = json.loads(response.read().decode("utf-8"))
         return body.get("quarantined") is True
     except (OSError, URLError, TimeoutError, json.JSONDecodeError):
-        return False
+        return True
 
 
 def require_dev_mcp_environment() -> None:

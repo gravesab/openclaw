@@ -44,7 +44,16 @@ function ranchSentinelEnabled(): boolean {
   return process.env.RANCH_SENTINEL_ENABLED === "1";
 }
 
-function postRanchSentinel(event: { type: string; service: string; score: number }): void {
+function ranchSentinelHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  const token = process.env.RANCH_SENTINEL_TOKEN;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+export function postRanchSentinel(event: { type: string; service: string; score: number }): void {
   if (!ranchSentinelEnabled()) {
     return;
   }
@@ -60,13 +69,13 @@ function postRanchSentinel(event: { type: string; service: string; score: number
   }
   void fetch(url, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: ranchSentinelHeaders(),
     body: JSON.stringify(event),
     signal: AbortSignal.timeout(200),
   }).catch(() => undefined);
 }
 
-async function ranchServiceQuarantined(service: string): Promise<boolean> {
+export async function ranchServiceQuarantined(service: string): Promise<boolean> {
   if (!ranchSentinelEnabled()) {
     return false;
   }
@@ -75,26 +84,26 @@ async function ranchServiceQuarantined(service: string): Promise<boolean> {
   try {
     statusUrl = new URL(base);
   } catch {
-    return false;
+    return true;
   }
   if (
     statusUrl.hostname !== "127.0.0.1" &&
     statusUrl.hostname !== "localhost" &&
     statusUrl.hostname !== "::1"
   ) {
-    return false;
+    return true;
   }
   statusUrl.pathname = `/quarantine/${service}`;
   statusUrl.search = "";
   try {
     const response = await fetch(statusUrl, { signal: AbortSignal.timeout(50) });
     if (!response.ok) {
-      return false;
+      return true;
     }
     const body = (await response.json()) as { quarantined?: boolean };
     return body.quarantined === true;
   } catch {
-    return false;
+    return true;
   }
 }
 const TELEGRAM_WEBHOOK_BODY_TIMEOUT_MS = 30_000;

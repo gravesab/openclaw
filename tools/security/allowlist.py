@@ -89,10 +89,14 @@ def _notify_sentinel(event: dict) -> None:
     parsed = urlparse(url)
     if parsed.scheme not in {"http", "https"} or parsed.hostname not in _LOOPBACK_NAMES:
         return
+    headers = {"Content-Type": "application/json"}
+    token = os.environ.get("RANCH_SENTINEL_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     outgoing = Request(
         url,
         data=json.dumps(event).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     try:

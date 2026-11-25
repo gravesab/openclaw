@@ -41,6 +41,38 @@ final class RanchOSFinanceLoanBalanceTests: XCTestCase {
         }
     }
 
+    func testPayoffHeaderVariants() {
+        for header in ["Payoff", "Payoff Balance", "Payoff Amount"] {
+            let csv = "Posted Date,Memo,Amount,\(header)\n09/30/2026,PAYMENT,-500.00,12000.00\n"
+            let parsed = RanchOSFinanceCSV.parse(bytes: Data(csv.utf8))
+            XCTAssertEqual(parsed.principal?.amountText, "12000.00", header)
+        }
+    }
+
+    func testPayoffBeatsRunningBalance() {
+        let csv = """
+        Posted Date,Memo,Amount,Payoff Balance,Running Balance
+        09/30/2026,PAYMENT,-500.00,12000.00,99999.00
+        """
+        let parsed = RanchOSFinanceCSV.parse(bytes: Data(csv.utf8))
+        XCTAssertEqual(parsed.principal?.amountText, "12000.00")
+    }
+
+    func testPrincipalBeatsPayoff() {
+        let csv = """
+        Posted Date,Memo,Amount,Principal Balance,Payoff Balance
+        09/30/2026,PAYMENT,-500.00,12000.00,8000.00
+        """
+        let parsed = RanchOSFinanceCSV.parse(bytes: Data(csv.utf8))
+        XCTAssertEqual(parsed.principal?.amountText, "12000.00")
+    }
+
+    func testPayoffPaymentIsNotTheBalance() {
+        let csv = "Posted Date,Memo,Amount,Payoff Payment\n09/30/2026,PAYMENT,-500.00,400.00\n"
+        let parsed = RanchOSFinanceCSV.parse(bytes: Data(csv.utf8))
+        XCTAssertNil(parsed.principal)
+    }
+
     func testPrincipalPaymentHeadersAreNotTheBalance() {
         for header in ["Principal Payment", "Principal Paid"] {
             let csv = "Posted Date,Memo,Amount,\(header)\n09/30/2026,PAYMENT,-500.00,400.00\n"
@@ -125,6 +157,30 @@ final class RanchOSFinanceLoanBalanceTests: XCTestCase {
         store.recordPrincipalSnapshot(accountID: loan.id, date: newer, amount: Decimal(string: "11500.00")!)
         XCTAssertEqual(store.principalBalance(accountID: loan.id)?.amount, Decimal(string: "11500.00"))
         XCTAssertEqual(store.principalHistory(accountID: loan.id).count, 3)
+    }
+
+    @MainActor
+    func testEarlierPayoffShowsTheChangeToTheNextDate() throws {
+        let store = try tempStore()
+        let loan = try XCTUnwrap(store.createAccount(name: "Freedom Mortgage", kind: .loan, purpose: "House"))
+        let august = try XCTUnwrap(RanchOSFinanceCSV.parseDate("08/31/2026"))
+        let september = try XCTUnwrap(RanchOSFinanceCSV.parseDate("09/30/2026"))
+        let october = try XCTUnwrap(RanchOSFinanceCSV.parseDate("10/31/2026"))
+        store.recordPrincipalSnapshot(accountID: loan.id, date: august, amount: Decimal(string: "12500.00")!)
+        XCTAssertTrue(store.earlierPayoffChanges(accountID: loan.id).isEmpty)
+
+        store.recordPrincipalSnapshot(accountID: loan.id, date: september, amount: Decimal(string: "12000.00")!)
+        store.recordPrincipalSnapshot(accountID: loan.id, date: october, amount: Decimal(string: "12100.00")!)
+        let changes = store.earlierPayoffChanges(accountID: loan.id)
+        XCTAssertEqual(changes.map(\.snapshot.amount), [
+            Decimal(string: "12000.00")!, Decimal(string: "12500.00")!,
+        ])
+        XCTAssertEqual(changes.map(\.decline), [
+            Decimal(string: "-100.00")!, Decimal(string: "500.00")!,
+        ])
+
+        store.recordPrincipalSnapshot(accountID: loan.id, date: september, amount: Decimal(string: "12100.00")!)
+        XCTAssertEqual(store.earlierPayoffChanges(accountID: loan.id).first?.decline, 0)
     }
 
     @MainActor

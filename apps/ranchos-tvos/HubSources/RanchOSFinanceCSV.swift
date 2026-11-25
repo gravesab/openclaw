@@ -38,12 +38,15 @@ enum RanchOSFinanceCSV {
     static let genericDescriptionHeaders = ["description", "merchant", "memo", "payee", "details", "narrative"]
     static let genericAmountHeaders = ["amount", "amount (usd)", "transaction amount", "value"]
 
-    /// A loan statement names what is still owed. A principal column wins;
-    /// otherwise the newest running-balance cell is the snapshot.
+    /// A loan statement names what is still owed. A principal column wins.
+    /// A payoff column is used only when no principal column is present, and
+    /// it wins over a running balance. Otherwise the newest running-balance
+    /// cell is the snapshot.
     static let principalHeaders = [
         "principal", "outstanding principal", "current principal",
         "principal balance", "remaining principal",
     ]
+    static let payoffHeaders = ["payoff", "payoff balance", "payoff amount"]
     static let balanceHeaders = ["balance", "running balance", "ending balance", "current balance"]
 
     static let dateFormats = ["M/d/yyyy", "MM/dd/yyyy", "M/d/yy", "MM/dd/yy", "yyyy-MM-dd"]
@@ -267,7 +270,8 @@ enum RanchOSFinanceCSV {
         }
         return GenericMapping(
             date: date, description: description, amount: amount,
-            principal: firstIndex(of: principalHeaders), balance: firstIndex(of: balanceHeaders))
+            principal: firstIndex(of: principalHeaders) ?? firstIndex(of: payoffHeaders),
+            balance: firstIndex(of: balanceHeaders))
     }
 
     // MARK: - Apple Card rows

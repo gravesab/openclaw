@@ -1775,11 +1775,9 @@ struct RanchOSFinanceScreen: View {
         if let current = store.principalBalance(accountID: account.id) {
             Text("Payoff balance \(RanchOSFinanceMoney.dollarsAndCents(current.amount)) as of \(RanchOSFinanceDates.display(current.date))")
                 .font(.subheadline)
-            let earlier = store.principalHistory(accountID: account.id)
-                .filter { $0.date != current.date }
-                .sorted { $0.date > $1.date }
-            ForEach(earlier, id: \.date) { snap in
-                Text("Payoff balance \(RanchOSFinanceMoney.dollarsAndCents(snap.amount)) as of \(RanchOSFinanceDates.display(snap.date))")
+            let earlier = store.earlierPayoffChanges(accountID: account.id)
+            ForEach(earlier, id: \.snapshot.date) { change in
+                Text(payoffHistoryLine(change))
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -1832,6 +1830,17 @@ struct RanchOSFinanceScreen: View {
                 principalDates[account.id] = date
                 principalProblems[account.id] = nil
             })
+    }
+
+    private func payoffHistoryLine(_ change: RanchOSFinancePayoffChange) -> String {
+        let line = "Payoff balance \(RanchOSFinanceMoney.dollarsAndCents(change.snapshot.amount)) as of \(RanchOSFinanceDates.display(change.snapshot.date))"
+        if change.decline > 0 {
+            return "\(line), down \(RanchOSFinanceMoney.dollarsAndCents(change.decline))"
+        }
+        if change.decline < 0 {
+            return "\(line), up \(RanchOSFinanceMoney.dollarsAndCents(-change.decline))"
+        }
+        return line
     }
 
     private func formatPrincipalDraft(_ accountID: UUID) {

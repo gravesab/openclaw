@@ -79,6 +79,13 @@ struct RanchOSFinancePrincipalSnapshot: Codable, Sendable, Equatable {
     var amount: Decimal
 }
 
+/// An earlier payoff and how it changed to reach the next newer date.
+/// A positive decline means the payoff went down. A negative decline means it went up.
+struct RanchOSFinancePayoffChange: Equatable, Sendable {
+    var snapshot: RanchOSFinancePrincipalSnapshot
+    var decline: Decimal
+}
+
 /// What ingesting a loan statement kept. Nil for cards, banks, and files
 /// that kept nothing new.
 enum RanchOSFinancePrincipalOutcome: Sendable, Equatable {
@@ -643,6 +650,18 @@ final class RanchOSFinanceStore {
             account.kind == .loan
         else { return [] }
         return account.principalSnapshots.sorted { $0.date < $1.date }
+    }
+
+    /// Earlier payoffs, newest first. Each decline is that date's amount minus
+    /// the next newer amount. The current payoff is not included.
+    func earlierPayoffChanges(accountID: UUID) -> [RanchOSFinancePayoffChange] {
+        let history = principalHistory(accountID: accountID)
+        guard history.count >= 2 else { return [] }
+        return (0..<(history.count - 1)).reversed().map { index in
+            let older = history[index]
+            let newer = history[index + 1]
+            return RanchOSFinancePayoffChange(snapshot: older, decline: older.amount - newer.amount)
+        }
     }
 
     /// Keeps one dated principal snapshot, as read or typed. A newer date is

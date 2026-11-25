@@ -19,12 +19,12 @@ Per handoff template in `~/team/handoffs/README.md`, create:
 
 **Filename**: `20260929-p3-http-service-spec.md`  
 **Priority**: Medium (blocks Jarvis HTTP client SDK)  
-**Dependencies**: RanchBrain core + PropertyManager tenant pool + OIDC auth (already implemented)
+**Dependencies**: RanchBrain core + PropertyManager tenant pool + OIDC auth (already implemented)  
 
 ### Key Design Questions to Address
 
 1. **Authentication flow**: How does tenant ID flow from JWT claims? (P2 already scoping; this should pass tenant as query/path param in headers)
-2. **Rate limits**: What are per-tenant limits on `/search`, `/memory` endpoints?
+2. **Rate limits**: What are per-tenant limits on `/search`, `/memory` endpoints? 
 3. **Apple-first considerations**:
    - Background task patterns for iOS/Apple Watch
    - On-device cache policy (no PII leaves without consent)

@@ -2,12 +2,11 @@
 
 **Date**: September 29, 2026  
 **From**: OpenCode (local Qwen 3.5 9B)  
-**To**: Muse Terminal session on SSH-Dev
+**To**: Muse Terminal session on SSH-Dev  
 
 ## Context Recap
 
 RanchOS development threads:
-
 1. **DEV app build** — Finished, HubTests 66/66 pass. Awaiting Andrew's human test of new IP endpoint (`100.85.188.74:5062`). Reinstall held until verified by Andrew.
 2. **PropertyManager API TCP mode** — `~/.config/openclaw/db.env` ready on SSH-Dev; systemd override prepared by Cursor. Wait for TCP cutover confirmation before testing `/tasks` latency drop (target <2s).
 3. **RanchBrain M3 grounding**:
@@ -24,7 +23,7 @@ Develop the **P3 HTTP service specification** for RanchBrain.
 Per handoff template in `~/team/handoffs/README.md`:
 
 1. **Title**: P3 — Tenant-scoped HTTP service (REST/gRPC, auth, rate limits)
-2. **Scope boundary**:
+2. **Scope boundary**: 
    - Builds on P2 isolation (tenant-per-request or scoped sessions)
    - Exposes read-only memory/query endpoints to client apps
    - No direct DB writes; delegates mutation to PropertyManager RLS policies
@@ -87,7 +86,6 @@ related-issue: RANCH-XXX (if known)
 ### Testing Notes
 
 Once spec is drafted:
-
 - Hand to Cursor for implementation review
 - No commits/pushes from this session (Muse never deploys)
 

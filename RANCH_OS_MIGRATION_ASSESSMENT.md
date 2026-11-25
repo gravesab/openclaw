@@ -3,7 +3,7 @@
 **Date**: September 28, 2026  
 **Migration**: M4 DEV VM transfer from Mac mini → IntelMini server  
 **Prepared by**: Cursor AI implementation team  
-**Distribution**: Andy (owner), Agent maintainers (Muse, Codex), Core team
+**Distribution**: Andy (owner), Agent maintainers (Muse, Codex), Core team  
 
 ---
 
@@ -19,24 +19,24 @@ This document assesses impact across active workstreams, documents required chan
 
 ### Current State (Pre-Migration)
 
-| Asset                 | Location                              | Role                                                       |
-| --------------------- | ------------------------------------- | ---------------------------------------------------------- |
-| DEV VM runtime        | M4 Mac mini (local)                   | Build orchestration, container deployment, gateway hosting |
-| Source control clones | M4 filesystem & worktrees on /Volumes | Developer editing, testing                                 |
-| Gateway services      | `src/gateway/` + containers           | Plugin discovery, channel routing                          |
-| Test infrastructure   | Vitest locally, Testbox remote        | Unit tests, E2E lanes                                      |
-| Agent sessions        | Cursor local host                     | Implementation, debugging                                  |
-| Credentials           | `~/.openclaw/credentials/` (M4)       | Auth tokens, API keys                                      |
+| Asset | Location | Role |
+| --- | --- | --- |
+| DEV VM runtime | M4 Mac mini (local) | Build orchestration, container deployment, gateway hosting |
+| Source control clones | M4 filesystem & worktrees on /Volumes | Developer editing, testing |
+| Gateway services | `src/gateway/` + containers | Plugin discovery, channel routing |
+| Test infrastructure | Vitest locally, Testbox remote | Unit tests, E2E lanes |
+| Agent sessions | Cursor local host | Implementation, debugging |
+| Credentials | `~/.openclaw/credentials/` (M4) | Auth tokens, API keys |
 
 ### Target State (Post-Migration)
 
-| Asset                 | Location                                                  | Role                                          |
-| --------------------- | --------------------------------------------------------- | --------------------------------------------- |
-| DEV VM runtime        | IntelMini server (Ubuntu)                                 | Build orchestration, containers, gateway      |
-| Source control clones | Mac local worktrees + server repos                        | Developer editing on M4                       |
-| Gateway services      | Docker/containers on IntelMini                            | Remote plugin/hosting loop                    |
-| Test infrastructure   | Vitest on M4 local + Testbox remote                       | Unit tests client-side, E2E lanes server-side |
-| Agent sessions        | Codex/Cursor on Mac, remote calls to IntelMini build APIs | Local code gen + CI execution                 |
+| Asset | Location | Role |
+| --- | --- | --- |
+| DEV VM runtime | IntelMini server (Ubuntu) | Build orchestration, containers, gateway |
+| Source control clones | Mac local worktrees + server repos | Developer editing on M4 |
+| Gateway services | Docker/containers on IntelMini | Remote plugin/hosting loop |
+| Test infrastructure | Vitest on M4 local + Testbox remote | Unit tests client-side, E2E lanes server-side |
+| Agent sessions | Codex/Cursor on Mac, remote calls to IntelMini build APIs | Local code gen + CI execution |
 
 ---
 
@@ -45,7 +45,6 @@ This document assesses impact across active workstreams, documents required chan
 ### 1. PropertyManager (Primary Application)
 
 **Current State**:
-
 - SwiftUI/iPadOS app builds on M4 local
 - API/Backend calls through DEV VM gateway
 - Test runs: `pnpm test` locally, e2e via Testbox
@@ -55,7 +54,7 @@ This document assesses impact across active workstreams, documents required chan
 | --- | --- | --- |
 | Build workflow | Low | Xcode/iPadSimulators continue local builds; only server-side API/hosting moves |
 | Gateway calls | Medium | Local client calls remote IntelMini gateway via network (existing pattern) |
-| Test execution | Low/High\* | Unit tests stay local; e2e lanes now use Testbox for full stack (recommended) |
+| Test execution | Low/High* | Unit tests stay local; e2e lanes now use Testbox for full stack (recommended) |
 | Hot path inference | High | On-device Apple Intelligence tasks unaffected; only server-side model calls change |
 
 **Notes**: The PropertyManager app remains a Swift/iOS client. Only the backend hosting moves remote, which already existed in RanchBrain/protocol design. No code changes needed to app layer; update gateway endpoint config if using direct container calls.
@@ -68,7 +67,6 @@ This document assesses impact across active workstreams, documents required chan
 ### 2. RanchFinance (Persistence, Ledger, RLS)
 
 **Current State**:
-
 - Uncommitted changes on `development` (Sep 27): persistence migrations, session storage, RLS policies, test suite
 - Branch `codex/finance-ledger-invariants` exists; PR security branch `9f7b934`
 - Worktree: `OpenClaw-Finance-PR`
@@ -76,12 +74,11 @@ This document assesses impact across active workstreams, documents required chan
 **Migration Impact**:
 | Area | Impact Level | Change Description |
 | --- | --- | --- |
-| Migration authority | High \*\* | Migration manifests and Python scripts run on server; ensure RLS constraints compatible with remote auth flow |
+| Migration authority | High ** | Migration manifests and Python scripts run on server; ensure RLS constraints compatible with remote auth flow |
 | Session state | Medium | `session/` store may live in PostgreSQL (server) or Redis; confirm persistence location after migration |
 | Test isolation | Low | Vitest runs locally; server DB access via connection string update only |
 
 **Critical Notes**:
-
 - **Migration authority** remains a sensitive operation. Do NOT automate without explicit owner approval. Verify migration `010` contents and compatibility with the server-bound gateway auth model.
 - The handoff notes warn against treating migration docs as live; inspect commit `dddcfdb` directly to confirm authority contract.
 
@@ -93,7 +90,6 @@ This document assesses impact across active workstreams, documents required chan
 ### 3. Apple TV / Property Dashboard
 
 **Current State**:
-
 - Worktree: `codex/dev-finalization-property-dashboard-tv` (ahead at `a8b5f5d`)
 - Uncommitted Swift/Xcode changes on main branch
 - Xcode builds local; remote calls to property API
@@ -108,18 +104,17 @@ This document assesses impact across active workstreams, documents required chan
 ### 4. RanchBrain / Gateway / Retrieval
 
 **Current State**:
-
 - Local-only gateway on M4 per handoff notes
 - Authentication, Telegram contracts, DEV model paths
 - Foundation worktree: `codex/ranchbrain-dev-foundation` (`ccb0a4d`)
 
 **Migration Impact**: **HIGH**. The "local-only" stance is being revised to support remote server hosting. This changes the fundamental inference/hosting topology:
 
-| Area        | Change                                          | Rationale                                                                            |
-| ----------- | ----------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Gateway     | Remote calls now use IntelMini                  | Frees M4 for inference tasks; follows RanchBot pattern                               |
-| Model paths | Ollama endpoints may shift to server URL        | Verify `.env` config for `OLLAMA_HOST`; ensure model registry accessible from client |
-| Auth flow   | May integrate with server-side credential vault | Align with Finance RLS/security boundaries                                           |
+| Area | Change | Rationale |
+| --- | --- | --- |
+| Gateway | Remote calls now use IntelMini | Frees M4 for inference tasks; follows RanchBot pattern |
+| Model paths | Ollama endpoints may shift to server URL | Verify `.env` config for `OLLAMA_HOST`; ensure model registry accessible from client |
+| Auth flow | May integrate with server-side credential vault | Align with Finance RLS/security boundaries |
 
 **Owner**: Cursor (infrastructure implementation); Codex (privacy/review)  
 **Next Action**: Audit all `OLLAMA_HOST`, `OPENCLAW_GATEWAY_URL` configs; confirm model registry mirrors or proxy if needed.
@@ -129,7 +124,6 @@ This document assesses impact across active workstreams, documents required chan
 ### 5. PropertyManager MCP v1 (Tooling, Handbook Search)
 
 **Current State**:
-
 - Worktree: `.git/worktrees/propertymanager-mcp-v1` and `/Volumes/T2 WD X/OpenClaw/Worktrees/propertymanager-mcp-v1`
 - Commit `dddcfdb`: Migration 010, authority manifest, Python MCP server
 - Live DB migrations pending; read-only surface (7 tools) verified
@@ -149,7 +143,6 @@ This document assesses impact across active workstreams, documents required chan
 ### 6. VA/Calling / Voice Module
 
 **Current State**:
-
 - Phase 0 docs approved Sep 21-22 (`RANCH_VA_VOICE_AND_CALLING_FOUNDATIONAL_REQUIREMENTS.md`)
 - Implementation pending (Push-to-talk, LiveKit eval)
 
@@ -163,17 +156,16 @@ This document assesses impact across active workstreams, documents required chan
 ### 7. OpenClaw Model Router / Compute Router
 
 **Current State**:
-
 - Failover documented but not live-certified (per August audit)
 - Compute independence extension approved/planned; pending integration
 
 **Migration Impact**: **HIGH**. The compute router must adapt to a new host URL for the M4-independent model serving layer:
 
-| Area                 | Required Change                                                              |
-| -------------------- | ---------------------------------------------------------------------------- |
-| Router configuration | Update `MODEL_HOST`, `PROVIDER_API_URL` to IntelMini server address          |
-| Score/cost logic     | Verify failover policy handles remote latency differences                    |
-| Privacy gate         | Ensure no sensitive user data crosses networks without explicit confirmation |
+| Area | Required Change |
+| --- | --- |
+| Router configuration | Update `MODEL_HOST`, `PROVIDER_API_URL` to IntelMini server address |
+| Score/cost logic | Verify failover policy handles remote latency differences |
+| Privacy gate | Ensure no sensitive user data crosses networks without explicit confirmation |
 
 **Owner**: Cursor (routing logic); Codex (privacy/egress review)  
 **Next Action**: Audit model registry paths; confirm provider contracts support IPv6/firewall rules on server.
@@ -183,7 +175,6 @@ This document assesses impact across active workstreams, documents required chan
 ### 8. Model Lab / Overnight Evaluator
 
 **Current State**:
-
 - Archive: `Ranch_OS_Model_Evaluator_Phase_1.zip`
 - Task-specific scoring, best/secondary model selection, nightly runs pending
 
@@ -197,7 +188,6 @@ This document assesses impact across active workstreams, documents required chan
 ### 9. Infrastructure / Muse Access / Intel DEV VM
 
 **Current State**:
-
 - Access runbook prepared Sep 27 (`RANCH_OS_MUSE_ENVIRONMENT_ACCESS_RUNBOOK.md`)
 - Andy requires: M4 host, Intel Mini, M4 DEV Ubuntu environment verified individually
 
@@ -232,7 +222,6 @@ This document assesses impact across active workstreams, documents required chan
    - Ensure worktrees (`.git/worktrees/`, `/Volumes/T2...`) are not orphaned
 
 2. **Update Gateway Configuration**
-
    ```bash
    # Example update to .env or server.config.json
    export OPENCLAW_GATEWAY_URL="https://intelmini.yourdomain.local:8443"
@@ -257,12 +246,12 @@ This document assesses impact across active workstreams, documents required chan
 
 ## Risk Assessment
 
-| Risk                                    | Likelihood | Impact           | Mitigation                                                            |
-| --------------------------------------- | ---------- | ---------------- | --------------------------------------------------------------------- |
-| Overwrite uncommitted M4 changes        | Medium     | High (data loss) | Force-push after staged commit; backup worktrees to external location |
-| Model registry inaccessible from client | Low-Medium | High             | Use gateway proxy or model cache if firewall blocks direct calls      |
-| Finance migration without consent       | Low        | Critical         | Codex review gate, owner signature before server deploy               |
-| Firewall blocks IPv6/remote API         | Medium     | Medium           | Test connectivity pre-migration; document NAT configuration needed    |
+| Risk | Likelihood | Impact | Mitigation |
+| --- | --- | --- | --- |
+| Overwrite uncommitted M4 changes | Medium | High (data loss) | Force-push after staged commit; backup worktrees to external location |
+| Model registry inaccessible from client | Low-Medium | High | Use gateway proxy or model cache if firewall blocks direct calls |
+| Finance migration without consent | Low | Critical | Codex review gate, owner signature before server deploy |
+| Firewall blocks IPv6/remote API | Medium | Medium | Test connectivity pre-migration; document NAT configuration needed |
 
 ---
 
@@ -288,4 +277,4 @@ This document assesses impact across active workstreams, documents required chan
 
 **Appendices**: Migration runbook for transferring DEV changes to IntelMini; Status report for Andy with verified checkpoints and pending items.
 
-_Generated automatically by Cursor AI implementation team, Sep 28, 2026_
+*Generated automatically by Cursor AI implementation team, Sep 28, 2026*

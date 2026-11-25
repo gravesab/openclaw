@@ -13,17 +13,10 @@ export default {
         acceptsArgs: false,
         handler: async () => {
           try {
-            const report = JSON.parse(
-              await readFile(
-                join(api.runtime.state.resolveStateDir(), "system-health/report.json"),
-                "utf8",
-              ),
-            );
+            const report = JSON.parse(await readFile(join(api.runtime.state.resolveStateDir(), "system-health/report.json"), "utf8"));
             const age = Date.now() / 1000 - report.checked_epoch;
             if (!Number.isFinite(age) || age < -300 || age > 900) {
-              return {
-                text: "System health: Unknown. Health collector has not refreshed within 15 minutes.",
-              };
+              return { text: "System health: Unknown. Health collector has not refreshed within 15 minutes." };
             }
             return { text: report.text };
           } catch {

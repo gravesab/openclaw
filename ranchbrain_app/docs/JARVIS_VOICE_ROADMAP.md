@@ -6,17 +6,17 @@ ranch records for this stage. No deployment, Production, or live-data authority.
 
 ## Design sources found
 
-| File                                                                   | Standing                                       | Relevance                                                                                                                                                   |
-| ---------------------------------------------------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ranchbrain_app/docs/RANCH_OS_HOME_APPLICATION_SHELL_DESIGN.md`        | Approved module-host contract for DEV planning | One RanchOS app per platform; compiled feature modules; Home owns no records; Apple-first intelligence, OpenClaw coordinates supporting AI behind workflows |
-| `RANCH_OS_CURSOR_ONBOARDING.md` (repo root)                            | Approved onboarding index                      | Doc precedence; fixture ≠ authorization; Apple-first direction required per AI feature                                                                      |
-| `ranchbrain_app/docs/ARCHITECTURE.md`                                  | Approved (1.0 Alpha)                           | RanchBrain is the local-first memory/knowledge engine OpenClaw uses; Jarvis facts come from here when connected                                             |
-| `ranchbrain_app/docs/ROADMAP.md`                                       | Approved plan                                  | Executive briefing ("Good Morning Andy") is the approved conversational precedent (2.0 - Executive)                                                         |
-| `ranchbrain_app/docs/API_SPEC.md`, `DATA_MODEL.md`                     | Approved contracts                             | Read-model shapes Jarvis must honor when grounded                                                                                                           |
-| `RANCHBOT_ARCHITECTURE.md` (repo root)                                 | Implemented behavior (Telegram ops bot)        | Text command router + briefing precedent; not voice, not Jarvis                                                                                             |
-| `tools/briefing/briefing_manager.py`                                   | Implemented behavior                           | Briefing assembly from events/memories; text-only                                                                                                           |
-| `~/openclaw-speech/voice_to_openclaw.py` (outside checkout, read-only) | Implemented prototype                          | Prior voice loop: fixed-record mic → faster-whisper → OpenClaw `/run-command` → macOS `say`; ancestor pattern, not shipped                                  |
-| `ranchbrain/README.md` → `docs/RanchBrain-Architecture.md`             | Missing                                        | Referenced path does not exist; do not cite it as evidence                                                                                                  |
+| File | Standing | Relevance |
+| --- | --- | --- |
+| `ranchbrain_app/docs/RANCH_OS_HOME_APPLICATION_SHELL_DESIGN.md` | Approved module-host contract for DEV planning | One RanchOS app per platform; compiled feature modules; Home owns no records; Apple-first intelligence, OpenClaw coordinates supporting AI behind workflows |
+| `RANCH_OS_CURSOR_ONBOARDING.md` (repo root) | Approved onboarding index | Doc precedence; fixture ≠ authorization; Apple-first direction required per AI feature |
+| `ranchbrain_app/docs/ARCHITECTURE.md` | Approved (1.0 Alpha) | RanchBrain is the local-first memory/knowledge engine OpenClaw uses; Jarvis facts come from here when connected |
+| `ranchbrain_app/docs/ROADMAP.md` | Approved plan | Executive briefing ("Good Morning Andy") is the approved conversational precedent (2.0 - Executive) |
+| `ranchbrain_app/docs/API_SPEC.md`, `DATA_MODEL.md` | Approved contracts | Read-model shapes Jarvis must honor when grounded |
+| `RANCHBOT_ARCHITECTURE.md` (repo root) | Implemented behavior (Telegram ops bot) | Text command router + briefing precedent; not voice, not Jarvis |
+| `tools/briefing/briefing_manager.py` | Implemented behavior | Briefing assembly from events/memories; text-only |
+| `~/openclaw-speech/voice_to_openclaw.py` (outside checkout, read-only) | Implemented prototype | Prior voice loop: fixed-record mic → faster-whisper → OpenClaw `/run-command` → macOS `say`; ancestor pattern, not shipped |
+| `ranchbrain/README.md` → `docs/RanchBrain-Architecture.md` | Missing | Referenced path does not exist; do not cite it as evidence |
 
 No Jarvis or voice design document exists in the checkout (searched
 `ranchbrain/`, `ranchbrain_app/`, `apps/`, `docs/`, `tools/briefing/` by name

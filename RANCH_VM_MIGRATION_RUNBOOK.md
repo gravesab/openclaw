@@ -3,7 +3,7 @@
 **Date**: September 28, 2026  
 **Objective**: Safely transfer Development VM workload from Apple M4 Mac mini to IntelMini server  
 **Prepared by**: Cursor AI with Codex security review  
-**Approval Required**: Andy (owner), Codex (security/privacy gate) before deployment
+**Approval Required**: Andy (owner), Codex (security/privacy gate) before deployment  
 
 ---
 
@@ -13,7 +13,7 @@ This runbook documents the safe migration of the OpenClaw DEV environment from y
 
 **Migration Type**: Hot swap (services continue running during transition)  
 **Downtime**: ~10 minutes max for gateway redeployment  
-**Credentials**: Preserved via secure vault, not file transfer
+**Credentials**: Preserved via secure vault, not file transfer  
 
 ---
 
@@ -81,7 +81,7 @@ docker ps -a --format "table {{.Names}}\t{{.Image}}\t{{.Status}}"
 
 # Document volumes mounted from Mac filesystem (these WILL be lost during cold swap)
 docker volume ls -f dangling=false --format "{{.Name}}" 2>/dev/null || \
-echo "No Docker volumes on this host (expected for hot migration)"
+echo "No Docker volumes on this host (expected for hot migration)" 
 ```
 
 ---
@@ -112,7 +112,7 @@ curl -s "${OPENCLAW_GATEWAY_URL}/api/health" && echo "Remote gateway reachable" 
 cat ~/.openclaw/sessions/*.json 2>/dev/null | head -20 || echo "No persistent sessions to export"
 
 # If using custom agent configs that won't re-sync:
-cp ~/.openclaw/agents/* ~/.openclaw/agents-backup-$(date +%Y%m%d) || true
+cp ~/.openclaw/agents/* ~/.openclaw/agents-backup-$(date +%Y%m%d) || true 
 ```
 
 **Step 3**: Commit and push pre-migration checkpoints (if repo permits)
@@ -278,17 +278,15 @@ echo "Use provider CLI tools per official docs (no automated re-export keys)"
 If validation fails in Phase 4, revert within the maintenance window:
 
 1. **Kill new deployment** on server (if unhealthy)
-
    ```bash
    ssh yourserver-ip <<EOF
    # Gracefully stop services
-   systemctl stop openclaw-gateway || docker compose down || node src/index.js -s 2>/dev/null &
+   systemctl stop openclaw-gateway || docker compose down || node src/index.js -s 2>/dev/null & 
    exit
    EOF
    ```
 
 2. **Restore local config** pointing to old gateway host (if applicable)
-
    ```bash
    export OPENCLAW_GATEWAY_URL="http://localhost:8443"  # Or original IP/hostname
    ```
@@ -343,12 +341,12 @@ Update these pages after migration completes successfully:
 ## Sign-Off
 
 **Approved by**:  
-[ ] Andy (owner): **********\_\_\_\_********** Date: ******\_\_\_******  
-[ ] Codex (security review): ******\_\_\_****** Date: ******\_\_\_******
+[  ] Andy (owner): ________________________ Date: _______________  
+[  ] Codex (security review): _______________ Date: _______________  
 
 **Migration Executed By**: Cursor AI with human oversight  
-**Timestamp**: TBD after validation success
+**Timestamp**: TBD after validation success  
 
 ---
 
-_End of runbook. For questions, refer to OPERATIONS_RUNBOOK.md in project root._
+*End of runbook. For questions, refer to OPERATIONS_RUNBOOK.md in project root.*

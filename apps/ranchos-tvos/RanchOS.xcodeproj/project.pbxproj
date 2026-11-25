@@ -91,6 +91,7 @@
 		8F624DC859A59696959F6829 /* RanchOSTVHomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B9EC6A622C755733752879E /* RanchOSTVHomeView.swift */; };
 		90C3BCFA7E0C18A55B992430 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 613AA46701E775DD8BDC30A4 /* Assets.xcassets */; };
 		91936F92A0928385E668024E /* RanchVADEVWorkspace.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A800F8592481015682150AE /* RanchVADEVWorkspace.swift */; };
+		937DF538CC533E1890E13CEA /* VoiceInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DA22C52AEDA33AC00525C7C /* VoiceInput.swift */; };
 		9499C316C9F3C1F528B1B11B /* RanchOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6A04C22D1EE199C860E5C42C /* RanchOSApp.swift */; };
 		979D3819C3A9C417ECCC6F7D /* RanchOSFinanceCost.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45B9E255E0AD692B20722102 /* RanchOSFinanceCost.swift */; };
 		9E07C3032BED00091BEAE81B /* LogitechCamera.swift in Sources */ = {isa = PBXBuildFile; fileRef = C46DA45AF23B7B1800BC6768 /* LogitechCamera.swift */; };
@@ -563,6 +564,7 @@
 				58B7E0FDE1127934536490DE /* RanchVADEVQueryTests.swift in Sources */,
 				D00953C51EDEBF52F2238640 /* RanchVAWeather.swift in Sources */,
 				26F886BA855795AA9A236346 /* RanchVAWeatherTests.swift in Sources */,
+				937DF538CC533E1890E13CEA /* VoiceInput.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

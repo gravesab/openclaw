@@ -143,6 +143,7 @@ targets:
       - path: HubSources/Jarvis/RanchVAAssetGraph.swift
       - path: HubSources/Jarvis/RanchVADEVQuery.swift
       - path: HubSources/Jarvis/RanchVAWeather.swift
+      - path: HubSources/Jarvis/VoiceInput.swift
       - path: HubSources/RanchOSFinanceCSV.swift
       - path: HubSources/RanchOSFinanceStore.swift
       - path: HubSources/RanchOSFinanceCategorizer.swift

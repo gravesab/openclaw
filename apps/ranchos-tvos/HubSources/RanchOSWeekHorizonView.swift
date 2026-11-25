@@ -1,5 +1,7 @@
 import SwiftUI
 
+// Uses RanchOSTheme, which the tvOS build does not include.
+#if !os(tvOS)
 /// Read-only Weeks planning: overdue + two week sections for a selected 14-day block.
 struct RanchOSWeekHorizonView: View {
     let propertyStore: RanchOSPropertyLiveStore
@@ -134,3 +136,4 @@ struct RanchOSWeekHorizonView: View {
         .padding(.top, 4)
     }
 }
+#endif

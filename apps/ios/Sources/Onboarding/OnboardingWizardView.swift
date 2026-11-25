@@ -1,5 +1,6 @@
 import Combine
 import CoreImage
+import OpenClawChatUI
 import OpenClawKit
 import PhotosUI
 import SwiftUI
@@ -572,8 +573,9 @@ struct OnboardingWizardView: View {
             TextField("Host", text: self.$manualHost)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .appleIntelligenceDictation(self.$manualHost)
             TextField("Port", text: self.$manualPortText)
-                .keyboardType(.numberPad)
+                .keyboardType(.numberPad).appleIntelligenceDictation(self.$manualPortText)
             Toggle("Use TLS", isOn: self.$manualTLS)
             self.manualConnectButton
         } header: {
@@ -589,7 +591,9 @@ struct OnboardingWizardView: View {
                 SecureField("Gateway Auth Token", text: self.$gatewayToken)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .appleIntelligenceDictation(self.$gatewayToken)
                 SecureField("Gateway Password", text: self.$gatewayPassword)
+                    .appleIntelligenceDictation(self.$gatewayPassword)
 
                 if let problem = self.currentProblem {
                     GatewayProblemBanner(
@@ -707,17 +711,21 @@ struct OnboardingWizardView: View {
             TextField("Host", text: self.$manualHost)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .appleIntelligenceDictation(self.$manualHost)
             TextField("Port", text: self.$manualPortText)
-                .keyboardType(.numberPad)
+                .keyboardType(.numberPad).appleIntelligenceDictation(self.$manualPortText)
             Toggle("Use TLS", isOn: self.$manualTLS)
             TextField("Discovery Domain (optional)", text: self.$discoveryDomain)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
+                .appleIntelligenceDictation(self.$discoveryDomain)
             if self.selectedMode == .remoteDomain {
                 SecureField("Gateway Auth Token", text: self.$gatewayToken)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .appleIntelligenceDictation(self.$gatewayToken)
                 SecureField("Gateway Password", text: self.$gatewayPassword)
+                    .appleIntelligenceDictation(self.$gatewayPassword)
             }
             self.manualConnectButton
         }

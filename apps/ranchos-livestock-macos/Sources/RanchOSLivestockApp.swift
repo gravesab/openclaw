@@ -12,7 +12,7 @@ struct RanchOSLivestockApp: App {
     var body: some Scene {
         WindowGroup(LivestockBuildStamp.current.name) {
             LivestockRootView(store: store)
-                .task { await store.loadAuthorizedRead() }
+                .task { await store.holdConnectionWhileOpen() }
         }
         #if os(macOS)
         .defaultSize(width: 1_250, height: 780)

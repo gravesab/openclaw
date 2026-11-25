@@ -39,6 +39,73 @@ import {
 import { createTelegramWebhookStatusPublisher } from "./webhook-status.js";
 
 const TELEGRAM_WEBHOOK_MAX_BODY_BYTES = 1024 * 1024;
+
+function ranchSentinelEnabled(): boolean {
+  return process.env.RANCH_SENTINEL_ENABLED === "1";
+}
+
+function ranchSentinelHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  const token = process.env.RANCH_SENTINEL_TOKEN;
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
+
+export function postRanchSentinel(event: { type: string; service: string; score: number }): void {
+  if (!ranchSentinelEnabled()) {
+    return;
+  }
+  const url = process.env.RANCH_SENTINEL_URL ?? "http://127.0.0.1:8001/sense";
+  let hostname = "";
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return;
+  }
+  if (hostname !== "127.0.0.1" && hostname !== "localhost" && hostname !== "::1") {
+    return;
+  }
+  void fetch(url, {
+    method: "POST",
+    headers: ranchSentinelHeaders(),
+    body: JSON.stringify(event),
+    signal: AbortSignal.timeout(200),
+  }).catch(() => undefined);
+}
+
+export async function ranchServiceQuarantined(service: string): Promise<boolean> {
+  if (!ranchSentinelEnabled()) {
+    return false;
+  }
+  const base = process.env.RANCH_SENTINEL_URL ?? "http://127.0.0.1:8001/sense";
+  let statusUrl: URL;
+  try {
+    statusUrl = new URL(base);
+  } catch {
+    return true;
+  }
+  if (
+    statusUrl.hostname !== "127.0.0.1" &&
+    statusUrl.hostname !== "localhost" &&
+    statusUrl.hostname !== "::1"
+  ) {
+    return true;
+  }
+  statusUrl.pathname = `/quarantine/${service}`;
+  statusUrl.search = "";
+  try {
+    const response = await fetch(statusUrl, { signal: AbortSignal.timeout(50) });
+    if (!response.ok) {
+      return true;
+    }
+    const body = (await response.json()) as { quarantined?: boolean };
+    return body.quarantined === true;
+  } catch {
+    return true;
+  }
+}
 const TELEGRAM_WEBHOOK_BODY_TIMEOUT_MS = 30_000;
 const TELEGRAM_WEBHOOK_REGISTRATION_RETRY_POLICY: BackoffPolicy = {
   initialMs: 5_000,
@@ -334,12 +401,17 @@ export async function startTelegramWebhook(opts: {
     }
     const secretHeader = resolveSingleHeaderValue(req.headers["x-telegram-bot-api-secret-token"]);
     if (!hasValidTelegramWebhookSecret(secretHeader, secret)) {
+      postRanchSentinel({ type: "tg.secret_fail", service: "telegram", score: 1 });
       res.shouldKeepAlive = false;
       res.setHeader("Connection", "close");
       respondText(401, "unauthorized");
       return;
     }
     void (async () => {
+      if (ranchSentinelEnabled() && (await ranchServiceQuarantined("telegram"))) {
+        respondText(503, "quarantined");
+        return;
+      }
       const body = await readJsonBodyWithLimit(req, {
         maxBytes: TELEGRAM_WEBHOOK_MAX_BODY_BYTES,
         timeoutMs: TELEGRAM_WEBHOOK_BODY_TIMEOUT_MS,

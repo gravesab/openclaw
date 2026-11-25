@@ -250,7 +250,7 @@ struct ManualLibraryView: View {
         defer { isLoadingLibrary = false }
         do {
             libraryPDFs = try await store.client.fetchDashboardLibraryPDFs(
-                manualLibraryBaseURL: store.manualLibraryBaseURL
+                manualLibraryBaseURL: store.activeManualLibraryBaseURL
             )
             libraryError = nil
         } catch {
@@ -268,7 +268,7 @@ struct ManualLibraryView: View {
                 let versionID = try await store.client.connectDashboardLibraryPDF(
                     pdf,
                     assetID: assetID,
-                    manualLibraryBaseURL: store.manualLibraryBaseURL
+                    manualLibraryBaseURL: store.activeManualLibraryBaseURL
                 )
                 await loadManuals()
                 connectingPath = nil
@@ -298,7 +298,7 @@ struct ManualLibraryView: View {
                 pdf: pdf,
                 filename: url.lastPathComponent,
                 assetID: assetID,
-                manualLibraryBaseURL: store.manualLibraryBaseURL
+                manualLibraryBaseURL: store.activeManualLibraryBaseURL
             )
             show(reply, isError: false)
             await loadManuals()
@@ -323,7 +323,7 @@ struct ManualLibraryView: View {
         do {
             let pdf = try await store.client.downloadAssetManual(
                 manual,
-                manualLibraryBaseURL: store.manualLibraryBaseURL
+                manualLibraryBaseURL: store.activeManualLibraryBaseURL
             )
             let result = try await AppleManualExtractor.extract(
                 pdf: pdf,

@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SwiftUI
+import OpenClawChatUI
 
 struct SystemRunSettingsView: View {
     @State private var model = ExecApprovalsSettingsModel()
@@ -107,6 +108,7 @@ struct SystemRunSettingsView: View {
                 HStack(spacing: 8) {
                     TextField("Add command name or path glob", text: self.$newPattern)
                         .textFieldStyle(.roundedBorder)
+                        .appleIntelligenceDictation(self.$newPattern)
                     Button("Add") {
                         if self.model.addEntry(self.newPattern) == nil {
                             self.newPattern = ""
@@ -186,6 +188,7 @@ struct ExecAllowlistRow: View {
             HStack(spacing: 8) {
                 TextField("Pattern", text: self.patternBinding)
                     .textFieldStyle(.roundedBorder)
+                    .appleIntelligenceDictation(self.patternBinding)
 
                 Button(role: .destructive) {
                     self.onRemove()

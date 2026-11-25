@@ -1,9 +1,10 @@
 """Loopback-only Livestock DEV read server for a local app test.
 
-GET /api/ranchos/livestock/v1/animals is the only route. The process binds
+GET /api/ranchos/livestock/v1/animals serves the Livestock DEV app.
+GET /api/ranchos/livestock/v1/herd prepares the RanchOS TV/iPhone summary
+from DEV Postgres. Apple clients do not open the database. The process binds
 127.0.0.1, writes a mode-0600 ticket outside the repo, and does not print
-the token. It does not accept writes, open PostgreSQL, or listen on any
-other address.
+the token.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ from ranchbrain.livestock_read_api import (
     LivestockProvenanceV1,
     LivestockReadResponseV1,
     LiveLifecycleStatus,
+    herd_summary_payload,
 )
 from ranchbrain.tenancy import (
     Role,
@@ -37,7 +39,12 @@ from ranchbrain.tenancy import (
 )
 
 LOOPBACK_HOST = "127.0.0.1"
+# A two-hour ticket expired during the work day and the app opened the sample session.
+DEV_SESSION_HOURS = 18
+# One address so a restart does not force a new ticket or a new iPhone copy.
+DEV_LOOPBACK_PORT = 18761
 ANIMALS_PATH = f"{API_PREFIX}/animals"
+HERD_PATH = f"{API_PREFIX}/herd"
 TENANT_ID = "tenant-a"
 TENANT_NAME = "North Ranch"
 PRINCIPAL_ID = "dev-read-principal"
@@ -92,7 +99,7 @@ class _DevSource:
         return self.animals
 
 
-def dev_contract(now: datetime) -> _FixedPrincipalContract:
+def dev_contract(now: datetime, valid_until: datetime | None = None) -> _FixedPrincipalContract:
     observed = now - timedelta(hours=1)
     principal = VerifiedPrincipal(
         id=PRINCIPAL_ID,
@@ -102,7 +109,7 @@ def dev_contract(now: datetime) -> _FixedPrincipalContract:
         assurance_profile="dev-loopback",
         session_reference="dev-read-session",
         valid_from=now - timedelta(minutes=5),
-        valid_until=now + timedelta(hours=2),
+        valid_until=valid_until or now + timedelta(hours=DEV_SESSION_HOURS),
         correlation_id="dev-read",
     )
     resolver = TenantContextResolver(
@@ -131,6 +138,15 @@ class _FixedPrincipalContract:
             now=self._now,
         )
 
+    def read_herd(self, requested_tenant_id: str) -> LivestockReadResponseV1:
+        return self._contract.execute(
+            principal=self._principal,
+            requested_tenant_id=requested_tenant_id,
+            method="GET",
+            path=HERD_PATH,
+            now=self._now,
+        )
+
 
 def response_payload(response: LivestockReadResponseV1) -> dict[str, object]:
     return {
@@ -139,6 +155,37 @@ def response_payload(response: LivestockReadResponseV1) -> dict[str, object]:
         "origin": response.origin.value,
         "body": dict(response.body),
     }
+
+
+def _parse_ticket_expiry(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        expiry = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return expiry
+
+
+def reusable_ticket(path: Path, base_url: str, now: datetime) -> tuple[str, datetime] | None:
+    """Keep the current ticket when a restart binds the same loopback address."""
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    token = payload.get("token")
+    if not isinstance(token, str) or not token:
+        return None
+    if payload.get("baseURL") != base_url or payload.get("tenantID") != TENANT_ID:
+        return None
+    expiry = _parse_ticket_expiry(payload.get("expiresAt"))
+    if expiry is None or expiry <= now:
+        return None
+    return token, expiry
 
 
 def write_ticket(path: Path, base_url: str, token: str, expires_at: datetime) -> None:
@@ -205,24 +252,27 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(405, {"error": "livestock DEV read allows GET only"}, allow="GET")
 
     def _read(self) -> None:
-        server: LivestockDevReadServer = self.server  # type: ignore[assignment]
         path = self.path.split("?", 1)[0]
-        if path != ANIMALS_PATH:
+        if path not in (ANIMALS_PATH, HERD_PATH):
             self._send(404, {"error": "not found"})
             return
-        presented = _bearer(self.headers.get("Authorization"))
-        if not presented or not hmac.compare_digest(presented, server.token):
-            self._send(401, {"error": "unauthorized"})
+        server = self._authorized()
+        if server is None:
             return
         tenant = (self.headers.get("X-RanchOS-Tenant") or "").strip()
-        if tenant != TENANT_ID:
-            self._send(403, {"error": "tenant selection was not authorized"})
-            return
         try:
-            if server.records is None:
+            if path == HERD_PATH:
+                if server.records is None:
+                    payload = response_payload(server.contract.read_herd(tenant))
+                else:
+                    payload = herd_summary_payload(server.records.hub_dashboard(TENANT_NAME))
+            elif server.records is None:
                 payload = response_payload(server.contract.read_animals(tenant))
             else:
                 payload = envelope(server.records.animals(), server.records.herds())
+        except LivestockPostgresError as error:
+            self._send(503, {"error": str(error)})
+            return
         except Exception:
             self._send(403, {"error": "livestock read was not authorized"})
             return
@@ -282,12 +332,115 @@ class _Handler(BaseHTTPRequestHandler):
                 return
             self._send(200, {"saved": True})
             return
+        if len(parts) == len(prefix) + 3 and parts[len(prefix)] == "herds" and parts[-1] == "name":
+            body = self._json_body()
+            try:
+                server.records.rename_herd(parts[len(prefix) + 1], str(body.get("name", "")))
+            except LivestockPostgresError as error:
+                self._send(409, {"error": str(error)})
+                return
+            self._send(200, {"saved": True})
+            return
+        if parts[len(prefix) : len(prefix) + 1] == ["herds"] and len(parts) in (
+            len(prefix) + 4,
+            len(prefix) + 6,
+        ):
+            herd_id = parts[len(prefix) + 1]
+            action = parts[len(prefix) + 2]
+            body = self._json_body()
+            event_id = ""
+            try:
+                if action == "care" and len(parts) == len(prefix) + 4:
+                    occurred_at = str(body.get("occurred_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
+                    event_id = server.records.record_care(
+                        event_type=str(body.get("type", "")),
+                        occurred_at=occurred_at,
+                        confirmed=body.get("confirmed") is True,
+                        item_name=str(body.get("item_name", "")),
+                        item_kind=str(body.get("item_kind", "")),
+                        herd_id=herd_id,
+                        dosage=str(body.get("dosage", "")),
+                    )
+                elif action == "care" and len(parts) == len(prefix) + 6 and parts[-1] == "correct":
+                    event_id = server.records.correct_care(
+                        "",
+                        parts[-2],
+                        str(body.get("occurred_at", "")),
+                        str(body.get("reason", "")),
+                        body.get("confirmed") is True,
+                        str(body.get("item_name", "")),
+                        str(body.get("item_kind", "")),
+                        str(body.get("cost_id", "")),
+                        str(body.get("cost_amount", "")),
+                        herd_id,
+                        dosage=str(body.get("dosage", "")),
+                    )
+                elif action == "consumption" and len(parts) == len(prefix) + 4:
+                    observed_at = str(body.get("observed_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
+                    event_id = server.records.record_consumption(
+                        input_type=str(body.get("input_type", "")),
+                        quantity=str(body.get("quantity", "")),
+                        unit=str(body.get("unit", "")),
+                        observed_at=observed_at,
+                        supplier=str(body.get("supplier", "")),
+                        batch=str(body.get("batch", "")),
+                        frequency=str(body.get("frequency", "")),
+                        herd_id=herd_id,
+                    )
+                elif action == "consumption" and len(parts) == len(prefix) + 6 and parts[-1] == "correct":
+                    event_id = server.records.correct_consumption(
+                        "",
+                        parts[-2],
+                        str(body.get("quantity", "")),
+                        str(body.get("unit", "")),
+                        str(body.get("frequency", "")),
+                        str(body.get("observed_at", "")),
+                        str(body.get("supplier", "")),
+                        str(body.get("batch", "")),
+                        str(body.get("reason", "")),
+                        body.get("confirmed") is True,
+                        str(body.get("cost_id", "")),
+                        str(body.get("cost_amount", "")),
+                        herd_id,
+                    )
+                elif action == "costs" and len(parts) == len(prefix) + 4:
+                    server.records.record_cost(
+                        amount=str(body.get("amount", "")),
+                        finance_reference=str(body.get("finance_reference", "")),
+                        confirmed=body.get("confirmed") is True,
+                        frequency=str(body.get("frequency", "")),
+                        feed_type=str(body.get("feed_type", "")),
+                        care_event_id=str(body.get("care_event_id", "")),
+                        consumption_id=str(body.get("consumption_id", "")),
+                        herd_id=herd_id,
+                    )
+                elif action == "costs" and len(parts) == len(prefix) + 6 and parts[-1] == "correct":
+                    event_id = server.records.correct_cost(
+                        "",
+                        parts[-2],
+                        str(body.get("amount", "")),
+                        str(body.get("reason", "")),
+                        body.get("confirmed") is True,
+                        herd_id,
+                    )
+                else:
+                    self._send(404, {"error": "not found"})
+                    return
+            except LivestockPostgresError as error:
+                self._send(409, {"error": str(error)})
+                return
+            payload: dict[str, object] = {"saved": True}
+            if event_id:
+                payload["event_id"] = event_id
+            self._send(200, payload)
+            return
         if parts[: len(prefix)] != prefix or len(parts) not in (len(prefix) + 2, len(prefix) + 4):
             self._send(404, {"error": "not found"})
             return
         body = self._json_body()
         animal_id = parts[len(prefix)]
         action = parts[len(prefix) + 1]
+        event_id = ""
         try:
             if action == "retire" and len(parts) == len(prefix) + 2:
                 server.records.retire_animal(
@@ -302,15 +455,29 @@ class _Handler(BaseHTTPRequestHandler):
                 server.records.retire_identifier(animal_id, parts[-2], str(body.get("reason", "")))
             elif action == "herd" and len(parts) == len(prefix) + 2:
                 server.records.assign_herd(animal_id, str(body.get("herd_id", "")))
+            elif action == "name" and len(parts) == len(prefix) + 2:
+                server.records.rename_animal(animal_id, str(body.get("display_name", "")))
             elif action == "classification" and len(parts) == len(prefix) + 2:
                 server.records.update_classification(
                     animal_id,
                     str(body.get("production_type_code", "")),
                     str(body.get("breed_code", "")),
                 )
+            elif action == "breeding" and len(parts) == len(prefix) + 2:
+                server.records.update_breeding(
+                    animal_id,
+                    str(body.get("sire_animal_id", "")),
+                    str(body.get("dam_animal_id", "")),
+                    str(body.get("bred_with_animal_id", "")),
+                )
             elif action == "lifecycle" and len(parts) == len(prefix) + 2:
                 occurred_at = str(body.get("occurred_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
-                server.records.record_lifecycle(animal_id, str(body.get("type", "")), occurred_at)
+                event_id = server.records.record_lifecycle(
+                    animal_id,
+                    str(body.get("type", "")),
+                    occurred_at,
+                    str(body.get("weight_pounds", "")),
+                )
             elif action == "lifecycle" and len(parts) == len(prefix) + 4 and parts[-1] == "correct":
                 server.records.correct_lifecycle(
                     animal_id,
@@ -318,13 +485,60 @@ class _Handler(BaseHTTPRequestHandler):
                     str(body.get("occurred_at", "")),
                     str(body.get("reason", "")),
                     body.get("confirmed") is True,
+                    str(body.get("weight_pounds", "")),
+                    str(body.get("cost_id", "")),
+                    str(body.get("cost_amount", "")),
+                )
+            elif action == "care" and len(parts) == len(prefix) + 4 and parts[-1] == "correct":
+                event_id = server.records.correct_care(
+                    animal_id,
+                    parts[-2],
+                    str(body.get("occurred_at", "")),
+                    str(body.get("reason", "")),
+                    body.get("confirmed") is True,
+                    str(body.get("item_name", "")),
+                    str(body.get("item_kind", "")),
+                    str(body.get("cost_id", "")),
+                    str(body.get("cost_amount", "")),
+                    dosage=str(body.get("dosage", "")),
+                )
+            elif action == "consumption" and len(parts) == len(prefix) + 4 and parts[-1] == "correct":
+                event_id = server.records.correct_consumption(
+                    animal_id,
+                    parts[-2],
+                    str(body.get("quantity", "")),
+                    str(body.get("unit", "")),
+                    str(body.get("frequency", "")),
+                    str(body.get("observed_at", "")),
+                    str(body.get("supplier", "")),
+                    str(body.get("batch", "")),
+                    str(body.get("reason", "")),
+                    body.get("confirmed") is True,
+                    str(body.get("cost_id", "")),
+                    str(body.get("cost_amount", "")),
+                )
+            elif action == "costs" and len(parts) == len(prefix) + 4 and parts[-1] == "correct":
+                event_id = server.records.correct_cost(
+                    animal_id,
+                    parts[-2],
+                    str(body.get("amount", "")),
+                    str(body.get("reason", "")),
+                    body.get("confirmed") is True,
                 )
             elif action == "care" and len(parts) == len(prefix) + 2:
                 occurred_at = str(body.get("occurred_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
-                server.records.record_care(animal_id, str(body.get("type", "")), occurred_at, body.get("confirmed") is True)
+                event_id = server.records.record_care(
+                    animal_id,
+                    str(body.get("type", "")),
+                    occurred_at,
+                    body.get("confirmed") is True,
+                    str(body.get("item_name", "")),
+                    str(body.get("item_kind", "")),
+                    dosage=str(body.get("dosage", "")),
+                )
             elif action == "consumption" and len(parts) == len(prefix) + 2:
                 observed_at = str(body.get("observed_at", "")) or occurred_at_stamp(datetime.now(timezone.utc))
-                server.records.record_consumption(
+                event_id = server.records.record_consumption(
                     animal_id,
                     str(body.get("input_type", "")),
                     str(body.get("quantity", "")),
@@ -342,6 +556,9 @@ class _Handler(BaseHTTPRequestHandler):
                     body.get("confirmed") is True,
                     str(body.get("frequency", "")),
                     str(body.get("feed_type", "")),
+                    str(body.get("lifecycle_event_id", "")),
+                    str(body.get("care_event_id", "")),
+                    str(body.get("consumption_id", "")),
                 )
             else:
                 self._send(404, {"error": "not found"})
@@ -349,7 +566,10 @@ class _Handler(BaseHTTPRequestHandler):
         except LivestockPostgresError as error:
             self._send(409, {"error": str(error)})
             return
-        self._send(200, {"saved": True})
+        payload: dict[str, object] = {"saved": True}
+        if event_id:
+            payload["event_id"] = event_id
+        self._send(200, payload)
 
     def _json_body(self) -> dict[str, object]:
         length = int(self.headers.get("Content-Length") or "0")
@@ -387,17 +607,26 @@ def create_server(
     records: LivestockPostgresRecords | None = None,
 ) -> tuple[LivestockDevReadServer, str]:
     moment = now or datetime.now(timezone.utc)
-    token = token_urlsafe(24)
-    contract = dev_contract(moment)
+    expected_url = f"http://{LOOPBACK_HOST}:{port}" if port else ""
+    reused = reusable_ticket(ticket_path, expected_url, moment) if expected_url else None
+    if reused:
+        token, expires_at = reused
+    else:
+        token = token_urlsafe(24)
+        expires_at = moment + timedelta(hours=DEV_SESSION_HOURS)
+    contract = dev_contract(moment, valid_until=expires_at)
     server = LivestockDevReadServer(token, contract, (LOOPBACK_HOST, port), records)
     bound_port = int(server.server_address[1])
     base_url = f"http://{LOOPBACK_HOST}:{bound_port}"
-    write_ticket(ticket_path, base_url, token, moment + timedelta(hours=2))
+    if reused is None:
+        write_ticket(ticket_path, base_url, token, expires_at)
     return server, base_url
 
 
 def main() -> None:
-    server, base_url = create_server(default_ticket_path(), records=LivestockPostgresRecords())
+    server, base_url = create_server(
+        default_ticket_path(), port=DEV_LOOPBACK_PORT, records=LivestockPostgresRecords()
+    )
     print(f"Livestock DEV database is ready at {base_url}.")
     print("Tags, lifecycle, care, feed, and cost save to the DEV Postgres database. The ticket stays on this Mac and is not printed.")
     try:

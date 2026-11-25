@@ -10,10 +10,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import ipaddress
 import json
 import re
-import socket
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,10 +25,12 @@ from uuid import uuid4
 
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_ANSWER_KEY = Path(__file__).with_name("fixtures") / "dr_chipper_answer_key.json"
-DEFAULT_OLLAMA_URL = "http://192.168.50.117:11434"
+DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from tools.security.allowlist import _is_allowed_host
 
 
 class EvaluationError(ValueError):
@@ -50,11 +50,11 @@ def is_private_local_url(raw_url: str) -> str:
     parsed = urlparse(raw_url.rstrip("/"))
     if parsed.scheme != "http" or not parsed.hostname or parsed.username or parsed.password:
         raise EvaluationError("Provider URL must be credential-free http://private-host[:port]")
-    try:
-        addresses = {ipaddress.ip_address(info[4][0]) for info in socket.getaddrinfo(parsed.hostname, parsed.port or 80)}
-    except OSError as exc:
-        raise EvaluationError(f"Cannot resolve local provider host: {parsed.hostname}") from exc
-    if not addresses or not all(address.is_private or address.is_loopback for address in addresses):
+    if not _is_allowed_host(
+        parsed.hostname,
+        service="handbook",
+        allowlist_env="OLLAMA_HOST_ALLOWLIST",
+    ):
         raise EvaluationError("DEV-only evaluation rejects non-private model endpoints")
     return raw_url.rstrip("/")
 
@@ -138,6 +138,7 @@ def resolve_dev_local_route(component_id: str) -> dict[str, Any]:
 
 
 def available_ollama_models(base_url: str, timeout_seconds: float) -> set[str]:
+    base_url = is_private_local_url(base_url)
     request = Request(f"{base_url}/api/tags", headers={"Accept": "application/json"})
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
@@ -249,6 +250,7 @@ HANDBOOK PAGE {page['page']}:
 
 
 def call_ollama(*, base_url: str, model: str, prompt: str, timeout_seconds: float) -> tuple[str, int]:
+    base_url = is_private_local_url(base_url)
     body = json.dumps({"model": model, "prompt": prompt, "stream": False, "format": "json", "think": False, "options": {"temperature": 0}}).encode()
     request = Request(f"{base_url}/api/generate", data=body, headers={"Content-Type": "application/json"}, method="POST")
     started = perf_counter()

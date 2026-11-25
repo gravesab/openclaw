@@ -3,6 +3,12 @@ name = "ranchbrain"
 version = "1.0.0"
 description = "Local-first memory and intelligence layer for RedBud Ranch"
 requires-python = ">=3.10"
+# google-auth 2.59.1 requires cryptography>=41.0.5. Pinned to the wheel
+# installed and imported in the DEV venv on 2026-10-03 (cp311 abi3 arm64).
+dependencies = [
+    "google-auth==2.59.1",
+    "cryptography==50.0.2",
+]
 
 [project.scripts]
 ranchbrain = "ranchbrain.cli:main"

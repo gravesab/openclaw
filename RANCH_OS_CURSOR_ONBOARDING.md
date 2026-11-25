@@ -33,12 +33,13 @@ below or establish that an integration has shipped.
 
 ## Checkout authority
 
-| Checkout | Intended use | Not authority for |
-| --- | --- | --- |
-| `/Users/andrewgraves/Documents/OpenClaw-DEV` | Canonical active DEV discovery checkout on the `development` branch. It is not blanket implementation, migration, runtime, or device approval. | Clean baseline, Production state, or implicit permission to include unrelated WIP. |
-| `/Users/andrewgraves/Documents/OpenClaw-DEV-2026.8.1-reconcile` | Historical reconciled branch evidence. | A second active implementation source. |
-| `/Users/andrewgraves/Documents/OpenClaw-DEV-pr35-repair-20260827` | Separate clone of the reconciled branch for repair/PR evidence. | A competing canonical checkout. |
-| `/Users/andrewgraves/Documents/OpenClaw-DEV-ranchos-tvos-20260828-shallow` | Isolated Ranch OS tvOS DEV fixture work. | Full Git history or Production authority. |
+| Checkout                                                                   | Intended use                                                                                                                                                                    | Not authority for                                                                  |
+| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `/Users/andrewgraves/Developer/OpenClaw-DEV`                               | Canonical active DEV discovery checkout on the `development` branch, outside iCloud since 2026-10-02. It is not blanket implementation, migration, runtime, or device approval. | Clean baseline, Production state, or implicit permission to include unrelated WIP. |
+| `/Users/andrewgraves/Documents/OpenClaw-DEV`                               | Retired iCloud copy, kept read-only until the iCloud exit is confirmed.                                                                                                         | Any new work or commits.                                                           |
+| `/Users/andrewgraves/Documents/OpenClaw-DEV-2026.8.1-reconcile`            | Historical reconciled branch evidence.                                                                                                                                          | A second active implementation source.                                             |
+| `/Users/andrewgraves/Documents/OpenClaw-DEV-pr35-repair-20260827`          | Separate clone of the reconciled branch for repair/PR evidence.                                                                                                                 | A competing canonical checkout.                                                    |
+| `/Users/andrewgraves/Documents/OpenClaw-DEV-ranchos-tvos-20260828-shallow` | Isolated Ranch OS tvOS DEV fixture work.                                                                                                                                        | Full Git history or Production authority.                                          |
 
 Tracked or untracked fixture apps, migrations, and `tenancy.py` in this
 checkout are not an implementation grant. Do not pull a second worktree into
@@ -81,7 +82,7 @@ scope. The more restrictive applicable contract wins.
    - `docs/architecture/SERVER_ENFORCED_MUTATION_AND_PROPOSAL_CONTRACT_V1.md`
    - `docs/architecture/CANONICAL_CONFIRMATION_POLICY_V1.md`
    - `docs/architecture/ATOMIC_AUTHORITATIVE_WRITE_AND_AUDIT_TRANSACTION_DESIGN_V1.md`
-   Other files in `docs/architecture/` are not Ranch OS tenancy authority.
+     Other files in `docs/architecture/` are not Ranch OS tenancy authority.
 
 4. `ranchbrain_app/docs/MULTI_TENANCY_DESIGN.md` is the sole approved Ranch OS
    tenancy contract for the specifically authorized DEV foundation scope. It
@@ -93,10 +94,10 @@ scope. The more restrictive applicable contract wins.
    - `Approved for DEV foundation work` → design contract for that scope.
    - `Proposed`, `Living design reference`, sprint, or alpha → not
      implementation authority.
-   Do not use Home, Apple TV, livestock persistence, livestock management
-   design, livestock blueprint, or the architecture poster as implementation
-   authority. `docs/foundation/HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md`
-   is a proposed design baseline and may be used as context only, not authority.
+     Do not use Home, Apple TV, livestock persistence, livestock management
+     design, livestock blueprint, or the architecture poster as implementation
+     authority. `docs/foundation/HUMAN_CENTERED_PERSONAL_INTELLIGENCE_SYSTEM.md`
+     is a proposed design baseline and may be used as context only, not authority.
 
 6. Root `AGENTS.md`, `SECURITY.md`, and scoped `AGENTS.md` are OpenClaw
    contributor/process rules. They do not define Ranch OS tenancy. Ignore
@@ -170,12 +171,12 @@ Ranch OS scope and must remain untouched.
 
 ## Application map
 
-| Surface | Location | Current boundary |
-| --- | --- | --- |
-| RanchBrain / tenancy types | `ranchbrain_app/` | DEV types, tests, and a tenancy migration *file*. Not migration, runtime, or livestock-write authority. |
-| Livestock macOS | `apps/ranchos-livestock-macos/` | Tracked fixture-only UI; hardcoded presentation data; `VerifiedPrincipal` is intentionally undeployed. Do not grow live persistence from this app. |
-| Ranch OS tvOS | `apps/ranchos-tvos/` | Untracked DEV fixture, bundle `ai.openclaw.ranchos.tv.dev`; no trusted ingress or live tenant feed. |
-| PropertyManager iOS | `apps/propertymanager-ios/` | Debug bundle is DEV-suffixed. Treat as a separate product surface. Do not verify its runtime, database, or credentials in a Ranch OS task. |
+| Surface                    | Location                        | Current boundary                                                                                                                                   |
+| -------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| RanchBrain / tenancy types | `ranchbrain_app/`               | DEV types, tests, and a tenancy migration _file_. Not migration, runtime, or livestock-write authority.                                            |
+| Livestock macOS            | `apps/ranchos-livestock-macos/` | Tracked fixture-only UI; hardcoded presentation data; `VerifiedPrincipal` is intentionally undeployed. Do not grow live persistence from this app. |
+| Ranch OS tvOS              | `apps/ranchos-tvos/`            | Untracked DEV fixture, bundle `ai.openclaw.ranchos.tv.dev`; no trusted ingress or live tenant feed.                                                |
+| PropertyManager iOS        | `apps/propertymanager-ios/`     | Debug bundle is DEV-suffixed. Treat as a separate product surface. Do not verify its runtime, database, or credentials in a Ranch OS task.         |
 
 ## Approval gates
 

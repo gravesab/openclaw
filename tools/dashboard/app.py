@@ -22,6 +22,7 @@ import re
 import json
 import time
 import base64
+import functools
 import hashlib
 import hmac
 import uuid
@@ -31,9 +32,82 @@ import html as html_module
 import matplotlib
 import html
 import markdown
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 from werkzeug.utils import secure_filename
 from pypdf import PdfReader
+
+def get_openrouter_cost():
+    # v2-spec: credits endpoint, zeros on failure, never raises.
+    out = {"cost": 0.0, "answers": 0, "tokens": 0, "ok": False, "error": ""}
+    try:
+        key = os.environ.get("OPENROUTER_API_KEY", "")
+        if not key:
+            out["error"] = "missing-key"
+            return out
+        headers = {"Authorization": "Bearer %s" % key}
+        r = requests.get("https://openrouter.ai/api/v1/credits", headers=headers, timeout=5)
+        if not r.ok:
+            out["error"] = "http-%s" % r.status_code
+            return out
+        data = (r.json() or {}).get("data", {}) or {}
+        try:
+            out["cost"] = float(data.get("total_usage", 0) or 0)
+        except (TypeError, ValueError):
+            out["cost"] = 0.0
+        out["ok"] = True
+        try:
+            a = requests.get("https://openrouter.ai/api/v1/activity", headers=headers, timeout=5)
+            if a.ok:
+                _ai_cost_fill_activity(a.json(), out)
+        except Exception:
+            pass
+    except Exception as exc:
+        out["error"] = type(exc).__name__
+    return out
+
+
+def _ai_cost_fill_activity(doc, out):
+    try:
+        data = doc.get("data") if isinstance(doc, dict) else None
+        rows = []
+        if isinstance(data, list):
+            rows = data
+        elif isinstance(data, dict):
+            for k in ("models", "usage", "days", "rows"):
+                if isinstance(data.get(k), list):
+                    rows = data.get(k)
+                    break
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            try:
+                tok = row.get("tokens") or row.get("total_tokens") or (
+                    (row.get("prompt_tokens") or 0) + (row.get("completion_tokens") or 0))
+                out["tokens"] += int(tok or 0)
+                out["answers"] += int(row.get("answers") or row.get("requests") or row.get("count") or 0)
+            except (TypeError, ValueError):
+                pass
+        per = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            name = str(row.get("model") or row.get("name") or row.get("id") or "")
+            try:
+                tok = int(row.get("tokens") or row.get("total_tokens") or 0)
+            except (TypeError, ValueError):
+                tok = 0
+            try:
+                cost = float(row.get("cost") or row.get("usage") or row.get("total_cost") or 0)
+            except (TypeError, ValueError):
+                cost = 0.0
+            if name and (tok or cost):
+                per.append({"model": name, "tokens": tok, "cost": cost,
+                            "answers": 0})
+        out["per_model"] = sorted(per, key=lambda d: -d["cost"])[:12]
+    except Exception:
+        pass
+
+
 
 OPENCLAW_ROOT = Path(__file__).resolve().parents[2]
 if str(OPENCLAW_ROOT) not in sys.path:
@@ -122,6 +196,9 @@ AI_SCORECARD_PATH = OPENCLAW_ROOT / "config/ai_intelligence/scorecard.json"
 AI_MODEL_REGISTRY_PATH = (
     OPENCLAW_ROOT / "config/ai_intelligence/model_registry.json"
 )
+AI_DEPLOYMENT_MAP_PATH = (
+    OPENCLAW_ROOT / "config/ai_intelligence/deployment_map.json"
+)
 AI_MODEL_RUNTIME_ALIASES_PATH = (
     OPENCLAW_ROOT / "config/ai_intelligence/model_runtime_aliases.json"
 )
@@ -137,17 +214,79 @@ AI_INTELLIGENCE_PYTHON = (
 
 
 
-def run_command(cmd, timeout=20):
+def run_command(cmd, timeout=20, env=None):
+    if not isinstance(cmd, list) or not all(isinstance(part, str) and part for part in cmd):
+        return "command refused"
+    run_env = env
+    if cmd[:2] == ["systemctl", "--user"]:
+        run_env = os.environ.copy()
+        run_env["XDG_RUNTIME_DIR"] = f"/run/user/{os.getuid()}"
     try:
         return subprocess.check_output(
             cmd,
-            shell=True,
             stderr=subprocess.STDOUT,
             text=True,
-            timeout=timeout
+            timeout=timeout,
+            env=run_env,
         ).strip()
     except Exception as e:
         return str(e)
+
+
+def _container_health(name):
+    names = run_command(["docker", "ps", "--format", "{{.Names}}"])
+    return "healthy" if any(name in line for line in names.splitlines()) else "absent"
+
+
+def _ollama_health():
+    parsed = urlparse(str(OLLAMA_HOST or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return "offline"
+    try:
+        response = requests.get(f"{parsed.scheme}://{parsed.netloc}/api/tags", timeout=5)
+        return "ok" if response.ok else "offline"
+    except Exception:
+        return "offline"
+
+
+def _resource_lines():
+    cpu = "unknown"
+    try:
+        values = [int(part) for part in Path("/proc/stat").read_text().split()[1:8]]
+        total = sum(values)
+        idle = values[3] + values[4]
+        cpu = f"{(100 * (total - idle) / total):.1f}" if total else "0"
+    except Exception as exc:
+        cpu = str(exc)
+    ram = "unknown"
+    try:
+        info = {}
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            key, rest = line.split(":", 1)
+            info[key] = int(rest.split()[0])
+        total_kb = info["MemTotal"]
+        used_kb = total_kb - info.get("MemAvailable", info.get("MemFree", 0))
+        ram = f"{used_kb / 1048576:.1f}Gi / {total_kb / 1048576:.1f}Gi"
+    except Exception as exc:
+        ram = str(exc)
+    disk = "unknown"
+    try:
+        usage = shutil.disk_usage("/")
+        pct = (100 * usage.used / usage.total) if usage.total else 0
+        disk = f"{usage.used / 1024**3:.1f}G / {usage.total / 1024**3:.1f}G ({pct:.0f}%)"
+    except Exception as exc:
+        disk = str(exc)
+    try:
+        out = subprocess.check_output(
+            ["docker", "ps", "-q"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=10,
+        )
+        docker = str(sum(1 for line in out.splitlines() if line.strip()))
+    except Exception as exc:
+        docker = str(exc)
+    return cpu, ram, disk, docker
 
 
 def get_disk_info(path, label):
@@ -302,7 +441,7 @@ def get_remote_external_storage_info():
 
 def get_external_storage_info():
     local_mount = run_command(
-        "findmnt -n -T /mnt/ai-storage -o TARGET",
+        ["findmnt", "-n", "-T", "/mnt/ai-storage", "-o", "TARGET"],
         timeout=5,
     )
     if local_mount == "/mnt/ai-storage":
@@ -428,13 +567,16 @@ def get_remote_internal_storage_info():
 
 def get_disk_used_percent(path):
     try:
+        target = Path(path)
+        if not target.is_absolute():
+            return None
         out = subprocess.check_output(
-            f"df -P {path} | awk 'NR==2 {{print $5}}'",
-            shell=True,
+            ["df", "-P", os.fspath(target)],
             text=True,
-            timeout=10
-        ).strip()
-        return float(out.replace("%", ""))
+            timeout=10,
+        )
+        capacity = out.splitlines()[1].split()[4]
+        return float(capacity.rstrip("%"))
     except Exception:
         return None
 
@@ -1035,7 +1177,14 @@ def make_chart(title, rows, column_names, filename, ylabel):
 
 
 def check_service(name, command, scope):
-    result = run_command(command).strip().lower()
+    # argv runs through run_command; a callable is a probe run here, so
+    # callers never probe while building the check list.
+    if isinstance(command, list):
+        result = run_command(command).strip().lower()
+    elif callable(command):
+        result = str(command()).strip().lower()
+    else:
+        result = str(command).strip().lower()
 
     if result in {"active", "running", "healthy", "pong", "ok"}:
         return (name, scope, "Connected", "#16a34a")
@@ -1059,14 +1208,13 @@ def get_propertymanager_mcp_status():
     return {"ready": True, "status": "Ready (on demand)"}
 
 
-def build_system_health(omlx=None, propertymanager_mcp=None):
+def build_system_health(omlx=None, propertymanager_mcp=None, llama_cpp=None):
     checks = []
 
     checks.append(
         check_service(
             "OpenClaw Gateway",
-            "XDG_RUNTIME_DIR=/run/user/$(id -u) "
-            "systemctl --user is-active openclaw-gateway.service",
+            ["systemctl", "--user", "is-active", "openclaw-gateway.service"],
             "User service",
         )
     )
@@ -1074,7 +1222,7 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
     checks.append(
         check_service(
             "OpenClaw Listener",
-            "systemctl is-active openclaw-listener.service",
+            ["systemctl", "is-active", "openclaw-listener.service"],
             "System service",
         )
     )
@@ -1082,7 +1230,7 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
     checks.append(
         check_service(
             "Docker",
-            "systemctl is-active docker",
+            ["systemctl", "is-active", "docker"],
             "System service",
         )
     )
@@ -1090,7 +1238,7 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
     checks.append(
         check_service(
             "Redis",
-            "docker ps --format '{{.Names}}' | grep -q redis && echo healthy",
+            functools.partial(_container_health, "redis"),
             "Container",
         )
     )
@@ -1098,7 +1246,7 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
     checks.append(
         check_service(
             "PostgreSQL",
-            "docker ps --format '{{.Names}}' | grep -q postgres && echo healthy",
+            functools.partial(_container_health, "postgres"),
             "Container",
         )
     )
@@ -1106,7 +1254,7 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
     checks.append(
         check_service(
             "Home Assistant",
-            "docker ps --format '{{.Names}}' | grep -q homeassistant && echo healthy",
+            functools.partial(_container_health, "homeassistant"),
             "Container",
         )
     )
@@ -1114,7 +1262,7 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
     checks.append(
         check_service(
             "Scrypted",
-            "docker ps --format '{{.Names}}' | grep -q scrypted && echo healthy",
+            functools.partial(_container_health, "scrypted"),
             "Container",
         )
     )
@@ -1122,7 +1270,7 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
     checks.append(
         check_service(
             "Ollama API",
-            f"curl -fsS {OLLAMA_HOST}/api/tags >/dev/null && echo ok",
+            _ollama_health,
             "HTTP endpoint",
         )
     )
@@ -1134,6 +1282,16 @@ def build_system_health(omlx=None, propertymanager_mcp=None):
             "HTTP endpoint",
             "Connected" if omlx["connected"] else omlx["status"],
             "#16a34a" if omlx["connected"] else "#b91c1c",
+        )
+    )
+
+    llama_cpp = llama_cpp if llama_cpp is not None else get_llama_cpp_status()
+    checks.append(
+        (
+            "llama.cpp API",
+            "HTTP endpoint",
+            "Connected" if llama_cpp["connected"] else llama_cpp["status"],
+            "#16a34a" if llama_cpp["connected"] else "#b91c1c",
         )
     )
 
@@ -1173,27 +1331,160 @@ def service_scope_panel_html(services):
 
 
 def collect_trend_sample():
-    script = Path.home() / "ai/projects/openclaw/tools/home_manager/collect_trends.sh"
+    """Record one local trend sample. No shell script and no SSH."""
+    header = (
+        "timestamp,ollama_latency_ms,mem_used_gib,mem_total_gib,disk_used_pct,"
+        "external_disk_used_pct,m4_mem_used_gib,m4_mem_total_gib,m4_cpu_used_pct,"
+        "m4_disk_used_pct,m4_ollama_response_ms,homeassistant_uptime,redis_uptime,"
+        "portainer_uptime,postgres_uptime,scrypted_uptime"
+    )
+    containers = (
+        "homeassistant",
+        "redis",
+        "portainer",
+        "postgres",
+        "scrypted",
+    )
     try:
-        result = subprocess.run(
-            ["/usr/bin/bash", str(script)],
-            cwd=str(Path.home() / "ai/projects/openclaw"),
-            capture_output=True,
+        REPORT_DIR.mkdir(parents=True, exist_ok=True)
+        if not TREND_FILE.exists():
+            TREND_FILE.write_text(header + "\n")
+        elif TREND_FILE.read_text().splitlines()[:1] != [header]:
+            return {"success": False, "message": "trend header differs; sample not written"}
+        meminfo = Path("/proc/meminfo")
+        if meminfo.is_file():
+            info = {}
+            for line in meminfo.read_text().splitlines():
+                key, rest = line.split(":", 1)
+                info[key] = int(rest.split()[0])
+            total_kb = info["MemTotal"]
+            used_kb = total_kb - info.get("MemAvailable", info.get("MemFree", 0))
+            mem_used = f"{used_kb / 1048576:.1f}"
+            mem_total = f"{total_kb / 1048576:.1f}"
+        else:
+            vm = subprocess.check_output(["vm_stat"], text=True, timeout=5)
+            memsize = int(subprocess.check_output(["sysctl", "-n", "hw.memsize"], text=True, timeout=5).strip())
+            page_size = int(re.search(r"page size of (\d+) bytes", vm).group(1))
+            values = {}
+            for line in vm.splitlines():
+                if ":" not in line:
+                    continue
+                key, val = line.split(":", 1)
+                match = re.search(r"(\d+)", val.replace(".", ""))
+                if match:
+                    values[key.strip()] = int(match.group(1))
+            free_pages = values.get("Pages free", 0) + values.get("Pages speculative", 0)
+            mem_used = f"{(memsize - (free_pages * page_size)) / 1024**3:.1f}"
+            mem_total = f"{memsize / 1024**3:.1f}"
+        usage = shutil.disk_usage("/")
+        disk_pct = f"{(100 * usage.used / usage.total):.0f}" if usage.total else ""
+        latency = ""
+        started = time.perf_counter()
+        try:
+            response = requests.get("http://127.0.0.1:11434/api/tags", timeout=2)
+            if response.ok:
+                latency = f"{(time.perf_counter() - started) * 1000:.0f}"
+        except Exception:
+            latency = ""
+        uptimes = {name: "" for name in containers}
+        try:
+            listing = subprocess.check_output(
+                ["docker", "ps", "--format", "{{.Names}}|{{.Status}}"],
+                stderr=subprocess.STDOUT,
+                text=True,
+                timeout=10,
+            )
+            for row in listing.splitlines():
+                name, _, status = row.partition("|")
+                if name in uptimes:
+                    uptimes[name] = status.removeprefix("Up ")
+        except Exception:
+            pass
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        fields = [
+            f'"{stamp}"',
+            latency,
+            mem_used,
+            mem_total,
+            disk_pct,
+            "",
+            "",
+            "",
+            "",
+            "",
+            "",
+            *(f'"{uptimes[name]}"' for name in containers),
+        ]
+        with TREND_FILE.open("a") as handle:
+            handle.write(",".join(fields) + "\n")
+        return {"success": True, "message": "local sample"}
+    except Exception as exc:
+        return {"success": False, "message": str(exc)}
+
+
+
+
+
+def load_intelmini_host_trend_rows():
+    """Return recent Intel Mini trend rows, which also carry the M4 columns."""
+    key = Path(INTELMINI_STORAGE_KEY)
+    if not key.is_file():
+        return None
+    remote_command = (
+        "python3 -c \"import csv,sys; from pathlib import Path; "
+        "p=Path.home()/'ai/projects/openclaw/reports/trends.csv'; "
+        "rows=list(csv.reader(p.open())); "
+        "w=csv.writer(sys.stdout); w.writerow(rows[0]); "
+        "w.writerows(rows[-36:])\""
+    )
+    try:
+        out = subprocess.check_output(
+            [
+                "ssh",
+                "-i",
+                str(key),
+                "-o",
+                "BatchMode=yes",
+                "-o",
+                "IdentitiesOnly=yes",
+                "-o",
+                "StrictHostKeyChecking=yes",
+                "-o",
+                "ConnectTimeout=5",
+                f"{INTELMINI_STORAGE_USER}@{INTELMINI_STORAGE_HOST}",
+                remote_command,
+            ],
             text=True,
-            timeout=90,
+            timeout=12,
+            stderr=subprocess.DEVNULL,
         )
-        return {
-            "success": result.returncode == 0,
-            "message": (result.stdout + result.stderr).strip()[-1200:],
-        }
-    except Exception as e:
-        return {
-            "success": False,
-            "message": str(e),
-        }
+        return list(csv.DictReader(out.splitlines()))
+    except Exception:
+        return None
 
 
+def trend_rows_include_m4(rows):
+    for row in rows[-48:]:
+        for key in (
+            "m4_mem_used_gib",
+            "m4_cpu_used_pct",
+            "m4_disk_used_pct",
+            "m4_ollama_response_ms",
+        ):
+            value = parse_number(row.get(key))
+            if value is not None and value > 0:
+                return True
+    return False
 
+
+def trend_rows_are_dev_guest(rows):
+    """Guest samples report about 8 GiB. The Intel Mini host reports about 62 GiB."""
+    totals = []
+    for row in rows[-48:]:
+        total = parse_number(row.get("mem_total_gib"))
+        if total is not None and total > 0:
+            totals.append(total)
+    return bool(totals) and max(totals) < 32
 
 
 def generate_trend_charts():
@@ -1208,11 +1499,21 @@ def generate_trend_charts():
     except Exception:
         return []
 
+    machine_name = "Intel Mini"
+    if rows and (
+        trend_rows_are_dev_guest(rows) or not trend_rows_include_m4(rows)
+    ):
+        remote_rows = load_intelmini_host_trend_rows()
+        if remote_rows:
+            rows = remote_rows
+        elif trend_rows_are_dev_guest(rows):
+            machine_name = "DEV virtual machine"
+
     if not rows:
         return []
 
     time_col = find_column(rows, ["timestamp", "time", "datetime", "date"])
-    recent_rows = rows[-24:]
+    recent_rows = rows[-48:]
 
     labels = []
     for row in recent_rows:
@@ -1230,23 +1531,12 @@ def generate_trend_charts():
             return None
 
         values = []
-        last_good = None
-
-        for row in rows:
-            v = parse_number(row.get(col))
-            if v is not None and v > 0:
-                last_good = v
-
         for row in recent_rows:
-            v = parse_number(row.get(col))
-            if v is not None and v > 0:
-                last_good = v
-                values.append(v)
-            elif last_good is not None:
-                values.append(last_good)
+            value = parse_number(row.get(col))
+            if value is not None and value > 0:
+                values.append(value)
             else:
-                values.append(0)
-
+                values.append(float("nan"))
         return values
 
     def style_chart(ax, title, ylabel, percent_axis=False):
@@ -1289,71 +1579,61 @@ def generate_trend_charts():
 
     chart_files = []
 
-    latency = values_for("ollama_latency_ms")
-    if latency:
+    def measured(values):
+        return bool(values) and any(value == value and value > 0 for value in values)
+
+    def add_chart(filename, title, ylabel, series, percent_axis=False):
+        drawn = [(label, values) for label, values in series if measured(values)]
+        if not drawn:
+            return
         chart_files.append(
-            save_line_chart(
-                "ollama_latency.png",
-                "Intel Mini Ollama Latency",
-                "Latency (ms)",
-                [("Intel Mini Ollama Latency", latency)],
-            )
+            save_line_chart(filename, title, ylabel, drawn, percent_axis=percent_axis)
         )
 
-    intel_mem = values_for("mem_used_gib")
-    m4_mem = values_for("m4_mem_used_gib")
-    memory_series = []
-
-    if intel_mem:
-        memory_series.append(("Intel Mini Memory Usage", intel_mem))
-
-    if m4_mem:
-        memory_series.append(("M4 Memory Usage", m4_mem))
-
-    if memory_series:
-        chart_files.append(
-            save_line_chart(
-                "memory_usage.png",
-                "Memory Usage Over Time (Both Computers)",
-                "Memory Used (GiB)",
-                memory_series,
-            )
+    add_chart(
+        "ollama_latency.png",
+        "Ollama Response",
+        "Response (ms)",
+        [
+            (machine_name, values_for("ollama_latency_ms")),
+            ("M4", values_for("m4_ollama_response_ms")),
+        ],
+    )
+    add_chart(
+        "memory_usage.png",
+        "Memory",
+        "Memory Used (GiB)",
+        [
+            (machine_name, values_for("mem_used_gib")),
+            ("M4", values_for("m4_mem_used_gib")),
+        ],
+    )
+    disk_series = [
+        (
+            machine_name if machine_name == "DEV virtual machine" else "Intel Mini internal",
+            values_for("disk_used_pct"),
+        ),
+        ("M4", values_for("m4_disk_used_pct")),
+    ]
+    if machine_name == "Intel Mini":
+        disk_series.insert(
+            1,
+            ("Intel Mini external", values_for("external_disk_used_pct")),
         )
-
-    m4_cpu = values_for("m4_cpu_used_pct")
-    if m4_cpu:
-        chart_files.append(
-            save_line_chart(
-                "m4_cpu_usage.png",
-                "M4 CPU Usage",
-                "CPU Used (%)",
-                [("M4 CPU Usage", m4_cpu)],
-                percent_axis=True,
-            )
-        )
-
-    m4_disk = values_for("m4_disk_used_pct")
-    if m4_disk:
-        chart_files.append(
-            save_line_chart(
-                "m4_disk_usage.png",
-                "M4 Disk Usage",
-                "Disk Used (%)",
-                [("M4 Disk Usage", m4_disk)],
-                percent_axis=True,
-            )
-        )
-
-    m4_ollama = values_for("m4_ollama_response_ms")
-    if m4_ollama:
-        chart_files.append(
-            save_line_chart(
-                "m4_ollama_response.png",
-                "M4 Ollama Response Time",
-                "Response Time (ms)",
-                [("M4 Ollama Response Time", m4_ollama)],
-            )
-        )
+    add_chart(
+        "intelmini_disk_usage.png",
+        "Disk",
+        "Disk Used (%)",
+        disk_series,
+        percent_axis=True,
+    )
+    add_chart(
+        "m4_cpu_usage.png",
+        "CPU",
+        "CPU Used (%)",
+        [("M4", values_for("m4_cpu_used_pct"))],
+        percent_axis=True,
+    )
 
     return chart_files
 
@@ -1389,6 +1669,35 @@ def load_model_runtime_aliases():
     }
 
 
+def model_process_usage_panel_html() -> str:
+    """Render configured assignments beside the current router selection."""
+
+    try:
+        # Imported on use so the dashboard still loads without the routing database stack.
+        from tools.dashboard.model_usage import (
+            build_model_usage,
+            model_usage_panel_html,
+        )
+        deployment_map = json.loads(
+            AI_DEPLOYMENT_MAP_PATH.read_text(encoding="utf-8")
+        )
+        registry = json.loads(
+            AI_MODEL_REGISTRY_PATH.read_text(encoding="utf-8")
+        )
+        snapshot = build_model_usage(deployment_map, registry)
+    except (ImportError, OSError, json.JSONDecodeError, ValueError) as exc:
+        return f"""
+        <div class='panel'>
+            <h2>Models by process</h2>
+            <div class='warning-box'>
+                The model assignment view could not be built.<br><br>
+                {html.escape(str(exc)[:160])}
+            </div>
+        </div>
+        """
+    return model_usage_panel_html(snapshot)
+
+
 def ai_routing_telemetry_panel_html(
     *,
     installed_model_names=(),
@@ -1396,8 +1705,9 @@ def ai_routing_telemetry_panel_html(
     report_path = AI_REPORT_DIR / "routing-telemetry-latest.json"
     text_path = AI_REPORT_DIR / "routing-telemetry-latest.txt"
 
+    usage_panel = model_process_usage_panel_html()
     if not report_path.exists():
-        return """
+        return usage_panel + """
         <div class='panel'>
             <h2>AI Routing Telemetry</h2>
             <div class='warning-box'>
@@ -1410,7 +1720,7 @@ def ai_routing_telemetry_panel_html(
     try:
         summary = json.loads(report_path.read_text(encoding="utf-8"))
     except Exception as exc:
-        return f"""
+        return usage_panel + f"""
         <div class='panel'>
             <h2>AI Routing Telemetry</h2>
             <div class='warning-box'>
@@ -1629,7 +1939,7 @@ def ai_routing_telemetry_panel_html(
             "\n".join(text_path.read_text(encoding="utf-8").splitlines()[:12])
         )
 
-    return f"""
+    return usage_panel + f"""
     <div class='panel'>
         <h2>AI Routing Telemetry</h2>
         <div class='status-box'>
@@ -1714,19 +2024,19 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
     if "permission denied" in message:
         return {
             "status": "Credentials rejected",
-            "summary": "The M4 rejected the configured SSH account or key.",
+            "summary": "The metrics host rejected the configured SSH account or key.",
             "technical": "SSH authentication failed.",
         }
     if "host key verification failed" in message or "remote host identification has changed" in message:
         return {
             "status": "Host identity not trusted",
-            "summary": "The saved M4 host identity must be reviewed.",
+            "summary": "The saved metrics host identity must be reviewed.",
             "technical": "SSH host-key verification failed.",
         }
     if "connection refused" in message:
         return {
             "status": "SSH service unavailable",
-            "summary": "The M4 answered on the network but did not accept SSH.",
+            "summary": "The metrics host answered on the network but did not accept SSH.",
             "technical": "SSH connection was refused.",
         }
     if any(
@@ -1735,13 +2045,13 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
     ):
         return {
             "status": "Host unreachable",
-            "summary": "The dashboard cannot currently reach the M4 over the network.",
-            "technical": "M4 network route is unavailable.",
+            "summary": "The dashboard cannot currently reach the metrics host over the network.",
+            "technical": "Metrics host network route is unavailable.",
         }
     if isinstance(error, subprocess.TimeoutExpired) or "timed out" in message:
         return {
             "status": "Connection timed out",
-            "summary": "The M4 SSH metrics probe did not respond in time.",
+            "summary": "The metrics host SSH probe did not respond in time.",
             "technical": "SSH metrics probe timed out.",
         }
     if isinstance(error, FileNotFoundError):
@@ -1752,14 +2062,15 @@ def classify_m4_ssh_metrics_error(error=None, key_path=None):
         }
     return {
         "status": "Metrics probe failed",
-        "summary": "Optional M4 metrics could not be collected.",
+        "summary": "Optional host metrics could not be collected.",
         "technical": "SSH metrics probe failed; review the dashboard service log.",
     }
 
 
-def m4_ai_health_panel_html(ollama=None, omlx=None):
+def m4_ai_health_panel_html(ollama=None, omlx=None, llama_cpp=None):
     ollama = ollama or get_m4_ollama_status()
     omlx = omlx or get_omlx_status()
+    llama_cpp = llama_cpp if llama_cpp is not None else get_llama_cpp_status()
     ollama_status = "Online" if ollama["connected"] else "Offline"
     ollama_color = "#22c55e" if ollama["connected"] else "#ef4444"
     response_ms = ollama.get("response_ms", "unknown")
@@ -1769,6 +2080,10 @@ def m4_ai_health_panel_html(ollama=None, omlx=None):
     omlx_color = "#22c55e" if omlx["connected"] else "#fbbf24"
     omlx_response_ms = omlx.get("response_ms", "unknown")
     omlx_models = omlx.get("detected_models") or omlx.get("error", "unknown")
+    llama_status = llama_cpp["status"]
+    llama_color = "#22c55e" if llama_cpp["connected"] else "#ef4444"
+    llama_response_ms = llama_cpp.get("response_ms", "unknown")
+    llama_models = llama_cpp.get("detected_models") or llama_cpp.get("error", "unknown")
 
     m4 = {
         "reachable": False,
@@ -1817,13 +2132,16 @@ except Exception as e:
     result["memory_error"] = str(e)
 
 try:
-    pids = subprocess.check_output("pgrep -f '[o]llama' || true", shell=True, text=True).strip().splitlines()
+    try:
+        pids = subprocess.check_output(["pgrep", "-f", "[o]llama"], text=True).strip().splitlines()
+    except subprocess.CalledProcessError:
+        pids = []
+    pids = [pid for pid in pids if pid.isdigit()]
     result["ollama_process"] = "Running" if pids else "Not running"
 
     if pids:
-        pid = pids[0]
-        cpu = subprocess.check_output(f"ps -p {pid} -o %cpu= | awk '{{print $1}}'", shell=True, text=True).strip()
-        result["ollama_cpu"] = cpu + "%"
+        cpu = subprocess.check_output(["ps", "-p", pids[0], "-o", "%cpu="], text=True).strip()
+        result["ollama_cpu"] = (cpu or "0") + "%"
     else:
         result["ollama_cpu"] = "0%"
 except Exception as e:
@@ -1832,7 +2150,7 @@ except Exception as e:
     result["process_error"] = str(e)
 
 try:
-    result["uptime"] = subprocess.check_output("uptime | sed 's/^ *//'", shell=True, text=True).strip()
+    result["uptime"] = subprocess.check_output(["uptime"], text=True).strip()
 except Exception:
     result["uptime"] = "unknown"
 
@@ -1871,7 +2189,7 @@ PY_REMOTE
 
     html = f"""
 <div class='panel'>
-<h2>🧠 M4 AI Server Health</h2>
+<h2>🧠 Intel Mini AI Server Health</h2>
 
 <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;">
 
@@ -1879,7 +2197,7 @@ PY_REMOTE
 <b>Remote metrics (optional)</b><br><br>
 <span style="color:{ssh_color};font-weight:bold;">{html_module.escape(ssh_status)}</span><br>
 {html_module.escape(m4['ssh_summary'])}<br>
-M4 SSH host: {html_module.escape(M4_SSH_HOST)}
+Metrics host: {html_module.escape(M4_SSH_HOST)}
 </div>
 
 <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
@@ -1896,7 +2214,14 @@ Models: {omlx.get('model_count', 0)}
 </div>
 
 <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
-<b>M4 Memory</b><br><br>
+<b>llama.cpp</b><br><br>
+<span style="color:{llama_color};font-weight:bold;">{html_module.escape(llama_status)}</span><br>
+Response: {html_module.escape(str(llama_response_ms))} ms<br>
+Models: {llama_cpp.get('model_count', 0)}
+</div>
+
+<div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:15px;">
+<b>Memory</b><br><br>
 Used: {m4['memory_used_gib']} GiB / {m4['memory_total_gib']} GiB<br>
 Percent: {m4['memory_percent']}
 </div>
@@ -1918,7 +2243,10 @@ Detected Models:
 oMLX Models:
 {html_module.escape(omlx_models)}
 
-M4 Uptime:
+llama.cpp Models:
+{html_module.escape(llama_models)}
+
+Uptime:
 {m4['uptime']}
 
 Errors:
@@ -1970,6 +2298,52 @@ def get_m4_ollama_status():
             "primary": "Unavailable",
             "detected_models": "",
             "model_names": [],
+            "response_ms": "failed",
+        }
+
+
+def get_llama_cpp_status():
+    """Probe the llama.cpp model catalog without sending a generation request.
+
+    The dashboard host reaches the M4 llama-server through the DEV loopback
+    tunnel. OPENCLAW_LLAMA_CPP_BASE_URL overrides that address.
+    """
+    base_url = os.environ.get(
+        "OPENCLAW_LLAMA_CPP_BASE_URL",
+        "http://127.0.0.1:18088/v1",
+    ).rstrip("/")
+    endpoint = f"{base_url}/models"
+    started = time.time()
+    try:
+        response = requests.get(endpoint, timeout=5)
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("llama.cpp model catalog must be an object")
+        models = payload.get("data")
+        if not isinstance(models, list):
+            raise ValueError("llama.cpp model catalog data must be a list")
+        model_ids = [
+            item.get("id", "")
+            for item in models
+            if isinstance(item, dict) and item.get("id")
+        ]
+        return {
+            "connected": True,
+            "status": "Online",
+            "endpoint": endpoint,
+            "model_count": len(model_ids),
+            "detected_models": ", ".join(model_ids),
+            "response_ms": int((time.time() - started) * 1000),
+        }
+    except (requests.RequestException, ValueError, TypeError):
+        return {
+            "connected": False,
+            "status": "Offline",
+            "endpoint": endpoint,
+            "error": "The configured llama.cpp API did not return a model catalog.",
+            "model_count": 0,
+            "detected_models": "",
             "response_ms": "failed",
         }
 
@@ -2162,8 +2536,16 @@ def get_ranchbrain_notes(category):
 
 def openclaw_shared_navigation():
     """Return the canonical navigation for OpenClaw dashboard pages."""
+    try:
+        from flask import request as _req
+        cur_path = _req.path if _req else "/"
+    except Exception:
+        cur_path = "/"
+    cur_path = (cur_path or "/").rstrip("/") or "/"
+
     links = (
         ("/", "Overview"),
+        ("/ai-cost", "AI Cost"),
         ("/ranchbrain", "RanchBrain"),
         ("/notes", "Vault"),
         ("/ai-scorecard?view=all", "All Models Scorecard"),
@@ -2172,28 +2554,29 @@ def openclaw_shared_navigation():
         ("/backup-recovery", "Backup & Recovery Center"),
     )
 
-    link_style = (
-        "background:#334155;"
-        "color:white;"
-        "text-decoration:none;"
-        "padding:10px 14px;"
-        "border-radius:7px;"
-        "font-weight:bold;"
-        "display:inline-block;"
-    )
+    base_style = "color:white;text-decoration:none;padding:10px 14px;border-radius:7px;font-weight:bold;display:inline-block;"
+    inactive_bg = "background:#334155;"
+    active_bg = "background:#60a5fa;color:black;"
 
-    anchors = "".join(
-        f'<a href="{href}" style="{link_style}">{label}</a>'
-        for href, label in links
-    )
-
+    anchors = []
+    for href, label in links:
+        href_path = href.split("?")[0].rstrip("/") or "/"
+        if href_path == "/":
+            is_active = (cur_path == "/")
+        else:
+            is_active = (cur_path == href_path or cur_path.startswith(href_path + "/"))
+            if href_path == "/ai-scorecard" and cur_path.startswith("/ai-scorecard"):
+                is_active = True
+        style = base_style + (active_bg if is_active else inactive_bg)
+        anchors.append(f'<a href="{href}" style="{style}">{label}</a>')
     return (
         '<div class="nav openclaw-shared-navigation" '
         'style="display:flex;gap:10px;flex-wrap:wrap;'
         'margin-bottom:20px;">'
-        f"{anchors}"
+        + "".join(anchors) +
         "</div>"
     )
+
 
 
 def ranchbrain_shell(title, body):
@@ -3540,7 +3923,7 @@ RANCHBRAIN_VAULT_TEXT_SUFFIXES = {".md", ".txt"}
 
 def ai_storage_is_local():
     local_mount = run_command(
-        "findmnt -n -T /mnt/ai-storage -o TARGET",
+        ["findmnt", "-n", "-T", "/mnt/ai-storage", "-o", "TARGET"],
         timeout=5,
     )
     return local_mount == "/mnt/ai-storage" and AI_STORAGE_ROOT.is_dir()
@@ -4181,8 +4564,15 @@ def pdf_upload_copy_remote(local_path, relative_path, expected_sha256):
     relative = pdf_library_validate_relative_path(relative_path)
     upload_token = uuid.uuid4().hex
     staging_path = PDF_REMOTE_STAGING_ROOT / f"{upload_token}.part"
+    staging_program = """
+import os
+os.makedirs("/mnt/ai-storage/.openclaw-upload-staging", exist_ok=True)
+"""
+    encoded_staging = base64.b64encode(staging_program.encode("utf-8")).decode("ascii")
     ai_storage_ssh(
-        "mkdir -p -- /mnt/ai-storage/.openclaw-upload-staging",
+        "python3 -c 'import base64;"
+        f'exec(base64.b64decode("{encoded_staging}"))'
+        "'",
         timeout=20,
     )
     remote_target = (
@@ -6470,15 +6860,82 @@ def backup_center_remote_latest(entry, warning_days):
     return result
 
 
+def backup_center_time_machine_latest(output):
+    """Return the newest completed backup time from a read-only probe.
+
+    A backup path is preferred. When that listing is blocked, the Time
+    Machine snapshot record is used instead.
+    """
+    latest_section = ""
+    if "OPENCLAW_LATEST_BACKUP" in output:
+        latest_section = output.split("OPENCLAW_LATEST_BACKUP", 1)[1]
+        if "OPENCLAW_DESTINATION" in latest_section:
+            latest_section = latest_section.split(
+                "OPENCLAW_DESTINATION",
+                1,
+            )[0]
+    latest_section = latest_section.strip()
+    latest_path = ""
+    if latest_section:
+        latest_path = latest_section.splitlines()[-1].strip()
+    path_match = re.search(
+        r"/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})\.backup",
+        latest_path,
+    )
+    if path_match:
+        return (
+            latest_path,
+            datetime(*[int(value) for value in path_match.groups()]),
+            "",
+        )
+
+    snapshot = ""
+    if "OPENCLAW_SNAPSHOT" in output:
+        snapshot = output.split("OPENCLAW_SNAPSHOT", 1)[1].strip()
+    lines = [line.strip() for line in snapshot.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return "", None, ""
+    snap_match = re.fullmatch(
+        r"(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})",
+        lines[0],
+    )
+    if not snap_match:
+        return "", None, ""
+    if lines[1] != "0":
+        return (
+            "",
+            None,
+            f"Time Machine result {lines[1]}; last snapshot {lines[0]}",
+        )
+    return (
+        lines[0],
+        datetime(*[int(value) for value in snap_match.groups()]),
+        "",
+    )
+
+
 def backup_center_m4_time_machine():
     """Read Time Machine status from the M4 without changing its state."""
-    remote_command = (
-        "hostname; tmutil status 2>&1; "
-        "printf '\\nOPENCLAW_LATEST_BACKUP\\n'; "
-        "tmutil latestbackup 2>&1; "
-        "printf '\\nOPENCLAW_DESTINATION\\n'; "
-        "tmutil destinationinfo 2>&1"
-    )
+    remote_command = """
+hostname
+tmutil status 2>&1
+printf '\\nOPENCLAW_LATEST_BACKUP\\n'
+tmutil latestbackup 2>&1
+printf '\\nOPENCLAW_DESTINATION\\n'
+tmutil destinationinfo 2>&1
+printf '\\nOPENCLAW_SNAPSHOT\\n'
+defaults export /Library/Preferences/com.apple.TimeMachine - 2>/dev/null \
+  | python3 -c 'import plistlib,sys; from datetime import timezone; raw=sys.stdin.buffer.read()
+if not raw: raise SystemExit(0)
+data=plistlib.loads(raw)
+dest=(data.get("Destinations") or [None])[0] or {}
+snaps=dest.get("SnapshotDates") or []
+if not snaps: raise SystemExit(0)
+snap=snaps[-1]
+if snap.tzinfo is None: snap=snap.replace(tzinfo=timezone.utc)
+print(snap.astimezone().strftime("%Y-%m-%d-%H%M%S"))
+print(dest.get("RESULT"))'
+"""
     try:
         result = subprocess.run(
             [
@@ -6507,21 +6964,21 @@ def backup_center_m4_time_machine():
                 or "M4 Time Machine probe failed."
             )
         output = result.stdout
-        latest_section = output.split(
-            "OPENCLAW_LATEST_BACKUP",
-            1,
-        )[1].split("OPENCLAW_DESTINATION", 1)[0].strip()
-        latest_path = latest_section.splitlines()[-1].strip()
-        timestamp_match = re.search(
-            r"/(\d{4})-(\d{2})-(\d{2})-(\d{2})(\d{2})(\d{2})"
-            r"\.backup",
-            latest_path,
+        latest_path, latest_at, failure = backup_center_time_machine_latest(
+            output
         )
-        if not timestamp_match:
+        if failure:
+            return {
+                "found": True,
+                "file": "Live read-only M4 Time Machine probe",
+                "content": failure,
+                "values": {},
+                "status": "critical",
+                "status_label": "Failed",
+                "status_color": "#ef4444",
+            }
+        if latest_at is None:
             raise ValueError("M4 latest backup timestamp was unavailable.")
-        latest_at = datetime(
-            *[int(value) for value in timestamp_match.groups()]
-        )
         age_hours = max(
             0,
             int(
@@ -7976,7 +8433,9 @@ def backup_recovery_run(backup_type):
 
 
 def system_connectivity_panel_html(drift, ollama):
-    output = "<div class='panel'><h2>System Connectivity Check</h2>"
+    output = "<div class='panel'>"
+    output += ai_cost_section_html()
+    output += "<h2>System Connectivity Check</h2>"
     warnings = drift.get("warnings", []) if drift else []
     if warnings:
         warning_info = classify_warning(warnings[0])
@@ -8011,6 +8470,250 @@ All monitored OpenClaw services are connected.
 </div>
 """
     return output + "</div>"
+AI_COST_SNAPSHOT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".ai_cost_daily.json")
+AI_COST_DAILY_ALERT_USD = 5.0
+AI_COST_CACHE_SECONDS = 120
+_ai_cost_cache = {"at": 0.0, "payload": None}
+
+
+def _ai_cost_live():
+    now = time.time()
+    if _ai_cost_cache["payload"] is not None and now - _ai_cost_cache["at"] < AI_COST_CACHE_SECONDS:
+        return _ai_cost_cache["payload"]
+    try:
+        payload = get_openrouter_cost()
+    except Exception:
+        payload = {"cost": 0.0, "answers": 0, "tokens": 0, "ok": False, "error": "unavailable"}
+    payload["daily_usd"] = _ai_cost_daily(payload.get("cost", 0.0) if payload.get("ok") else None)
+    _ai_cost_cache["at"] = now
+    _ai_cost_cache["payload"] = payload
+    return payload
+
+
+def _ai_cost_daily(current_total):
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        snap = {}
+        if os.path.exists(AI_COST_SNAPSHOT_FILE):
+            with open(AI_COST_SNAPSHOT_FILE) as fh:
+                snap = json.load(fh) or {}
+        last_date = snap.get("date", "")
+        last_total = float(snap.get("total", 0) or 0)
+        if current_total is None:
+            return max(0.0, float(snap.get("daily", 0) or 0))
+        if last_date != today:
+            daily = 0.0 if not last_date else max(0.0, current_total - last_total)
+            snap = {"date": today, "total": current_total, "daily": daily}
+        else:
+            daily = max(0.0, current_total - last_total)
+            snap["total"] = current_total
+            snap["daily"] = daily
+        tmp = AI_COST_SNAPSHOT_FILE + ".tmp"
+        with open(tmp, "w") as fh:
+            json.dump(snap, fh)
+        os.replace(tmp, AI_COST_SNAPSHOT_FILE)
+        return daily
+    except Exception:
+        return 0.0
+
+
+def _ai_cost_money(value):
+    try:
+        return "$%.4f" % float(value)
+    except (TypeError, ValueError):
+        return "$--.--"
+
+
+def ai_cost_section_html():
+    try:
+        info = _ai_cost_live()
+    except Exception:
+        info = {"cost": 0.0, "answers": 0, "tokens": 0, "ok": False, "error": "unavailable"}
+    if info.get("ok"):
+        cost_line = _ai_cost_money(info.get("cost"))
+        stats_line = "%s Answers - %s Tokens" % (info.get("answers", 0), info.get("tokens", 0))
+    elif info.get("error") == "missing-key":
+        cost_line = "not configured"
+        stats_line = "Set OPENROUTER_API_KEY to track spend"
+    else:
+        cost_line = "$0.00"
+        stats_line = "0 Answers - 0 Tokens"
+    return """
+    <div class="ai-cost-section" style="margin-bottom:20px;">
+        <h2>AI cost</h2>
+        <p>What OpenClaw recorded for each AI. Answers on this machine have no API bill. OpenRouter shows the amount it reported for each answer.</p>
+        <div style="display:flex;gap:15px;flex-wrap:wrap;margin-bottom:15px;">
+            <div style="flex:1;min-width:200px;background:#2d3748;padding:15px;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;"><strong>On this machine</strong> <span style="background:#22c55e;color:black;padding:2px 8px;border-radius:12px;font-size:12px;">Local</span></div>
+                <div style="margin-top:10px;font-size:14px;">Qwen 3.5 9B (llama.cpp) and the other local models</div>
+                <div style="font-size:28px;font-weight:bold;margin-top:8px;">$0.00</div>
+                <div style="font-size:12px;opacity:0.7;">No API bill. These answers stay on this machine.</div>
+            </div>
+            <div style="flex:1;min-width:200px;background:#2d3748;padding:15px;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;"><strong>OpenRouter</strong> <span style="background:#3b82f6;color:white;padding:2px 8px;border-radius:12px;font-size:12px;">Cloud</span></div>
+                <div style="margin-top:10px;font-size:14px;">Kimi K3, last, after the local models / ChatGPT-3 and other cloud models</div>
+                <div style="font-size:28px;font-weight:bold;margin-top:8px;">%(cost)s</div>
+                <div style="font-size:12px;opacity:0.7;">%(stats)s - Cost reported by OpenRouter. Track to avoid overspend.</div>
+            </div>
+            <div style="flex:1;min-width:200px;background:#2d3748;padding:15px;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;"><strong>Stayed here</strong> <span style="background:#22c55e;color:black;padding:2px 8px;border-radius:12px;font-size:12px;">Local</span></div>
+                <div style="margin-top:10px;font-size:14px;">Finance and Home Assistant</div>
+                <div style="font-size:28px;font-weight:bold;margin-top:8px;">$0.00</div>
+                <div style="font-size:12px;opacity:0.7;">0 Finance 0 Home Assistant</div>
+            </div>
+        </div>
+        <p><a href="/ai-cost" style="color:#93c5fd;font-weight:bold;text-decoration:underline;">Open the full cost page</a></p>
+    </div>
+    """ % {"cost": cost_line, "stats": stats_line}
+
+
+def ai_cost_breakdown_html():
+    try:
+        info = _ai_cost_live()
+    except Exception:
+        info = {"cost": 0.0, "answers": 0, "tokens": 0, "ok": False, "per_model": [], "daily_usd": 0.0}
+    daily = info.get("daily_usd", 0.0) or 0.0
+    today = datetime.now().strftime("%Y-%m-%d")
+    if daily > AI_COST_DAILY_ALERT_USD:
+        alert = ("<div class='panel' style='border-left:6px solid #ef4444;'>"
+                 "<h2>Daily overspend alert</h2>"
+                 "<div>Today's routed spend <b>%s</b> exceeds the $%.2f daily limit.</div>"
+                 "</div>") % (_ai_cost_money(daily), AI_COST_DAILY_ALERT_USD)
+    else:
+        alert = ("<div class='panel'><h2>Daily spend</h2>"
+                 "<div>Today: <b>%s</b> (alerts above $%.2f).</div></div>") % (
+                     _ai_cost_money(daily), AI_COST_DAILY_ALERT_USD)
+    rows = []
+    for row in info.get("per_model", []) or []:
+        rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            html_module.escape(str(row.get("model", "?"))),
+            html_module.escape(str(row.get("answers", 0))),
+            html_module.escape(str(row.get("tokens", 0))),
+            _ai_cost_money(row.get("cost", 0)), today))
+    if not rows:
+        rows.append("<tr><td>Kimi K3 / ChatGPT-3 (OpenRouter)</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" % (
+            info.get("answers", 0), info.get("tokens", 0),
+            _ai_cost_money(info.get("cost")), today))
+        rows.append("<tr><td>Qwen 3.5 9B (llama.cpp, on-device)</td><td>local</td><td>local</td><td>$0.00</td><td>%s</td></tr>" % today)
+    return (alert + """
+        <div class='panel'>
+            <h2>Per-model breakdown</h2>
+            <div>Daily total: <b>%s</b></div>
+            <div class='table-scroll'><table class='dashboard-table'>
+                <thead><tr><th>Model</th><th>Answers</th><th>Tokens</th><th>Cost</th><th>Date</th></tr></thead>
+                <tbody>%s</tbody>
+            </table></div>
+            <div>OpenRouter credits API reports account totals; per-model rows appear when activity data is available.</div>
+        </div>
+        """) % (_ai_cost_money(daily), "".join(rows))
+
+
+@app.route("/ai-cost")
+def ai_cost():
+    try:
+        body = ai_cost_section_html() + ai_cost_breakdown_html()
+    except Exception as exc:
+        body = ("<div class='panel'><h2>AI Cost</h2>"
+                "<div>Could not load cost data (%s).</div></div>") % html_module.escape(type(exc).__name__)
+    html = """
+<html>
+<head>
+<title>AI Cost - OpenClaw AI Dashboard</title>
+<style>
+body { background-color:#1e293b; color:white; font-family:Arial; padding:20px; }
+.panel { background-color:#273549; padding:20px; margin-bottom:20px; border-radius:10px; }
+a{color:#93c5fd;text-decoration:underline;} a:visited{color:#a5b4fc;} a:hover{color:#bfdbfe;}
+h1, h2 { margin-top:0; }
+table.dashboard-table { border-collapse:collapse; width:100%%; }
+table.dashboard-table th, table.dashboard-table td { border:1px solid #475569; padding:8px; text-align:left; }
+.table-scroll { overflow-x:auto; }
+</style>
+</head>
+<body>
+<h1>AI Cost</h1>
+__OPENCLAW_SHARED_NAVIGATION__
+""" + body + """
+</body>
+</html>
+"""
+    return html.replace("__OPENCLAW_SHARED_NAVIGATION__", openclaw_shared_navigation(), 1)
+
+
+@app.route("/run-command", methods=["POST"])
+def api_run_command():
+    """Voice/chat callback for Jarvis round-trip (T1). Never 500s."""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+    except Exception:
+        data = {}
+    if not isinstance(data, dict):
+        data = {}
+    command = str(data.get("command") or data.get("transcript") or "").strip()
+    try:
+        app.logger.info("run-command: %s", command[:300])
+    except Exception:
+        pass
+    if command.lower().startswith("chat "):
+        said = command[5:].strip() or "(empty)"
+        output = "Heard: %s. Round-trip OK." % said[:280]
+    elif not command:
+        output = "No command received."
+    else:
+        output = "Command not supported yet: %s" % command[:120]
+    return Response(json.dumps({"status": "ok", "result": output, "output": output}),
+                    mimetype="application/json")
+
+
+@app.route("/jarvis")
+def jarvis_3d():
+    return '<!doctype html><html><head><meta charset="utf-8"><title>Jarvis 3D prod</title>\n<style>html,body{margin:0;height:100%;background:#0f172a;color:#7dd3fc;overflow:hidden;font-family:system-ui}\n#top{position:absolute;top:12px;left:12px;z-index:10}\n#top b{color:#22d3ee}\n#ver{font-size:11px;opacity:0.8;margin-top:4px}\ncanvas{display:block}\n#chat{position:absolute;bottom:12px;left:12px;width:300px;background:#1e293bAA;padding:10px;border-radius:10px;backdrop-filter:blur(6px)}\n#log{height:80px;overflow:auto;font-size:12px;margin-bottom:6px}\ninput{width:70%;background:#0f172a;color:#7dd3fc;border:1px solid #334155;padding:6px;border-radius:6px}\nbutton{background:#0ea5e9;color:white;border:0;padding:6px 10px;border-radius:6px;cursor:pointer}\n</style></head><body>\n<div id="top"><b>JARVIS 3D prod</b> <span style="font-size:12px;opacity:0.7">Voice core online · drag to orbit · <a href="/" style="color:#93c5fd">back to Overview</a></span><div id="ver">Version: 2026.10.30-prod · Build: 71f4c266+jarvis · Source: app.py.before-jarvis-20261030-162120 · Host: PROD 100.85.36.72:5051</div></div>\n<div id="chat"><div id="log">Jarvis: Systems online. [PROD BUILD]</div><input id="cmd" placeholder="say something..."><button onclick="send()">Send</button></div>\n<script type="importmap">{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}</script>\n<script type="module">\nimport * as THREE from \'three\'; import { OrbitControls } from \'three/addons/controls/OrbitControls.js\';\nconst scene=new THREE.Scene(); const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,1000); camera.position.set(0,2,6);\nconst renderer=new THREE.WebGLRenderer({antialias:true,alpha:true}); renderer.setSize(innerWidth,innerHeight); document.body.appendChild(renderer.domElement);\nconst controls=new OrbitControls(camera,renderer.domElement); controls.enableDamping=true;\nconst core=new THREE.Mesh(new THREE.SphereGeometry(0.9,32,32), new THREE.MeshPhongMaterial({color:0x7dd3fc,emissive:0x0ea5e9,emissiveIntensity:0.6})); scene.add(core);\nconst wire=new THREE.Mesh(new THREE.IcosahedronGeometry(1.8,2), new THREE.MeshBasicMaterial({color:0x22d3ee,wireframe:true,transparent:true,opacity:0.5})); scene.add(wire);\nconst ring1=new THREE.Mesh(new THREE.TorusGeometry(2.6,0.06,16,100), new THREE.MeshBasicMaterial({color:0x0ea5e9})); ring1.rotation.x=Math.PI/2; scene.add(ring1);\nconst ring2=new THREE.Mesh(new THREE.TorusGeometry(2.8,0.06,16,100), new THREE.MeshBasicMaterial({color:0x38bdf8,transparent:true,opacity:0.6})); ring2.rotation.x=Math.PI/3; scene.add(ring2);\nscene.add(new THREE.AmbientLight(0x7dd3fc,0.8)); const light=new THREE.DirectionalLight(0xffffff,1); light.position.set(5,5,5); scene.add(light);\nconst ptsGeo=new THREE.BufferGeometry(); const c=600; const pos=new Float32Array(c*3); for(let i=0;i<c*3;i++) pos[i]=(Math.random()-0.5)*20; ptsGeo.setAttribute(\'position\',new THREE.BufferAttribute(pos,3)); scene.add(new THREE.Points(ptsGeo,new THREE.PointsMaterial({size:0.05,color:0x7dd3fc})));\nfunction log(t){document.getElementById(\'log\').innerHTML+=`<div>${t}</div>`;}\nwindow.send=async()=>{const v=document.getElementById(\'cmd\').value; if(!v) return; log(`You: ${v}`); try{const r=await fetch(\'/run-command\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\'},body:JSON.stringify({command:\'chat \'+v})}); const j=await r.json(); log(`Jarvis: ${j.result||j.output||JSON.stringify(j)}`);}catch(e){log(\'ERR \'+e);} document.getElementById(\'cmd\').value=\'\';}\n(function anim(){requestAnimationFrame(anim); wire.rotation.y+=0.003; ring1.rotation.z+=0.01; ring2.rotation.z-=0.008; core.rotation.y+=0.005; controls.update(); renderer.render(scene,camera);})();\nlog(\'Jarvis 3D prod v2026.10.30 build 71f4c266 online — \'+location.host);\n</script></body></html>\n'
+
+
+
+
+
+
+
+
+
+
+def format_dashboard_window_title(environment, version, build):
+    """Browser and page title for this dashboard."""
+    return f"OpenClaw AI Dashboard {environment} Version {version} Build {build}"
+
+
+def dashboard_window_title():
+    """Name this dashboard DEV and identify the running version and build.
+
+    Version comes from package.json. Build is the short git commit of the
+    checkout that is serving the page.
+    """
+    environment = os.environ.get("OPENCLAW_DASHBOARD_ENVIRONMENT", "DEV").strip() or "DEV"
+    version = "unknown"
+    try:
+        payload = json.loads((OPENCLAW_ROOT / "package.json").read_text(encoding="utf-8"))
+        candidate = payload.get("version")
+        if isinstance(candidate, str) and candidate.strip():
+            version = candidate.strip()
+    except (OSError, json.JSONDecodeError, TypeError, AttributeError):
+        version = "unknown"
+
+    build = "unknown"
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(OPENCLAW_ROOT), "rev-parse", "--short=11", "HEAD"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=3,
+        )
+        candidate = completed.stdout.strip()
+        if re.fullmatch(r"[0-9a-f]{7,40}", candidate):
+            build = candidate
+    except (OSError, subprocess.SubprocessError):
+        build = "unknown"
+
+    return format_dashboard_window_title(environment, version, build)
 
 
 @app.route("/")
@@ -8018,14 +8721,16 @@ def home():
     backup_success = request.args.get("backup")
     drift = check_ai_drift()
     omlx = get_omlx_status()
+    llama_cpp = get_llama_cpp_status()
     propertymanager_mcp = get_propertymanager_mcp_status()
-    services = build_system_health(omlx, propertymanager_mcp)
+    services = build_system_health(omlx, propertymanager_mcp, llama_cpp)
     m4 = get_m4_ollama_status()
+    page_title = html_module.escape(dashboard_window_title())
 
     html = """
 <html>
 <head>
-<title>OpenClaw AI Dashboard</title>
+<title>__DASHBOARD_WINDOW_TITLE__</title>
 <style>
 body { background-color:#1e293b; color:white; font-family:Arial; padding:20px; }
 .panel { background-color:#273549; padding:20px; margin-bottom:20px; border-radius:10px; }
@@ -8056,15 +8761,24 @@ h1, h2 { margin-top:0; }
 </style>
 </head>
 <body>
-<h1>OpenClaw AI Dashboard</h1>
+<h1>__DASHBOARD_WINDOW_TITLE__</h1>
 
 __OPENCLAW_SHARED_NAVIGATION__
 """
 
+    html = html.replace("__DASHBOARD_WINDOW_TITLE__", page_title)
     html = html.replace(
         "__OPENCLAW_SHARED_NAVIGATION__",
         openclaw_shared_navigation(),
         1,
+    )
+
+    html += (
+        '<p style="margin:0 0 16px;">'
+        '<a href="http://127.0.0.1:8000/jarvis.html" '
+        'style="background:#334155;color:white;text-decoration:none;'
+        'padding:10px 14px;border-radius:7px;font-weight:bold;'
+        'display:inline-block;">Jarvis</a></p>'
     )
 
     html += system_connectivity_panel_html(drift, m4)
@@ -8076,7 +8790,7 @@ __OPENCLAW_SHARED_NAVIGATION__
     if m4["connected"]:
         html += f"""
         <div class='panel'>
-            <h2>🧠 Intel Mini → M4 Model Server</h2>
+            <h2>🧠 Intel Mini Model Server</h2>
             <div class='status-box'>
                 <b>Status:</b> <span style='color:#7CFC00;'>Connected</span><br><br>
                 <b>Endpoint:</b> {m4["endpoint"]}<br><br>
@@ -8089,7 +8803,7 @@ __OPENCLAW_SHARED_NAVIGATION__
     else:
         html += f"""
         <div class='panel'>
-            <h2>🧠 Intel Mini → M4 Model Server</h2>
+            <h2>🧠 Intel Mini Model Server</h2>
             <div class='warning-box'>
                 <b>Status:</b> Offline<br><br>
                 <b>Endpoint:</b> {m4["endpoint"]}<br><br>
@@ -8098,7 +8812,7 @@ __OPENCLAW_SHARED_NAVIGATION__
         </div>
         """
 
-    html += m4_ai_health_panel_html(m4, omlx)
+    html += m4_ai_health_panel_html(m4, omlx, llama_cpp)
     html += ai_routing_telemetry_panel_html(
         installed_model_names=m4.get("model_names", []),
     )
@@ -8121,6 +8835,7 @@ __OPENCLAW_SHARED_NAVIGATION__
     html += f"""
     <div class='panel'>
         <h2>Trend Charts</h2>
+        <p>The legend names the machine. Intel Mini and M4 share a chart when the units match. Memory is GiB used. Disk is percent full: Intel Mini internal, Intel Mini external, and M4. The DEV virtual machine disk is on the external drive, so it shows on that line and does not jump the internal disk. CPU is the M4 only, because the Intel Mini samples do not include CPU.</p>
         <form method='get' action='/' onsubmit="
 document.getElementById('refreshMsg').innerHTML='Collecting fresh sample and refreshing charts...';
 document.getElementById('refreshBtn').disabled=true;
@@ -8174,14 +8889,24 @@ Trend file checked:
 </div>
 """
 
-    cpu = run_command("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'")
-    ram = run_command("free -h | awk '/Mem:/ {print $3 \" / \" $2}'")
-    disk = run_command("df -h / | awk 'NR==2 {print $3 \" / \" $2 \" (\" $5 \")\"}'")
-    docker = run_command("docker ps -q | wc -l")
+    cpu, ram, disk, docker = _resource_lines()
+    if Path("/mnt/ai-storage").is_mount():
+        live_monitor_title = "Live Resource Monitor — Intel Mini"
+        live_monitor_note = (
+            "These numbers are the Intel Mini host. "
+            "They are not the DEV virtual machine and not the M4."
+        )
+    else:
+        live_monitor_title = "Live Resource Monitor — DEV virtual machine"
+        live_monitor_note = (
+            "These numbers are the DEV guest running on the Intel Mini. "
+            "They are not the Intel Mini host and not the M4."
+        )
 
     html += f"""
 <div class="panel">
-<h2>Live Resource Monitor</h2>
+<h2>{live_monitor_title}</h2>
+<p>{live_monitor_note}</p>
 <div class="output">CPU Usage:
 {cpu}% used
 

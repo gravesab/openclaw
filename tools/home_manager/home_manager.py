@@ -1,7 +1,15 @@
 import json
-import redis
-import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
+
+import redis
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.security.shell_guard import run_checked
 
 r = redis.Redis(
     host="127.0.0.1",
@@ -10,17 +18,7 @@ r = redis.Redis(
 )
 
 def cmd(command, timeout=15):
-    try:
-        return subprocess.check_output(
-            command,
-            shell=True,
-            text=True,
-            timeout=timeout,
-        ).strip()
-    except subprocess.TimeoutExpired:
-        return f"Command timed out after {timeout} seconds: {command}"
-    except Exception as e:
-        return str(e)
+    return run_checked(command, state_changing=False, timeout=timeout, service="home_manager")
 
 def publish(event_type, message):
 
@@ -42,7 +40,7 @@ def publish(event_type, message):
 def check_homeassistant():
 
     output = cmd(
-        "docker ps --filter name=homeassistant --format '{{.Status}}'"
+        ["docker", "ps", "--filter", "name=homeassistant", "--format", "{{.Status}}"]
     )
 
     if output:
@@ -59,7 +57,7 @@ def check_homeassistant():
 def check_scrypted():
 
     output = cmd(
-        "docker ps --filter name=scrypted --format '{{.Status}}'"
+        ["docker", "ps", "--filter", "name=scrypted", "--format", "{{.Status}}"]
     )
 
     if output:
@@ -75,7 +73,7 @@ def check_scrypted():
 
 def check_bluetooth():
 
-    output = cmd("bluetoothctl show")
+    output = cmd(["bluetoothctl", "show"])
 
     if "Powered: yes" in output:
         publish(

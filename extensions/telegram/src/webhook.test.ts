@@ -3,7 +3,7 @@ import { once } from "node:events";
 import { request, type IncomingMessage } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
 import { WEBHOOK_RATE_LIMIT_DEFAULTS } from "openclaw/plugin-sdk/webhook-ingress";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 const handleUpdateSpy = vi.hoisted(() => vi.fn((..._args: unknown[]): unknown => undefined));
 const setWebhookSpy = vi.hoisted(() => vi.fn());
@@ -101,6 +101,8 @@ vi.mock("./bot.js", () => ({
 }));
 
 let startTelegramWebhook: typeof import("./webhook.js").startTelegramWebhook;
+let ranchServiceQuarantined: typeof import("./webhook.js").ranchServiceQuarantined;
+let postRanchSentinel: typeof import("./webhook.js").postRanchSentinel;
 
 function resetTelegramWebhookMocks(): void {
   handleUpdateSpy.mockReset();
@@ -163,7 +165,8 @@ function expectStatusCall(
 }
 
 beforeAll(async () => {
-  ({ startTelegramWebhook } = await import("./webhook.js"));
+  ({ startTelegramWebhook, ranchServiceQuarantined, postRanchSentinel } =
+    await import("./webhook.js"));
 });
 
 beforeEach(() => {
@@ -1054,5 +1057,109 @@ describe("startTelegramWebhook", () => {
     abort.abort();
     expect(deleteWebhookSpy).toHaveBeenCalledTimes(1);
     expect(deleteWebhookSpy).toHaveBeenCalledWith({ drop_pending_updates: false });
+  });
+});
+
+describe("ranchServiceQuarantined", () => {
+  const saved: Record<string, string | undefined> = {};
+  let snapshotted = false;
+
+  function setSentinel(enabled: string, url?: string, token?: string): void {
+    if (!snapshotted) {
+      saved.RANCH_SENTINEL_ENABLED = process.env.RANCH_SENTINEL_ENABLED;
+      saved.RANCH_SENTINEL_URL = process.env.RANCH_SENTINEL_URL;
+      saved.RANCH_SENTINEL_TOKEN = process.env.RANCH_SENTINEL_TOKEN;
+      snapshotted = true;
+    }
+    process.env.RANCH_SENTINEL_ENABLED = enabled;
+    if (url === undefined) {
+      delete process.env.RANCH_SENTINEL_URL;
+    } else {
+      process.env.RANCH_SENTINEL_URL = url;
+    }
+    if (token === undefined) {
+      delete process.env.RANCH_SENTINEL_TOKEN;
+    } else {
+      process.env.RANCH_SENTINEL_TOKEN = token;
+    }
+  }
+
+  function restoreSentinel(): void {
+    if (!snapshotted) {
+      vi.unstubAllGlobals();
+      return;
+    }
+    for (const key of ["RANCH_SENTINEL_ENABLED", "RANCH_SENTINEL_URL", "RANCH_SENTINEL_TOKEN"]) {
+      const value = saved[key];
+      if (value === undefined) {
+        delete process.env[key];
+      } else {
+        process.env[key] = value;
+      }
+    }
+    snapshotted = false;
+    vi.unstubAllGlobals();
+  }
+
+  afterEach(() => {
+    restoreSentinel();
+  });
+
+  it("stays open when the sentinel is disabled", async () => {
+    setSentinel("0");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(ranchServiceQuarantined("telegram")).resolves.toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed on a non-loopback host, timeout, non-200, or invalid JSON", async () => {
+    setSentinel("1", "http://10.0.0.8:8001/sense");
+    const blocked = vi.fn();
+    vi.stubGlobal("fetch", blocked);
+    await expect(ranchServiceQuarantined("telegram")).resolves.toBe(true);
+    expect(blocked).not.toHaveBeenCalled();
+
+    setSentinel("1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Promise.reject(new Error("timeout"))),
+    );
+    await expect(ranchServiceQuarantined("telegram")).resolves.toBe(true);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("no", { status: 503 })),
+    );
+    await expect(ranchServiceQuarantined("telegram")).resolves.toBe(true);
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response("not-json", { status: 200 })),
+    );
+    await expect(ranchServiceQuarantined("telegram")).resolves.toBe(true);
+  });
+
+  it("returns false when the service is not quarantined", async () => {
+    setSentinel("1");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ quarantined: false })),
+    );
+    await expect(ranchServiceQuarantined("telegram")).resolves.toBe(false);
+  });
+
+  it("sends the bearer token when RANCH_SENTINEL_TOKEN is set", async () => {
+    setSentinel("1", undefined, "sense-token");
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    postRanchSentinel({ type: "tg.secret_fail", service: "telegram", score: 1 });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:8001/sense",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ Authorization: "Bearer sense-token" }),
+      }),
+    );
   });
 });

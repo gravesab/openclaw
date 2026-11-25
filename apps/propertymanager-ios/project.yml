@@ -58,6 +58,10 @@ targets:
           NSAllowsArbitraryLoads: true
           NSAllowsLocalNetworking: true
           NSExceptionDomains:
+            100.104.100.96:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+              NSExceptionRequiresForwardSecrecy: false
             100.85.36.72:
               NSExceptionAllowsInsecureHTTPLoads: true
               NSIncludesSubdomains: true
@@ -71,6 +75,10 @@ targets:
               NSIncludesSubdomains: true
             127.0.0.1:
               NSExceptionAllowsInsecureHTTPLoads: true
+            ts.net:
+              NSExceptionAllowsInsecureHTTPLoads: true
+              NSIncludesSubdomains: true
+              NSExceptionRequiresForwardSecrecy: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: ai.openclaw.propertymanager

@@ -1,5 +1,6 @@
 import Network
 import Observation
+import OpenClawChatUI
 import OpenClawKit
 import os
 import SwiftUI
@@ -99,6 +100,7 @@ struct SettingsTab: View {
                             TextField("Paste setup code", text: self.$setupCode)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .appleIntelligenceDictation(self.$setupCode)
 
                             Button {
                                 self.openGatewayQRScanner()
@@ -195,9 +197,11 @@ struct SettingsTab: View {
                             TextField("Host", text: self.$manualGatewayHost)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .appleIntelligenceDictation(self.$manualGatewayHost)
 
                             TextField("Port (optional)", text: self.manualPortBinding)
                                 .keyboardType(.numberPad)
+                                .appleIntelligenceDictation(self.manualPortBinding)
 
                             Toggle("Use TLS", isOn: self.$manualGatewayTLS)
 
@@ -238,8 +242,10 @@ struct SettingsTab: View {
                             TextField("Gateway Auth Token", text: self.$gatewayToken)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
+                                .appleIntelligenceDictation(self.$gatewayToken)
 
                             SecureField("Gateway Password", text: self.$gatewayPassword)
+                                .appleIntelligenceDictation(self.$gatewayPassword)
 
                             Button("Reset Onboarding", role: .destructive) {
                                 self.showResetOnboardingAlert = true
@@ -374,6 +380,7 @@ struct SettingsTab: View {
                             TextField("Default Share Instruction", text: self.$defaultShareInstruction, axis: .vertical)
                                 .lineLimit(2...6)
                                 .textInputAutocapitalization(.sentences)
+                                .appleIntelligenceDictation(self.$defaultShareInstruction)
                             HStack(spacing: 8) {
                                 Text("Default Share Instruction")
                                     .font(.footnote)
@@ -409,6 +416,7 @@ struct SettingsTab: View {
 
                     DisclosureGroup("Device Info") {
                         TextField("Name", text: self.$displayName)
+                            .appleIntelligenceDictation(self.$displayName)
                         Text(self.instanceId)
                             .font(.footnote)
                             .foregroundStyle(.secondary)

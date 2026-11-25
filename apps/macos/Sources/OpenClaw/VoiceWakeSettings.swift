@@ -5,6 +5,7 @@ import Speech
 import SwabbleKit
 import SwiftUI
 import UniformTypeIdentifiers
+import OpenClawChatUI
 
 struct VoiceWakeSettings: View {
     @Bindable var state: AppState
@@ -213,6 +214,7 @@ struct VoiceWakeSettings: View {
                             .onSubmit {
                                 self.syncTriggerEntriesToState()
                             }
+                            .appleIntelligenceDictation($entry.value)
 
                         Button {
                             self.removeWord(id: entry.id)

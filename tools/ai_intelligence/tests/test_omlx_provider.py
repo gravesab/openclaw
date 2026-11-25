@@ -37,7 +37,7 @@ class FakeHTTPResponse:
 class OMLXProviderTests(unittest.TestCase):
     def setUp(self) -> None:
         self.provider = OMLXProvider(
-            OMLXConfig("http://10.0.2.2:8000/v1", "secret", 30)
+            OMLXConfig("http://127.0.0.1:8000/v1", "secret", 30)
         )
         self.request = ProviderRequest(
             model_id="omlx-qwen3.5-9b-4bit",

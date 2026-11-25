@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping
 from dataclasses import dataclass
 from os import environ
 from typing import Any
+from urllib.error import URLError
+from urllib.parse import urlparse
+from urllib.request import Request, urlopen
 
 
 @dataclass(frozen=True)
@@ -22,12 +26,63 @@ MCP_ENABLED_ENV = "OPENCLAW_AI_INTELLIGENCE_MCP_ENABLED"
 MCP_ENVIRONMENT_ENV = "OPENCLAW_AI_INTELLIGENCE_ENVIRONMENT"
 
 
+def _notify_sentinel(event: dict) -> None:
+    if environ.get("RANCH_SENTINEL_ENABLED", "0") != "1":
+        return
+    url = environ.get("RANCH_SENTINEL_URL", "http://127.0.0.1:8001/sense")
+    parsed = urlparse(url)
+    if parsed.scheme not in {"http", "https"} or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return
+    payload = json.dumps(event).encode("utf-8")
+    headers = {"Content-Type": "application/json"}
+    token = environ.get("RANCH_SENTINEL_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    outgoing = Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urlopen(outgoing, timeout=0.5):
+            return
+    except (OSError, URLError, TimeoutError):
+        return
+
+
+def _service_quarantined(service: str) -> bool:
+    if environ.get("RANCH_SENTINEL_ENABLED", "0") != "1":
+        return False
+    base = urlparse(environ.get("RANCH_SENTINEL_URL", "http://127.0.0.1:8001/sense"))
+    # Enabled lookups fail closed: a missed or non-loopback check is quarantined.
+    if base.scheme not in {"http", "https"} or base.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return True
+    port = base.port or (443 if base.scheme == "https" else 80)
+    status_url = f"{base.scheme}://{base.hostname}:{port}/quarantine/{service}"
+    try:
+        with urlopen(status_url, timeout=0.05) as response:
+            body = json.loads(response.read().decode("utf-8"))
+        return body.get("quarantined") is True
+    except (OSError, URLError, TimeoutError, json.JSONDecodeError):
+        return True
+
+
 def require_dev_mcp_environment() -> None:
     """Allow MCP execution only after explicit DEV activation."""
 
+    if _service_quarantined("ai_intelligence_mcp"):
+        raise PermissionError("503 quarantined")
     if environ.get(MCP_ENABLED_ENV) != "1":
+        _notify_sentinel({
+            "type": "mcp.dev_bypass_attempt",
+            "service": "ai_intelligence_mcp",
+            "score": 1.0,
+            "payload": {"reason": "disabled"},
+        })
         raise PermissionError("AI Intelligence MCP is disabled")
     if environ.get(MCP_ENVIRONMENT_ENV) != "development":
+        _notify_sentinel({
+            "type": "mcp.dev_bypass_attempt",
+            "service": "ai_intelligence_mcp",
+            "score": 1.0,
+            "payload": {"reason": "environment"},
+        })
         raise PermissionError(
             "AI Intelligence MCP is restricted to the development environment"
         )

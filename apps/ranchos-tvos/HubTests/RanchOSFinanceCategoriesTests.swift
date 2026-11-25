@@ -391,6 +391,31 @@ final class RanchOSFinanceCategoriesTests: XCTestCase {
     }
 
     @MainActor
+    func testSuggestionKeepsCategoryChosenWhileWaiting() async throws {
+        let suggester = RacingFinanceSuggester(answer: "Groceries")
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        addTeardownBlock {
+            try? FileManager.default.removeItem(at: directory)
+        }
+        let store = RanchOSFinanceStore(
+            persistenceURL: directory.appendingPathComponent("ledger.json"), suggester: suggester)
+        _ = try XCTUnwrap(store.createCategory(name: "Groceries"))
+        let feed = try XCTUnwrap(store.createCategory(name: "Feed"))
+        let outcome = store.ingest(fileName: "bank.csv", bytes: try fixtureBytes("FinanceSampleBank"))
+        let vendorID = outcome.newVendors[0].id
+        XCTAssertEqual(store.vendor(id: vendorID)?.categoryID, store.uncategorizedID)
+
+        // He places the vendor while the model is still answering.
+        suggester.whileWaiting = { store.assign(vendorID: vendorID, categoryID: feed.id) }
+        await store.requestSuggestion(vendorID: vendorID)
+
+        XCTAssertEqual(store.vendor(id: vendorID)?.categoryID, feed.id)
+        XCTAssertNil(store.vendor(id: vendorID)?.suggestion)
+    }
+
+    @MainActor
     func testSuggestionOutsideListLeavesUncategorized() async throws {
         let suggester = FakeFinanceSuggester(answer: "Vet Care")
         let store = try tempStore(suggester: suggester)
@@ -1932,6 +1957,24 @@ final class RanchOSFinanceCategoriesTests: XCTestCase {
 }
 
 @MainActor
+/// Runs a step on the main actor before answering, like a person acting
+/// while the model is still working.
+private final class RacingFinanceSuggester: RanchOSFinanceCategorySuggesting, @unchecked Sendable {
+    let answer: String
+    var whileWaiting: (@MainActor @Sendable () -> Void)?
+
+    init(answer: String) {
+        self.answer = answer
+    }
+
+    func suggestCategory(vendorName: String, categories: [String]) async -> String? {
+        if let whileWaiting {
+            await MainActor.run { whileWaiting() }
+        }
+        return answer
+    }
+}
+
 private final class FakeFinanceSuggester: RanchOSFinanceCategorySuggesting, @unchecked Sendable {
     var answer: String?
     var calls: [(String, [String])] = []

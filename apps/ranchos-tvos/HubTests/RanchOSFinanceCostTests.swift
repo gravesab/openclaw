@@ -127,11 +127,13 @@ final class RanchOSFinanceCostTests: XCTestCase {
     @MainActor
     func testTargetTotalsSumAcrossCharges() throws {
         let store = try tempStore()
-        _ = try hankCharge(store: store)
+        let hank = try hankCharge(store: store)
         let card = try fixtureBytes("FinanceSampleAppleCard")
         _ = store.ingest(fileName: "card.csv", bytes: card)
-        let charges = store.ledger.charges.filter { $0.amountText == "84.12" }
-        XCTAssertEqual(charges.count, 2)
+        // The second 84.12 row is an exact duplicate and cannot be linked.
+        let groceries = store.ledger.charges.filter { $0.amountText == "84.12" && !$0.isDuplicate }
+        XCTAssertEqual(groceries.count, 1)
+        let charges = groceries + [hank]
 
         for charge in charges {
             _ = store.addExactUse(
@@ -228,6 +230,42 @@ final class RanchOSFinanceCostTests: XCTestCase {
         XCTAssertTrue(decoded.operations.isEmpty)
         XCTAssertEqual(decoded.files.count, 1)
         XCTAssertFalse(decoded.charges.isEmpty)
+    }
+
+    @MainActor
+    func testDuplicateRowCannotBeLinked() throws {
+        let store = try tempStore()
+        _ = try hankCharge(store: store)
+        let payroll = store.ledger.charges.filter { $0.merchantText == "PAYROLL DEPOSIT" }
+        let duplicate = try XCTUnwrap(payroll.first(where: \.isDuplicate))
+        let kept = try XCTUnwrap(payroll.first(where: { !$0.isDuplicate }))
+
+        XCTAssertEqual(store.allocatableAmount(charge: duplicate), 0)
+        XCTAssertEqual(store.unallocatedAmount(chargeID: duplicate.id), 0)
+        XCTAssertFalse(store.chargesWithUnallocated().contains { $0.id == duplicate.id })
+        XCTAssertTrue(store.chargesWithUnallocated().contains { $0.id == kept.id })
+        XCTAssertNil(store.addExactUse(
+            chargeID: duplicate.id, kind: .household,
+            recordID: RanchOSFinanceMoney.householdRecordID, amount: Decimal(string: "10.00")!))
+    }
+
+    @MainActor
+    func testIncomeAndExpensesHonorYearAndMonth() throws {
+        let store = try tempStore()
+        _ = try hankCharge(store: store)
+        var query = RanchOSFinanceChartQuery.allExpenses
+        let all = store.incomeAndExpenses(query)
+        XCTAssertGreaterThan(all.income, 0)
+
+        query.year = 2026
+        query.month = 9
+        XCTAssertEqual(store.incomeAndExpenses(query).income, all.income)
+        XCTAssertEqual(store.incomeAndExpenses(query).expenses, all.expenses)
+
+        query.month = 8
+        let august = store.incomeAndExpenses(query)
+        XCTAssertEqual(august.income, 0)
+        XCTAssertEqual(august.expenses, 0)
     }
 
     // MARK: - Helpers

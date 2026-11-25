@@ -117,11 +117,12 @@ enum RanchOSFinanceCSV {
         let headers = headerFields.map { normalizeHeader($0) }
         let body = Array(physical.dropFirst())
         if isAppleCardAttempt(headers: headers) {
-            let rows = joinContinuations(body)
+            let dateColumn = headers.firstIndex(of: normalizeHeader("Transaction Date")) ?? 0
+            let rows = joinContinuations(body, dateColumn: dateColumn)
             return parseAppleCard(headers: headers, rows: rows, sha: sha, now: now)
         }
         if let mapping = genericMapping(headers: headers) {
-            let rows = joinContinuations(body)
+            let rows = joinContinuations(body, dateColumn: mapping.date)
             return parseGeneric(mapping: mapping, rows: rows, sha: sha, now: now)
         }
         return ParsedFile(
@@ -194,17 +195,18 @@ enum RanchOSFinanceCSV {
         return records
     }
 
-    /// Joins wrapped continuation lines: a physical line that does not start
-    /// with a transaction date continues the previous row. The continuation's
+    /// Joins wrapped continuation lines: a physical line whose date column
+    /// does not hold a date continues the previous row. Bank files may put
+    /// the date in any column, so the caller names it. The continuation's
     /// first cell extends the previous row's last cell (the field the wrap
     /// broke, usually the description) with a space; any remaining cells fill
     /// the columns that follow on the continuation line. A joined line counts
     /// once as one logical row.
-    static func joinContinuations(_ body: [[String]]) -> [[String]] {
+    static func joinContinuations(_ body: [[String]], dateColumn: Int = 0) -> [[String]] {
         var joined: [[String]] = []
         for record in body {
-            let firstCell = record.first ?? ""
-            if startsWithDate(firstCell) || joined.isEmpty {
+            let dateCell = dateColumn < record.count ? record[dateColumn] : ""
+            if startsWithDate(dateCell) || joined.isEmpty {
                 joined.append(record)
                 continue
             }
@@ -233,7 +235,9 @@ enum RanchOSFinanceCSV {
 
     static func startsWithDate(_ cell: String) -> Bool {
         let trimmed = cell.trimmingCharacters(in: .whitespaces)
-        let pattern = #"^\d{1,4}[/\-.]\d{1,2}([/\-.]\d{1,4})?"#
+        // Three parts, not followed by more digits or separators, so a phone
+        // number such as 1-800-555-0100 is not read as a date.
+        let pattern = #"^\d{1,4}[/\-.]\d{1,2}[/\-.]\d{2,4}(?![\d/\-.])"#
         return trimmed.range(of: pattern, options: .regularExpression) != nil
     }
 

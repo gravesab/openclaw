@@ -1668,20 +1668,28 @@ final class RanchOSFinanceStore {
         }
         let vendor = ledger.vendors[index]
         let names = ledger.categories.map(\.name)
-        guard let suggested = await suggester.suggestCategory(
-            vendorName: vendor.name, categories: names)
+        let suggested = await suggester.suggestCategory(vendorName: vendor.name, categories: names)
+        // The ledger may have changed while the model ran. Find the vendor
+        // again, and write only if it is still Uncategorized: a category he
+        // chose in the meantime wins.
+        guard let current = ledger.vendors.firstIndex(where: { $0.id == vendorID }),
+            let uncategorizedID = self.uncategorizedID,
+            ledger.vendors[current].categoryID == uncategorizedID
         else {
-            ledger.vendors[index].suggestion = .unavailable
+            return
+        }
+        guard let suggested else {
+            ledger.vendors[current].suggestion = .unavailable
             persist()
             return
         }
         if let match = ledger.categories.first(where: {
             !$0.isUncategorized && $0.name.lowercased() == suggested.lowercased()
         }) {
-            ledger.vendors[index].categoryID = match.id
-            ledger.vendors[index].suggestion = .suggested
+            ledger.vendors[current].categoryID = match.id
+            ledger.vendors[current].suggestion = .suggested
         } else {
-            ledger.vendors[index].suggestion = .notObvious
+            ledger.vendors[current].suggestion = .notObvious
         }
         persist()
     }

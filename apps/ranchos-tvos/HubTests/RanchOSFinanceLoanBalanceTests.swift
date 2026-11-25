@@ -73,6 +73,34 @@ final class RanchOSFinanceLoanBalanceTests: XCTestCase {
         XCTAssertNil(parsed.principal)
     }
 
+    func testMemoFirstBankRowsStaySeparate() throws {
+        let now = try XCTUnwrap(RanchOSFinanceCSV.parseDate("10/01/2026"))
+        let csv = """
+        Memo,Posted Date,Amount
+        FEED STORE,09/02/2026,-40.00
+        FUEL STOP,09/03/2026,-55.10
+        VET CLINIC,09/04/2026,-120.00
+        """
+        let parsed = RanchOSFinanceCSV.parse(bytes: Data(csv.utf8), now: now)
+        XCTAssertEqual(parsed.charges.map(\.merchantText), ["FEED STORE", "FUEL STOP", "VET CLINIC"])
+        XCTAssertEqual(parsed.charges.map(\.amountText), ["-40.00", "-55.10", "-120.00"])
+        XCTAssertTrue(parsed.errors.isEmpty)
+    }
+
+    func testPhoneNumberWrapJoinsThePreviousRow() throws {
+        let now = try XCTUnwrap(RanchOSFinanceCSV.parseDate("10/01/2026"))
+        let csv = """
+        Posted Date,Amount,Memo
+        09/02/2026,-40.00,ACME SUPPORT
+        1-800-555-0100
+        09/03/2026,-5.00,COFFEE
+        """
+        let parsed = RanchOSFinanceCSV.parse(bytes: Data(csv.utf8), now: now)
+        XCTAssertEqual(parsed.charges.map(\.merchantText), ["ACME SUPPORT 1-800-555-0100", "COFFEE"])
+        XCTAssertEqual(parsed.rowCount, 2)
+        XCTAssertTrue(parsed.errors.isEmpty)
+    }
+
     func testFutureBankRowIsRejected() throws {
         let now = try XCTUnwrap(RanchOSFinanceCSV.parseDate("10/01/2026"))
         let csv = """

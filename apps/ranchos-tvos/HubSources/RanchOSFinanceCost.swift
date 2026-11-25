@@ -95,6 +95,8 @@ extension RanchOSFinanceStore {
     /// cents. Direction (in or out) is the statement's business; allocation
     /// splits the size. Unparseable amounts allocate nothing.
     func allocatableAmount(charge: RanchOSFinanceCharge) -> Decimal {
+        // A duplicate row is not kept money anywhere else, so it cannot be linked.
+        if charge.isDuplicate { return 0 }
         guard let amount = RanchOSFinanceCSV.parseAmount(charge.amountText) else { return 0 }
         return RanchOSFinanceMoney.roundedCents(amount < 0 ? -amount : amount)
     }
@@ -192,7 +194,8 @@ extension RanchOSFinanceStore {
     /// Each target with the sum of amounts linked to it, by name.
     func costByTarget() -> [RanchOSFinanceTargetTotal] {
         var totals: [String: RanchOSFinanceTargetTotal] = [:]
-        for use in ledger.uses {
+        let duplicateIDs = Set(ledger.charges.filter(\.isDuplicate).map(\.id))
+        for use in ledger.uses where !duplicateIDs.contains(use.chargeID) {
             let key = use.kind.rawValue + ":" + use.recordID
             if var existing = totals[key] {
                 existing.total += use.amount
@@ -720,6 +723,11 @@ extension RanchOSFinanceStore {
             } else if let start = scoped.start, let end = scoped.end {
                 guard let date = RanchOSFinanceDates.parse(charge.dateText), date >= start && date <= end
                 else { continue }
+            } else if let year = scoped.year, let month = scoped.month {
+                // Same month scope as the category bars in chartCharges.
+                guard let date = RanchOSFinanceDates.parse(charge.dateText) else { continue }
+                let parts = RanchOSFinanceDates.yearMonth(date)
+                if parts.year != year || parts.month != month { continue }
             }
             income += chartValue(charge, money: .income)
             expenses += chartValue(charge, money: .expenses)

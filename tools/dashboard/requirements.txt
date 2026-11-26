@@ -3,5 +3,5 @@ Gunicorn==26.0.0
 Markdown==3.10.2
 matplotlib==3.11.1
 psycopg2-binary==2.9.12
-pypdf==6.14.2
+pypdf==6.21.4
 requests==2.34.2

@@ -1,6 +1,7 @@
 """shell_guard coverage for the five agents after the watchdog."""
 
 import os
+import subprocess
 import time
 import unittest
 from pathlib import Path
@@ -125,8 +126,12 @@ class RemainingAgentShellTests(unittest.TestCase):
                 self.home.cmd(["docker", "restart", "homeassistant"]),
                 "dry-run: approval required",
             )
-            self.assertEqual(self.summary.recent_memories(), "dry-run: approval required")
             run.assert_not_called()
+            run.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
+            self.assertEqual(self.summary.recent_memories(), "")
+            argv = run.call_args.args[0]
+            self.assertEqual(argv[2], "-e")
+            self.assertEqual(argv[3], "PGOPTIONS=-c default_transaction_read_only=on")
         self.assertLess(time.perf_counter() - started, 0.1)
 
     def test_non_loopback_host_is_blocked(self):

@@ -206,16 +206,31 @@ class AiSummaryAgentTests(AgentGuardCase):
         self.agent.r = MagicMock()
         self.agent.r.lrange.return_value = []
 
-    def test_memory_read_is_dry_run_without_approval(self):
-        self.assertEqual(self.agent.recent_memories(), "dry-run: approval required")
-        self.run_mock.assert_not_called()
+    def test_memory_read_is_read_only_without_approval(self):
+        self.assertNotEqual(os.environ.get("RANCH_SHELL_APPROVAL"), "1")
+        self.run_mock.return_value = subprocess.CompletedProcess(
+            [],
+            0,
+            stdout='{"agent_name":"watchdog","category":"ops","content":"pump ok"}\n',
+            stderr="",
+        )
+        self.assertEqual(self.agent.recent_memories(), "[watchdog:ops] pump ok")
+        argv = self.run_mock.call_args.args[0]
+        self.assertEqual(
+            argv[:4],
+            ["docker", "exec", "-e", "PGOPTIONS=-c default_transaction_read_only=on"],
+        )
+        self.assertIn("SELECT json_build_object(", argv[-1])
+        self.assertNotIn("INSERT", argv[-1])
 
     def test_model_url_must_be_loopback(self):
+        self.run_mock.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with patch.object(self.agent, "OLLAMA_URL", "http://attacker.com/api/generate"), patch.object(self.agent.requests, "post") as post:
             self.assertIn("not allowlisted", self.agent.generate_summary())
         post.assert_not_called()
 
     def test_model_call_does_not_follow_redirects(self):
+        self.run_mock.return_value = subprocess.CompletedProcess([], 0, stdout="", stderr="")
         with patch.object(self.agent.requests, "post") as post:
             post.return_value.json.return_value = {"response": "all green"}
             self.assertEqual(self.agent.generate_summary(), "all green")
